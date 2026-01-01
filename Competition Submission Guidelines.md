@@ -10,4 +10,4 @@ Teams can refer to the file structure under the "Reference Example" directory fo
 The above three parts are mandatory, but the code structure and document format are for reference only and are not restricted.
 #### 2. Submission Format
 Teams should submit their entries in the [Competition Submission] folder.
-The naming convention should be: Team Name + Tool Name + Team Leader's Employee ID.
+The naming convention should be: Team Name + Tool Name 
