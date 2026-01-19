@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: web-scraper-tool
+Version: 0.1.0
+Summary: A general-purpose web scraping tool server for OpenJiuwen Agent Studio (CLOUD_API plugin).
+Requires-Python: >=3.10
+Requires-Dist: fastapi>=0.110.0
+Requires-Dist: uvicorn[standard]>=0.27.0
+Requires-Dist: httpx>=0.26.0
+Requires-Dist: beautifulsoup4>=4.12.0

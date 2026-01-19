@@ -1,0 +1,10 @@
+README.md
+pyproject.toml
+src/web_scraper_tool.egg-info/PKG-INFO
+src/web_scraper_tool.egg-info/SOURCES.txt
+src/web_scraper_tool.egg-info/dependency_links.txt
+src/web_scraper_tool.egg-info/requires.txt
+src/web_scraper_tool.egg-info/top_level.txt
+src/webscraper_tool/app.py
+src/webscraper_tool/routers/scrape_router.py
+src/webscraper_tool/routers/system_router.py
