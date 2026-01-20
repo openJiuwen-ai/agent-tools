@@ -1,0 +1,19 @@
+============================================================
+Migration Report
+============================================================
+Source: D:\lg2jiuwen_plugin\example\langgraph\weather_agent.py
+Output: D:\lg2jiuwen_plugin\example\jiuwen\weather_agent_openjiuwen.py
+
+Statistics:
+  - Nodes converted: 2
+  - Edges converted: 2
+  - Tools converted: 1
+
+Manual Tasks Required:
+  [ ] Review and adapt component invoke() method implementations
+  [ ] Verify BranchRouter conditions and target mappings
+  [ ] Configure LLM provider and model settings in component initializations
+  [ ] Test the migrated workflow with sample inputs
+
+Migration completed successfully!
+============================================================
