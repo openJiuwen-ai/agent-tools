@@ -1,0 +1,17 @@
+# API密钥和敏感配置文件
+.env
+
+# IDR 配置文件
+.vscode/
+
+# 依赖目录
+__pycache__/
+
+# 日志文件
+*.log
+*.json
+*.txt
+
+# 测试文件
+*.jpg
+*.png
