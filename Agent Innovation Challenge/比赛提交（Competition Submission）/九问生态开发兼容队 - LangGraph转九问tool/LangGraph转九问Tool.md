@@ -184,7 +184,8 @@ def get_weather(city: str) -> str:
 
 ```
 
-lg2jiuwentool/
+核心代码文件介绍：
+lg2jiuwen_plugin/src/lg2jiuwentool/
   ├── __init__.py   # 包入口，导出公共API
   ├── __main__.py   # 命令行入口，支持python -m运行
   ├── cli.py        # 命令行接口实现
