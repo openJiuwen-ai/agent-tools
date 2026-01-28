@@ -1,0 +1,192 @@
+{
+  "agent": {
+    "name": "Agent",
+    "llm_config": {
+      "model_name": "glm-4-flash",
+      "temperature": 0.7,
+      "other_params": {
+        "api_key": "a2143076169049208e54a83c9900d084.xyq9uiIZxK9AwWx3",
+        "api_base": "https://open.bigmodel.cn/api/paas/v4/"
+      }
+    },
+    "tools": [
+      {
+        "name": "calculator",
+        "func_name": "calculator",
+        "description": "用于数学加减乘除计算",
+        "parameters": [
+          {
+            "name": "expression",
+            "type": "str"
+          }
+        ],
+        "converted_body": "try:\n    result = eval(expression, {'__builtins__': {}}, {})\n    return str(result)\nexcept Exception as e:\n    return f'计算失败：{e}'"
+      },
+      {
+        "name": "weather",
+        "func_name": "weather",
+        "description": "按城市+自然语言日期查天气（使用心知天气API）",
+        "parameters": [
+          {
+            "name": "params",
+            "type": "str"
+          }
+        ],
+        "converted_body": "try:\n    city = params.split(' ')[0]\n    date = params.split(' ')[1]\n    day_index = {'今天': 0, '明天': 1, '后天': 2}.get(date, 0)\nexcept IndexError:\n    return f'参数错误：params={params}, 缺失日期或城市'\nurl = f'https://api.seniverse.com/v3/weather/daily.json?key={SENIVERSE_API_KEY}&location={city}&language=zh-Hans&unit=c&start={day_index}&days=1'\ntry:\n    resp = httpx.get(url, timeout=10)\n    resp.raise_for_status()\n    data = resp.json()\n    result = data['results'][0]\n    location = result['location']['name']\n    daily = result['daily'][0]\n    return f'{location} {daily['date']}: {daily['low']}~{daily['high']}°C, 白天{daily['text_day']}, 夜间{daily['text_night']}'\nexcept httpx.HTTPStatusError as e:\n    return f'天气服务异常：HTTP {e.response.status_code}'\nexcept (KeyError, IndexError) as e:\n    return f'天气数据解析异常：{e}'\nexcept Exception as e:\n    return f'天气服务异常：{e}'"
+      }
+    ],
+    "state_fields": [
+      {
+        "name": "input",
+        "type": "str",
+        "default": null
+      },
+      {
+        "name": "thought",
+        "type": "str",
+        "default": null
+      },
+      {
+        "name": "selected_tool",
+        "type": "Optional[str]",
+        "default": null
+      },
+      {
+        "name": "tool_input",
+        "type": "str",
+        "default": null
+      },
+      {
+        "name": "result",
+        "type": "str",
+        "default": null
+      },
+      {
+        "name": "is_end",
+        "type": "bool",
+        "default": null
+      },
+      {
+        "name": "loop_count",
+        "type": "int",
+        "default": null
+      }
+    ],
+    "global_vars": [
+      "LLM_MODEL_NAME = 'glm-4-flash'",
+      "LLM_API_KEY = 'a2143076169049208e54a83c9900d084.xyq9uiIZxK9AwWx3'",
+      "LLM_API_BASE = 'https://open.bigmodel.cn/api/paas/v4/'",
+      "SENIVERSE_API_KEY = 'SBM-NCypTmfxznW6X'",
+      "MAX_LOOPS = 3"
+    ],
+    "tool_related_vars": [
+      "tool_map = {'Calculator': calculator, 'Weather': weather}"
+    ],
+    "tool_map_var_name": "tool_map",
+    "initial_inputs": {
+      "input": "${input_text}",
+      "is_end": false,
+      "loop_count": 0
+    },
+    "example_inputs": {
+      "input": "100加200等于多少？",
+      "is_end": false,
+      "loop_count": 0
+    }
+  },
+  "workflow": {
+    "entry_node": "think",
+    "state_class_name": "AgentState",
+    "nodes": [
+      {
+        "name": "think",
+        "class_name": "ThinkComp",
+        "inputs": [
+          "loop_count",
+          "input"
+        ],
+        "outputs": [
+          "tool_input",
+          "selected_tool",
+          "thought",
+          "loop_count"
+        ],
+        "conversion_source": "rule",
+        "has_llm": true,
+        "has_tools": false,
+        "docstring": "思考节点：分析问题并选择合适的工具",
+        "converted_body": "content = f'用户问题：{inputs['input']}\\n\\n可用工具：\\n1. Calculator - 用于数学加减乘除计算\\n2. Weather - 用于查询城市天气\\n\\n请分析用户意图，选择合适的工具。\\n返回格式（严格遵守）：\\n工具：<工具名>\\n参数：<工具所需参数>\\n思考：<一句话说明理由>\\n\\n示例1：\\n工具：Calculator\\n参数：100+200\\n思考：用户想计算数学表达式\\n\\n示例2：\\n工具：Weather\\n参数：北京 今天\\n思考：用户想查询天气'\nmessages = [{'role': 'user', 'content': content}]\nresponse = (await self._llm.ainvoke(model_name=self.model_name, messages=messages)).content\nselected_tool = None\ntool_input = ''\nthought = response\nprint('response:', response)\nfor line in response.split('\\n'):\n    line = line.strip()\n    if line.startswith('工具：') or line.startswith('工具:'):\n        selected_tool = line.split('：')[-1].split(':')[-1].strip()\n    elif line.startswith('参数：') or line.startswith('参数:'):\n        tool_input = line.split('：')[-1].split(':')[-1].strip()\n    elif line.startswith('思考：') or line.startswith('思考:'):\n        thought = line.split('：')[-1].split(':')[-1].strip()\nloop_count = inputs.get('loop_count', 0) + 1\nreturn {'thought': thought, 'selected_tool': selected_tool, 'tool_input': tool_input, 'loop_count': loop_count}"
+      },
+      {
+        "name": "select_tool",
+        "class_name": "SelectToolComp",
+        "inputs": [
+          "tool_input",
+          "selected_tool"
+        ],
+        "outputs": [
+          "result"
+        ],
+        "conversion_source": "rule",
+        "has_llm": false,
+        "has_tools": false,
+        "docstring": "工具执行节点：根据选择调用对应工具",
+        "converted_body": "selected_tool = inputs.get('selected_tool')\ntool_input = inputs.get('tool_input', '')\nif not selected_tool or selected_tool not in tool_map:\n    return {'result': f'未知工具：{selected_tool}，可用工具：Calculator, Weather'}\nresult = invoke_tool(selected_tool, tool_input)\nreturn {'result': result}"
+      },
+      {
+        "name": "judge",
+        "class_name": "JudgeComp",
+        "inputs": [
+          "selected_tool",
+          "result",
+          "input"
+        ],
+        "outputs": [
+          "is_end",
+          "reason"
+        ],
+        "conversion_source": "rule",
+        "has_llm": true,
+        "has_tools": false,
+        "docstring": "终止判断节点",
+        "converted_body": "content = f'用户问题：{inputs['input']}\\n使用工具：{inputs.get('selected_tool', '')}\\n工具结果：{inputs.get('result', '')}\\n\\n问题：根据工具结果，是否已经能够回答用户的问题？不能回答需要给出原因\\n返回格式（严格遵守）：\\n结果：True 或 False\\n原因：<一句话说明> （可选，只有结果为False时才给出原因）\\n\\n示例1：\\n结果：True\\n\\n示例2：\\n结果：False\\n原因：天气查询失败，缺失查询日期 \\n\\n示例3：\\n结果：False\\n原因：计算器无法处理该输入，请重新输入\\n\\n'\nmessages = [{'role': 'user', 'content': content}]\nreason = None\nresponse = (((await self._llm.ainvoke(model_name=self.model_name, messages=messages)).content).strip()).lower()\nfor line in response.split('\\n'):\n    line = line.strip()\n    if line.startswith('结果：') or line.startswith('结果:'):\n        res = line.split('：')[-1].split(':')[-1].strip()\n        is_end = res in ('true', 'True', 'yes', '是', '1')\n    if is_end:\n        break\n    if line.startswith('原因：') or line.startswith('原因:'):\n        reason = line.split('：')[-1].split(':')[-1].strip()\n        print(reason)\nreturn {'is_end': is_end, 'reason': reason}"
+      }
+    ],
+    "edges": [
+      {
+        "source": "think",
+        "target": "select_tool",
+        "is_conditional": false,
+        "condition_func": null,
+        "condition_map": null,
+        "router_name": null
+      },
+      {
+        "source": "select_tool",
+        "target": "judge",
+        "is_conditional": false,
+        "condition_func": null,
+        "condition_map": null,
+        "router_name": null
+      },
+      {
+        "source": "judge",
+        "target": "",
+        "is_conditional": true,
+        "condition_func": "def judge_router(runtime: WorkflowRuntime) -> str:\n    \"\"\"路由函数：根据 judge 的输出决定下一个节点\"\"\"\n    if runtime.get_global_state(\"judge.is_end\"):\n        return \"end\"\n    if (runtime.get_global_state(\"loop_count\") or 0) >= MAX_LOOPS:\n        print(f'达到最大循环次数 {MAX_LOOPS}，强制结束')\n        return \"end\"\n    return \"think\"",
+        "condition_map": {
+          "end": "end",
+          "think": "think"
+        },
+        "router_name": "judge_router"
+      }
+    ]
+  },
+  "stats": {
+    "rule_count": 3,
+    "ai_count": 0,
+    "total_nodes": 3,
+    "total_edges": 3,
+    "total_tools": 2
+  }
+}

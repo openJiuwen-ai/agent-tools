@@ -1,330 +1,243 @@
-# lg2jiuwentool
+# LG2Jiuwen
 
-## 1 工具概述 
+> 版本：V2.0.0
+> 更新日期：2026-01-24
 
-LangGraph to openJiuwen Migration Tool - 是一款自动化迁移工具，用于将基于 LangGraph 框架开发的 Agent 代码迁移至 openJiuwen 框架。该工具通过静态代码分析和中间表示（IR）转换，实现跨框架的代码自动迁移。
+## 1. 工具概述
 
-## 2 应用场景和功能特性
+LangGraph to openJiuwen Migration Tool - 是一款自动化迁移工具，用于将基于 LangGraph 框架开发的 Agent 代码迁移至 openJiuwen 框架。
 
-### 2.1 功能特性
+**核心设计原则：规则优先，AI 兜底**
+- 规则能处理的用规则（快速、确定、低成本）
+- 规则无法处理的用 AI（语义理解、灵活）
+
+## 2. 功能特性
+
+### 2.1 核心功能
 
 - 自动解析 LangGraph 源代码结构（状态、节点、边、工具等）
-- 生成符合 openJiuwen 规范的组件和工作流代码
-- 保留原有静态函数逻辑
-- 生成详细的迁移报告和中间表示（IR）文件
+- 基于规则的代码转换（状态访问、LLM 调用、工具调用）
+- 生成符合 openJiuwen 规范的多文件项目结构
+- 自动提取源代码中的示例输入
+- 支持单文件和多文件项目迁移
+- 生成详细的迁移报告
 
 ### 2.2 典型场景
 
-#### 场景一：企业框架迁移
-企业原有基于 LangGraph 开发的智能客服、数据处理等 Agent 应用，因业务需求需迁移至 openJiuwen 平台。使用本工具可快速完成代码迁移，减少人工改写成本。
-
-#### 场景二：多 Agent 批量迁移
-拥有多个 LangGraph Agent 的项目，需要批量迁移至 openJiuwen。工具支持命令行批量处理，提高迁移效率。
-
-#### 场景三：LangGraph生态工具转换成openJiuwen生态工具
-扩展和提高openJiuwen生态工具的丰富性和兼容性
+| 场景 | 说明 |
+|------|------|
+| 企业框架迁移 | 原有 LangGraph Agent 迁移至 openJiuwen 平台 |
+| 多 Agent 批量迁移 | 命令行批量处理，提高迁移效率 |
+| 生态工具转换 | 扩展 openJiuwen 生态工具的丰富性 |
 
 ## 3. 技术架构
 
 ### 3.1 整体架构
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        lg2jiuwentool                            │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐  │
-│  │   Parser    │───▶│  IR Models  │───▶│     Generator       │  │
-│  │ (解析器)    │    │ (中间表示)  │    │    (代码生成器)     │  │
-│  └─────────────┘    └─────────────┘    └─────────────────────┘  │
-│         │                  │                      │             │
-│         ▼                  ▼                      ▼             │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐  │
-│  │ AST 分析    │    │  AgentIR    │    │  openJiuwen 代码    │  │
-│  │ 状态提取    │    │ WorkflowIR  │    │  组件/工作流生成    │  │
-│  │ 节点识别    │    │   ToolIR    │    │  路由函数生成       │  │
-│  └─────────────┘    └─────────────┘    └─────────────────────┘  │
-├─────────────────────────────────────────────────────────────────┤
-│                         Migrator (迁移协调器)                    │
-│              CLI Interface / Programmatic API                    │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           LG2Jiuwen 迁移工具                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  源代码 → AST → RuleExtractor → [AISemantic] → IR → CodeGenerator      │
+│                     │                │           │           │          │
+│                     ▼                ▼           ▼           ▼          │
+│              ┌───────────┐    ┌───────────┐  ┌──────┐  ┌──────────┐    │
+│              │ 转换规则   │    │ AI 处理   │  │ 中间 │  │ 代码生成 │    │
+│              │ - 状态访问 │    │ (可选)    │  │ 表示 │  │ - 组件   │    │
+│              │ - LLM调用  │    │           │  │      │  │ - 路由   │    │
+│              │ - 工具调用 │    │           │  │      │  │ - 工作流 │    │
+│              └───────────┘    └───────────┘  └──────┘  └──────────┘    │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                    openJiuwen Workflow 实现                              │
+│                    CLI / Service API                                    │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 核心模块
-
-| 模块 | 文件 | 职责 |
-|------|------|------|
-| **Parser** | `parser.py` | 解析 LangGraph 源代码，提取状态、节点、边、工具等信息 |
-| **IR Models** | `ir_models.py` | 定义平台无关的中间表示数据结构 |
-| **Generator** | `generator.py` | 根据 IR 生成 openJiuwen 框架代码 |
-| **Migrator** | `migrator.py` | 协调整个迁移流程，生成报告 |
-
-
-## 4. 核心技术方案
-
-### 4.1 基于 AST 的代码解析
-
-使用 Python 标准库 `ast` 模块进行源代码解析，实现：
-
-```python
-# 解析流程
-source_code → AST → 结构化信息提取
-
-# 提取内容
-- TypedDict 状态类定义
-- @tool 装饰的工具函数
-- 节点函数（通过 add_node() 调用识别）
-- 条件路由函数
-- LLM 配置信息
-- 图构建调用（add_edge, add_conditional_edges 等）
-```
-
-### 4.2 中间表示（IR）设计
-
-采用三层 IR 结构：
+### 3.2 项目结构
 
 ```
-ParseResult (解析结果)
-    ├── state_fields: 状态字段定义
-    ├── node_functions: 节点函数信息
-    ├── conditional_functions: 条件函数信息
-    ├── edges: 边定义
-    └── tools: 工具定义
-
-AgentIR (Agent 中间表示)
-    ├── name: Agent 名称
-    ├── llm_config: LLM 配置
-    ├── tools: 工具列表
-    ├── workflow: 工作流 IR
-    └── state_fields: 状态字段
-
-WorkflowIR (工作流中间表示)
-    ├── nodes: 节点列表
-    ├── edges: 边列表
-    └── entry_node: 入口节点
+src/lg2jiuwen_tool/
+├── __init__.py              # 模块入口
+├── __main__.py              # 命令行入口
+├── cli.py                   # CLI 实现
+├── service.py               # 服务接口（主入口）
+├── workflow/                # openJiuwen 工作流定义
+│   ├── migration_workflow.py   # 主工作流
+│   └── state.py                # 状态和数据模型
+├── components/              # 工作流组件
+│   ├── project_detector.py     # 项目检测（单/多文件）
+│   ├── file_loader.py          # 文件加载
+│   ├── ast_parser.py           # AST 解析
+│   ├── rule_extractor.py       # 规则提取+转换（核心）
+│   ├── pending_check.py        # 待处理检查
+│   ├── ai_semantic.py          # AI 语义理解
+│   ├── ir_builder.py           # IR 构建
+│   ├── code_generator.py       # 代码生成（核心）
+│   └── report.py               # 报告生成
+├── rules/                   # 转换规则
+│   ├── base.py                 # 规则基类
+│   ├── state_rules.py          # 状态访问规则
+│   ├── llm_rules.py            # LLM 调用规则
+│   ├── tool_rules.py           # 工具调用规则
+│   └── edge_rules.py           # 边/路由规则
+└── ir/                      # 中间表示
+    └── models.py               # IR 数据模型
 ```
 
-### 4.3 代码生成策略
+### 3.3 核心模块
 
-#### 组件生成
-每个 LangGraph 节点函数转换为 openJiuwen 的 `WorkflowComponent`：
+| 模块 | 目录/文件 | 职责 |
+|------|----------|------|
+| **Workflow** | `workflow/` | 定义迁移工作流和状态模型 |
+| **Components** | `components/` | 各阶段处理组件 |
+| **Rules** | `rules/` | 代码转换规则（状态、LLM、工具） |
+| **IR** | `ir/` | 中间表示数据模型 |
+| **Service** | `service.py` | 对外服务接口 |
 
-```python
-# LangGraph
-def call_llm(state: AgentState) -> AgentState:
-    state["answer"] = llm.invoke(...)
-    return state
+## 4. 迁移映射关系
 
-# 生成的 openJiuwen
-class CallLlmComponent(WorkflowComponent, ComponentExecutable):
-    async def invoke(self, inputs: Input, runtime: Runtime, context: Context) -> Output:
-        answer = None
-        answer = await self._llm.ainvoke(...)
-        return {"answer": answer}
-```
-
-#### 条件边转换路由函数
-LangGraph 的条件边转换为 openJiuwen 的路由函数：
-
-```python
-# LangGraph
-def should_continue(state):
-    return END if state.get("error") else "next_node"
-
-# 生成的 openJiuwen
-def node_router(runtime: Runtime) -> str:
-    return 'end' if runtime.get_global_state('node.error') else 'next_node'
-```
-
-#### 工具函数转换
-
-保留原有工具逻辑，适配 openJiuwen 的 `@tool` 装饰器：
-
-```python
-# LangGraph
-@tool
-def get_weather(city: str) -> str:
-    """获取天气"""
-    ...
-
-# 生成的 openJiuwen
-@tool(
-    name="get_weather",
-    description="获取天气",
-    params=[Param(name="city", type="string", required=True)]
-)
-def get_weather(city: str) -> str:
-    ...
-```
-
-
-## 5. 迁移映射关系
-
-### 5.1 概念映射
+### 4.1 结构映射
 
 | LangGraph | openJiuwen |
 |-----------|------------|
 | `StateGraph` | `Workflow` |
-| `TypedDict` State | 状态通过 `inputs_schema` 传递 |
+| `TypedDict` State | `inputs_schema` 传递 |
 | Node Function | `WorkflowComponent` |
 | `add_edge()` | `add_connection()` |
 | `add_conditional_edges()` | `add_conditional_connection()` + Router |
-| `@tool` 装饰器 | `@tool()` 装饰器 + `Param` |
+| `@tool` | `@tool()` + `Param` |
+| `END` | `"end"` |
 
-### 5.2 LLM 调用映射
+### 4.2 代码转换映射
 
 | LangGraph | openJiuwen |
 |-----------|------------|
-| `ChatOpenAI(...)` | `OpenAIChatModel(...)` |
-| `llm.invoke(messages)` | `await self._llm.ainvoke(model_name, messages, ...)` |
-| 同步调用 | 异步调用 (`async/await`) |
+| `state["key"]` | `inputs["key"]` 或 `runtime.get_global_state("key")` |
+| `state.get("key", default)` | `inputs.get("key", default)` |
+| `state["key"] = val` | 收集到 `return {"key": val}` |
+| `llm.invoke(msgs)` | `await self._llm.ainvoke(model_name, msgs)` |
+| `tool.invoke({"arg": val})` | `tool.invoke(inputs={"arg": val})` |
+| `tool_map[key].run(arg)` | `invoke_tool(key, arg)` |
+| `return state` | `return {"key1": val1, ...}` |
+| `return END` | `return "end"` |
 
-## 6. 安装和使用指导
+### 4.3 路由函数转换
 
-### 6.1 项目结构
+```python
+# LangGraph
+def should_continue(state):
+    if state.get("is_end"):
+        return END
+    if state.get("loop_count", 0) >= 3:
+        return END
+    return "think"
 
+# openJiuwen（自动生成）
+def judge_router(runtime) -> str:
+    # 上游组件输出 → 带节点前缀
+    if runtime.get_global_state("judge.is_end"):
+        return "end"
+    # 全局状态 → 不带前缀
+    if (runtime.get_global_state("loop_count") or 0) >= 3:
+        return "end"
+    return "think"
 ```
 
-lg2jiuwentool/
-  ├── __init__.py   # 包入口，导出公共API
-  ├── __main__.py   # 命令行入口，支持python -m运行
-  ├── cli.py        # 命令行接口实现
-  ├── generator.py  # openJiuwen代码生成器
-  ├── ir_models.py  # 中间表示数据模型
-  ├── migrator.py   # 迁移流程协调器
-  ├── parser.py     # LangGraph代码解析器
+## 5. 安装和使用
 
-```
-
-### 6.2 环境要求
+### 5.1 环境要求
 
 - Python 3.9+
-- 无第三方依赖（仅使用 Python 标准库）
+- openJiuwen 框架（用于运行迁移工作流）
 
-### 6.3 安装
-将 `lg2jiuwentool` 目录放置在项目中，即可直接使用：
+### 5.2 安装
 
 ```bash
-# 确保在项目根目录下
-python -m lg2jiuwentool <source_file> [options]
+# 克隆项目
+git clone https://github.com/openjiuwen/lg2jiuwen.git
+
+# 安装依赖
+pip install -e .
 ```
 
-
-## 7 快速开始
-
-### 7.1 基本用法
+### 5.3 命令行使用
 
 ```bash
-# 迁移单个文件到当前目录
-python -m lg2jiuwentool my_agent.py
+# 迁移单个文件
+python -m lg2jiuwen_tool my_agent.py -o ./output
 
-# 指定输出目录
-python -m lg2jiuwentool my_agent.py -o ./output
+# 迁移项目目录
+python -m lg2jiuwen_tool ./my_project/ -o ./output
 
-# 指定输出文件名
-python -m lg2jiuwentool my_agent.py -o ./output -n my_migrated_agent
+# 启用 AI 处理
+python -m lg2jiuwen_tool my_agent.py -o ./output --use-ai
 
 # 显示详细输出
-python -m lg2jiuwentool my_agent.py --verbose
+python -m lg2jiuwen_tool my_agent.py -o ./output -v
 ```
 
-### 7.2 命令行参数
+### 5.4 命令行参数
 
 | 参数 | 简写 | 说明 | 默认值 |
 |------|------|------|--------|
-| `source` | - | LangGraph 源文件路径 | (必需) |
-| `--output` | `-o` | 输出目录 | `.` (当前目录) |
-| `--name` | `-n` | 输出文件名（不含扩展名） | `{source}_openjiuwen` |
+| `source` | - | 源文件或目录路径 | (必需) |
+| `--output` | `-o` | 输出目录 | `./output` |
+| `--use-ai` | - | 启用 AI 处理 | `False` |
 | `--no-report` | - | 不生成迁移报告 | `False` |
 | `--no-comments` | - | 不保留原始注释 | `False` |
 | `--verbose` | `-v` | 显示详细输出 | `False` |
-| `--version` | - | 显示版本号 | - |
 
-### 7.3 示例
-
-```bash
-# 迁移天气查询 Agent
-python -m lg2jiuwentool langgraph_test/weather_agent_v2.py -o output/
-
-# 输出文件：
-#   output/weather_agent_v2_openjiuwen.py      - 迁移后的代码
-#   output/weather_agent_v2_openjiuwen_report.txt  - 迁移报告
-#   output/weather_agent_v2_openjiuwen_ir.json     - 中间表示
-```
-
-### 7.4 编程接口
-
-除命令行外，也可在 Python 代码中调用：
+### 5.5 编程接口
 
 ```python
-from lg2jiuwentool import migrate, MigrationOptions
+from lg2jiuwen_tool import migrate_new, MigrationOptions
 
 # 基本迁移
-result = migrate(
+result = migrate_new(
     source_path="my_agent.py",
     output_dir="./output"
 )
 
 # 自定义选项
 options = MigrationOptions(
+    use_ai=True,
     preserve_comments=True,
-    include_report=True,
-    include_ir=True,
-    output_name="custom_name"
+    include_report=True
 )
-result = migrate("my_agent.py", "./output", options)
+result = migrate_new("my_agent.py", "./output", options)
 
 # 检查结果
 if result.success:
     print("迁移成功！")
+    print(f"规则处理: {result.rule_count} 项")
+    print(f"AI 处理: {result.ai_count} 项")
     print("生成文件:", result.generated_files)
 else:
-    print("迁移失败:", result.error)
+    print("迁移失败:", result.errors)
 ```
 
-### 7.5 迁移后的手动工作
+## 6. 输出文件结构
 
-迁移完成后，请检查以下内容：
+迁移后生成的项目结构：
 
-1. **LLM 配置**：确认 API Key、API Base 等配置正确
-2. **异步调用**：openJiuwen 使用异步模式，确保运行环境支持
-3. **组件调用**：检查各组件输入输出是否符合预期
-4. **路由逻辑**：验证条件路由的状态访问路径
-5. **测试运行**：使用示例输入测试迁移后的代码
+```
+{agent_name}/
+├── __init__.py           # 模块入口
+├── config.py             # 配置（LLM、全局变量）
+├── tools.py              # 工具函数 + invoke_tool 辅助函数
+├── components/           # 组件目录
+│   ├── __init__.py
+│   └── {node}_comp.py    # 每个节点一个组件
+├── routers.py            # 路由函数
+├── workflow.py           # 工作流构建
+└── main.py               # 主入口（含示例输入）
+```
 
-### 7.6 输出文件说明
+## 7. 支持的 LangGraph 特性
 
-#### 迁移代码 (`*_openjiuwen.py`)
-
-包含：
-- 导入语句
-- 全局变量
-- 工具函数定义
-- 组件类定义
-- 路由函数
-- 工作流构建函数
-- 主函数入口
-
-#### 迁移报告 (`*_report.txt`)
-
-包含：
-- 源文件和输出文件路径
-- 转换统计（节点数、边数、工具数）
-- 警告信息
-- 待手动处理的任务清单
-
-#### 中间表示 (`*_ir.json`)
-
-包含：
-- 解析结果 (parse_result)
-- Agent IR (agent_ir)
-- 工作流 IR (workflow_ir)
-
-用于调试和分析迁移过程。
-
-
-## 8 支持的 LangGraph 特性
-
-### 8.1 已支持
+### 7.1 已支持
 
 - [x] `StateGraph` 状态图定义
 - [x] `TypedDict` 状态类
@@ -334,8 +247,10 @@ else:
 - [x] `set_entry_point()` 入口点
 - [x] `@tool` 工具装饰器
 - [x] `ChatOpenAI` 等 LLM 初始化
+- [x] `tool_map[key].run()` 工具映射调用
+- [x] 示例输入自动提取
 
-### 8.2 待支持
+### 7.2 待支持
 
 - [ ] 子图 (Subgraph)
 - [ ] 并行节点
@@ -343,10 +258,9 @@ else:
 - [ ] 动态节点添加
 - [ ] 流式输出 (Streaming)
 
+## 8. 常见问题
 
-## 9 常见问题
-
-### Q: 迁移后代码报错 `NameError: name 'xxx' is not defined`
+### Q: 迁移后代码报错 `NameError`
 
 检查变量是否在所有代码路径中都有定义。工具会自动初始化返回变量为 `None`，但复杂逻辑可能需要手动调整。
 
@@ -359,10 +273,16 @@ else:
 
 ### Q: 条件路由不生效
 
-检查路由函数中的状态访问路径是否正确，格式为 `runtime.get_global_state('node_name.field_name')`。
+检查路由函数中的状态访问路径：
+- 上游组件输出：`runtime.get_global_state("node.field")` 带前缀
+- 全局状态：`runtime.get_global_state("field")` 不带前缀
 
+### Q: 工具映射变量名不对
 
-## 相关链接
+工具会自动从源代码提取工具映射变量名（如 `tool_map`、`tools` 等），无需手动修改。
+
+## 9. 相关链接
 
 - [openJiuwen 文档](https://docs.openjiuwen.com)
 - [LangGraph 文档](https://langchain-ai.github.io/langgraph/)
+- [问题反馈](https://github.com/openjiuwen/lg2jiuwen/issues)

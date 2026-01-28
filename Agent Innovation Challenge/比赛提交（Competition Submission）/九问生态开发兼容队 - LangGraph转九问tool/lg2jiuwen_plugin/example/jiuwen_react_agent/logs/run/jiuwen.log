@@ -1,0 +1,53 @@
+2026-01-24 17:58:00 | common | base.py | 550 | _invoke_task |  | INFO | begin to invoke, input: {'input': '100加200等于多少？', 'is_end': False, 'loop_count': 0}
+2026-01-24 17:58:08 | common | checkpointer.py | 28 | pre_workflow_execute |  | INFO | workflow: cc85c667911e4fda98cd4f58215c0ab6 create or restore checkpoint from session: d19b4ba5f08f43129452a8069b2fff79
+2026-01-24 17:58:08 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-24 17:58:12 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-24 17:58:14 | common | checkpointer.py | 58 | post_workflow_execute |  | INFO | clear checkpoint for workflow: cc85c667911e4fda98cd4f58215c0ab6 in session: d19b4ba5f08f43129452a8069b2fff79
+2026-01-24 17:58:14 | common | checkpointer.py | 68 | post_workflow_execute |  | INFO | clear session: d19b4ba5f08f43129452a8069b2fff79
+2026-01-24 17:58:14 | common | manager.py | 60 | stream_output |  | INFO | Received END_FRAME, stopping stream output.
+2026-01-24 17:58:15 | common | emitter.py | 80 | close |  | INFO | StreamQueue closed successfully, timeout: -1
+2026-01-24 17:58:15 | common | base.py | 569 | _invoke_task |  | INFO | end to invoke, results=result={'output': {'thought': '用户直接提出了一个数学问题，需要计算100加200的结果。因此，使用Calculator工具来进行计算。', 'loop_count': 1, 'tool_input': '100+200', 'selected_tool': 'Calculator', 'result': '300', 'is_end': True}} state=<WorkflowExecutionState.COMPLETED: 'COMPLETED'>
+2026-01-24 17:59:15 | common | base.py | 550 | _invoke_task |  | INFO | begin to invoke, input: {'input': '今天天气？', 'is_end': False, 'loop_count': 0}
+2026-01-24 17:59:22 | common | checkpointer.py | 28 | pre_workflow_execute |  | INFO | workflow: f442942ac22c4a3d9589df33c0d32737 create or restore checkpoint from session: f390ab8ecb4d426081227b75efdda167
+2026-01-24 17:59:22 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-24 17:59:26 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-24 17:59:29 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-24 17:59:31 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-24 17:59:32 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-24 17:59:34 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-24 17:59:34 | common | checkpointer.py | 58 | post_workflow_execute |  | INFO | clear checkpoint for workflow: f442942ac22c4a3d9589df33c0d32737 in session: f390ab8ecb4d426081227b75efdda167
+2026-01-24 17:59:35 | common | checkpointer.py | 68 | post_workflow_execute |  | INFO | clear session: f390ab8ecb4d426081227b75efdda167
+2026-01-24 17:59:35 | common | manager.py | 60 | stream_output |  | INFO | Received END_FRAME, stopping stream output.
+2026-01-24 17:59:35 | common | emitter.py | 80 | close |  | INFO | StreamQueue closed successfully, timeout: -1
+2026-01-24 17:59:35 | common | base.py | 569 | _invoke_task |  | INFO | end to invoke, results=result={'output': {'thought': '用户询问今天的天气情况，需要查询今天的天气信息。', 'loop_count': 3, 'tool_input': '今天', 'selected_tool': 'Weather', 'result': '参数错误：params=今天, 缺失日期或城市', 'reason': '工具参数错误，需要提供具体的日期或城市名称。', 'is_end': False}} state=<WorkflowExecutionState.COMPLETED: 'COMPLETED'>
+2026-01-26 19:12:02 | common | base.py | 550 | _invoke_task |  | INFO | begin to invoke, input: {'input': '100加200等于多少？', 'is_end': False, 'loop_count': 0}
+2026-01-26 19:12:10 | common | checkpointer.py | 28 | pre_workflow_execute |  | INFO | workflow: 737667a792cd492893be3309534800ab create or restore checkpoint from session: c148c77fda4849ca8a1de26d22ebf4b4
+2026-01-26 19:12:10 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-26 19:12:16 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-26 19:12:19 | common | checkpointer.py | 58 | post_workflow_execute |  | INFO | clear checkpoint for workflow: 737667a792cd492893be3309534800ab in session: c148c77fda4849ca8a1de26d22ebf4b4
+2026-01-26 19:12:19 | common | checkpointer.py | 68 | post_workflow_execute |  | INFO | clear session: c148c77fda4849ca8a1de26d22ebf4b4
+2026-01-26 19:12:19 | common | manager.py | 60 | stream_output |  | INFO | Received END_FRAME, stopping stream output.
+2026-01-26 19:12:19 | common | emitter.py | 80 | close |  | INFO | StreamQueue closed successfully, timeout: -1
+2026-01-26 19:12:19 | common | base.py | 569 | _invoke_task |  | INFO | end to invoke, results=result={'output': {'thought': '用户直接提出了一个数学加法问题，需要使用计算器工具来得到结果。', 'selected_tool': 'Calculator', 'loop_count': 1, 'tool_input': '100+200', 'result': '未知工具：Calculator，可用工具：Calculator, Weather', 'is_end': True}} state=<WorkflowExecutionState.COMPLETED: 'COMPLETED'>
+2026-01-26 19:37:23 | common | base.py | 550 | _invoke_task |  | INFO | begin to invoke, input: {'input': '100加200等于多少？', 'is_end': False, 'loop_count': 0}
+2026-01-26 19:37:31 | common | checkpointer.py | 28 | pre_workflow_execute |  | INFO | workflow: f4dd31aecde34ac0b091b512116fb024 create or restore checkpoint from session: 6c35bae26eb445478c6141c14d63c06b
+2026-01-26 19:37:31 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-26 19:37:37 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-26 19:37:40 | common | checkpointer.py | 58 | post_workflow_execute |  | INFO | clear checkpoint for workflow: f4dd31aecde34ac0b091b512116fb024 in session: 6c35bae26eb445478c6141c14d63c06b
+2026-01-26 19:37:40 | common | checkpointer.py | 68 | post_workflow_execute |  | INFO | clear session: 6c35bae26eb445478c6141c14d63c06b
+2026-01-26 19:37:40 | common | manager.py | 60 | stream_output |  | INFO | Received END_FRAME, stopping stream output.
+2026-01-26 19:37:40 | common | emitter.py | 80 | close |  | INFO | StreamQueue closed successfully, timeout: -1
+2026-01-26 19:37:40 | common | base.py | 569 | _invoke_task |  | INFO | end to invoke, results=result={'output': {'tool_input': '100+200', 'selected_tool': 'Calculator', 'thought': '用户提出了一个简单的数学加法问题，需要计算两个数字的和。因此，我选择了计算器工具来进行这个数学计算。', 'loop_count': 1, 'result': '300', 'is_end': True}} state=<WorkflowExecutionState.COMPLETED: 'COMPLETED'>
+2026-01-26 19:40:35 | common | base.py | 550 | _invoke_task |  | INFO | begin to invoke, input: {'input': '今天天气？', 'is_end': False, 'loop_count': 0}
+2026-01-26 19:40:43 | common | checkpointer.py | 28 | pre_workflow_execute |  | INFO | workflow: 6c59a5b2764a4efa9e2d454119003258 create or restore checkpoint from session: 43e7f49eb10b468a83631960e97f074f
+2026-01-26 19:40:43 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-26 19:40:49 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-26 19:40:52 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-26 19:40:56 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-26 19:40:59 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-26 19:41:01 | common | default_model.py | 684 | _build_request_params |  | INFO | Before request openai chat model, request params is ready.
+2026-01-26 19:41:02 | common | checkpointer.py | 58 | post_workflow_execute |  | INFO | clear checkpoint for workflow: 6c59a5b2764a4efa9e2d454119003258 in session: 43e7f49eb10b468a83631960e97f074f
+2026-01-26 19:41:02 | common | checkpointer.py | 68 | post_workflow_execute |  | INFO | clear session: 43e7f49eb10b468a83631960e97f074f
+2026-01-26 19:41:02 | common | manager.py | 60 | stream_output |  | INFO | Received END_FRAME, stopping stream output.
+2026-01-26 19:41:02 | common | emitter.py | 80 | close |  | INFO | StreamQueue closed successfully, timeout: -1
+2026-01-26 19:41:02 | common | base.py | 569 | _invoke_task |  | INFO | end to invoke, results=result={'output': {'tool_input': '北京', 'selected_tool': 'Weather', 'thought': '用户询问的是当天的天气情况，需要查询的是某个城市的天气。由于没有具体指定查询哪一天，因此默认查询的是今天。', 'loop_count': 3, 'result': '参数错误：params=北京, 缺失日期或城市', 'is_end': False, 'reason': '缺少具体日期信息'}} state=<WorkflowExecutionState.COMPLETED: 'COMPLETED'>
