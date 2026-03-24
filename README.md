@@ -1,11 +1,16 @@
 # Agent Tools
 
-openJiuwen 平台通用市场：提供 **插件市场服务（marketplace）** 与 **CLI 工具（cli）** 等能力。
+openJiuwen 平台通用市场：提供 **插件市场服务（marketplace）** 、 **CLI 工具（cli）** 和 **预置插件（plugins）** 等能力。
 
-## 环境要求
+## 快速开始
 
-- **Python**：建议 **3.11+**（`marketplace/pyproject.toml` 中 `requires-python >= 3.11.4`）
-- **包管理**：推荐使用 [uv](https://github.com/astral-sh/uv)（与下文快速启动一致）；亦可用 `pip` + 虚拟环境
+本地安装、依赖服务（MySQL / MinIO / OBS）、环境变量与启动命令等，请参考中文安装指导：
+
+**[→ 本地安装指导](docs/zh/安装指导/本地安装/安装指导.md)**
+
+完成安装并启动 **marketplace** 后，可参考 **[中文接口文档](docs/zh/接口文档/v1/插件市场.md)** 进行调试与运行。
+
+---
 
 ## 项目结构
 
@@ -22,6 +27,7 @@ agent-tools/
 │   │   └── services/             # 业务逻辑
 │   ├── main.py                   # 服务入口
 │   └── pyproject.toml
+├── docs/                         # 文档
 ├── plugins/                      # 插件示例/本地插件目录
 ├── .env.example                  # 环境变量示例（复制为根目录 .env）
 └── README.md
@@ -50,48 +56,4 @@ routers (接口层) → services (业务层) → repositories (数据层)
 | repositories | 数据库 CRUD、查询封装                   |
 
 
-## 快速启动（marketplace）
-
-在仓库根目录准备好 `**.env**`（见下一节），然后：
-
-```bash
-cd marketplace
-uv sync
-# Windows
-.venv\Scripts\activate
-# Linux / macOS
-# source .venv/bin/activate
-
-python main.py
-```
-
-默认由 `main.py` 读取环境变量中的 `**STORE_HOST` / `STORE_PORT**`（未设置则使用内置默认）启动 Uvicorn。
-
-## 环境配置
-
-1. 复制 `**/.env.example**` 为仓库根目录 `**.env**`，按部署环境修改。
-2. **marketplace 会从仓库根目录加载 `.env`**（与 `marketplace/plugins_market/core/database.py` 中 `load_dotenv` 一致），请勿只改子目录里的孤立配置文件而忽略根目录 `.env`。
-
-### 常用变量（节选）
-
-
-| 变量                                                                 | 说明                                                                         |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| `STORE_HOST` / `STORE_PORT`                                        | HTTP 监听地址与端口                                                               |
-| `DB_TYPE`                                                          | 设为 `mysql` 时使用下方 `DB_*` 拼装连接串；不设置则走默认 SQLite 逻辑                            |
-| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD`                  | MySQL 连接参数                                                                 |
-| `STORE_DB_NAME`                                                    | MySQL 库名（与 `DB_TYPE=mysql` 配合）                                             |
-| `MARKET_DB_URL`                                                    | Pydantic Settings 中的 `db_url`，可显式指定 SQLite/MySQL 等连接串（与代码中 `MARKET_` 前缀一致） |
-| `AUTH_SERVICE_HOST` / `AUTH_SERVICE_PORT`                          | 账号/Studio 鉴权服务地址（Bearer 发布时会请求用户校验接口）                                      |
-| `SYSTEM_ADMIN_TOKEN`                                               | 与请求头 `X-System-Token` 比对，用于运维/系统调用（与 Bearer 二选一，见路由实现）                     |
-| `STORAGE_TYPE`                                                     | `MinIO` 或 `OBS`                                                            |
-| `MARKET_S3_*` / `MARKET_BUCKET_NAME` / `MARKET_STORAGE_PUBLIC_URL` | 对象存储与公开访问 URL（图标等）                                                         |
-
-
-完整示例以 `**.env.example**` 为准。
-
-### 对象存储
-
-- 本地/开发常用 **MinIO**（S3 兼容 API）。
-- 云端可使用 **华为云 OBS** 等（代码侧按 `STORAGE_TYPE` 与 `MARKET_S3_`* 配置）。
-
+更细的 HTTP 接口说明见 **[中文接口文档](docs/zh/接口文档/v1/插件市场.md)**。

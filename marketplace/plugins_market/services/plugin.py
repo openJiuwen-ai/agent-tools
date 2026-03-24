@@ -377,8 +377,8 @@ def _extract_plugin_metadata(content: bytes) -> dict[str, Any]:
 
 
 def _normalize_version(version: str) -> str:
-    """Strip optional leading 'v' so 1.0.0 and v1.0.0 both become 1.0.0."""
-    return version.strip().lstrip("vV").strip()
+    """Normalize surrounding whitespace only; do not rewrite semantic content."""
+    return version.strip()
 
 
 def _validate_version(version: str) -> None:
@@ -503,9 +503,9 @@ def publish(
 
     if len(content) < 2 or content[:2] != b"PK":
         raise PublishError(
-            code=422,
-            error="manifest_validation_failed",
-            message="上传内容不是有效的 ZIP 文件（文件头应为 PK），请确认选择的是 .zip 插件包且路径正确",
+            code=400,
+            error="invalid_file_format",
+            message="仅支持 .zip 格式的插件包文件",
         )
 
     meta = _extract_plugin_metadata(content)
@@ -585,9 +585,9 @@ def publish(
             )
         if len(matches) == 1:
             raise PublishError(
-                code=422,
-                error="plugin_id_required",
-                message="当前名称下已存在插件，发布新版本时必须填写 plugin_id",
+                code=409,
+                error="plugin_name_exists",
+                message=f"您已发布过同名插件 '{name}'，请使用其他名称或为现有插件添加新版本",
                 data={"expected_plugin_id": matches[0].asset_id},
             )
         asset_id = uuid.uuid4().hex

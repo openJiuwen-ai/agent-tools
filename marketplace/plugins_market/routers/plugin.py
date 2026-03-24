@@ -33,6 +33,18 @@ from plugins_market.services import PublishError, publish as plugin_publish
 plugin_router = APIRouter(prefix="/plugins", tags=["plugins"])
 
 
+def _auth_error(status_code: int, message: str, *, error: str = "permission_denied") -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "code": status_code,
+            "data": None,
+            "error": error,
+            "message": message,
+        },
+    )
+
+
 def _parse_form_bool(value: Optional[str]) -> bool:
     if not value:
         return False
@@ -125,20 +137,20 @@ def get_publish_auth(
 
     auth_count = int(has_system) + int(has_bearer_token)
     if auth_count != 1:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing/invalid authorization: provide exactly one of "
+        raise _auth_error(
+            status.HTTP_403_FORBIDDEN,
+            "Missing/invalid authorization: provide exactly one of "
             "Authorization: Bearer <token>, token: <token>, or X-System-Token",
         )
 
     if has_system:
         if settings.system_admin_token and x_system_token.strip() == settings.system_admin_token:
             return (None, True)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid X-System-Token")
+        raise _auth_error(status.HTTP_403_FORBIDDEN, "Invalid X-System-Token")
 
     token = authorization[7:].strip() if has_auth else token_header.strip()
     if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or empty token")
+        raise _auth_error(status.HTTP_403_FORBIDDEN, "Invalid or empty token")
     return (token, False)
 
 
