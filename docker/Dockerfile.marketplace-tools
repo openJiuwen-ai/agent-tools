@@ -1,0 +1,53 @@
+# Stage 1: Builder — use uv to build wheel
+FROM python:3.11-slim-bookworm AS builder
+
+ARG INDEX_URL=https://pypi.org/simple
+
+RUN echo "INDEX_URL: ${INDEX_URL}"
+
+WORKDIR /app
+
+# Build context should be marketplace/ directory.
+COPY pyproject.toml ./
+COPY plugins_market ./plugins_market
+COPY main.py ./main.py
+
+RUN pip install --no-cache-dir uv -i ${INDEX_URL} \
+    && uv sync \
+    && uv build --out-dir /app/dist
+
+# Stage 2: Runtime — install wheel only (use slimmer image)
+FROM python:3.11-slim-bookworm AS runtime
+
+ARG INDEX_URL=https://pypi.org/simple
+ARG TRUSTED_HOST=pypi.org
+ARG TRUSTED_HOST_EXTRA=files.pythonhosted.org
+
+RUN echo "INDEX_URL: ${INDEX_URL}"
+RUN echo "TRUSTED_HOST: ${TRUSTED_HOST} ${TRUSTED_HOST_EXTRA}"
+
+RUN useradd --create-home --shell /bin/bash app \
+    && mkdir -p /app/dist /app/data /app/logs \
+    && chown -R app:app /app
+
+WORKDIR /app
+
+COPY --from=builder /app/dist/*.whl /app/dist/
+
+RUN pip3 install --no-cache-dir /app/dist/*.whl \
+    --trusted-host ${TRUSTED_HOST} \
+    --trusted-host ${TRUSTED_HOST_EXTRA} \
+    --index-url ${INDEX_URL} \
+    --target=/app/site-packages \
+    --retries=5 \
+    --timeout=120 \
+    && chown -R app:app /app/site-packages
+
+ENV PYTHONPATH=/app/site-packages
+USER app
+
+EXPOSE 8100
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=5 \
+    CMD python -c "import urllib.request as r; r.urlopen('http://127.0.0.1:8100/api/health', timeout=2).read()"
+
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8100"]

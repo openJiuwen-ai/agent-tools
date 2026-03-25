@@ -23,6 +23,10 @@ dependencies = [
     "httpx>=0.27.0",
 ]
 
+[tool.setuptools]
+# 将入口 main.py 一并打入 wheel，便于 Docker 多阶段构建后 `python -m uvicorn main:app` 启动
+py-modules = ["main"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 exclude = ["logs", "*.egg-info", "resources"]
