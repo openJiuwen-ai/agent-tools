@@ -25,8 +25,7 @@ from plugins_market.repositories import (
 from plugins_market.schemas.plugin import PluginPublishResult
 
 
-# Upload size limit (OBS supports up to 5GB; we align server-side limit here).
-MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024
+MAX_FILE_SIZE = 512 * 1024 * 1024
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 
@@ -490,7 +489,7 @@ def publish(
         raise PublishError(
             code=413,
             error="file_too_large",
-            message="文件大小超过限制（最大5GB）",
+            message="文件大小超过限制（最大512MB）",
         )
 
     computed = _compute_checksum(content)
