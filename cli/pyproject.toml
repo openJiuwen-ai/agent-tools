@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openjiuwen_plugin"
+version = "0.1.0"
+description = "openJiuwen Plugin CLI utilities"
+readme = "README.md"
+requires-python = ">=3.11.4"
+dependencies = ["PyYAML>=6.0", "requests>=2.28", "packaging>=23.0"]
+
+[project.scripts]
+# PyPI 安装后的唯一入口（包名 openjiuwen-plugin-cli）
+openjiuwen_plugin = "cli.main:main"
+
+# 包在上级目录 agent-tools 下，可编辑安装会把 agent-tools 加入 path，任意目录运行 plugin 都能 import cli
+[tool.setuptools.package-dir]
+"" = ".."
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["cli*"]
+exclude = ["tests*"]
