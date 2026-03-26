@@ -65,6 +65,17 @@ class PluginVersionDeleteData(BaseModel):
 
 # ----- GET /api/v1/plugins 列表 -----
 
+
+class PluginDownloadData(BaseModel):
+    """GET /api/v1/artifacts/{id} 响应体 data。"""
+
+    download_url: str
+    asset_id: str
+    name: str
+    version: str
+    file_size: int
+    checksum_sha256: str
+
 PLUGIN_ORDER_BY_OPTIONS = ("install_count", "like_count", "create_time", "update_time", "review_count")
 
 

@@ -1,10 +1,13 @@
 import os
+import hashlib
+import logging
 from typing import Dict, Any, Optional, List
 
 import boto3
 from botocore.config import Config
 
 STORAGE_TYPES = ("MinIO", "OBS")
+logger = logging.getLogger(__name__)
 
 
 class S3StorageConfig:
@@ -172,6 +175,70 @@ class S3StorageClient:
                 "error": str(e),
                 "storage_type": self.config.storage_type,
             }
+
+    def head_object(self, key: str) -> Dict[str, Any]:
+        """Check object existence via metadata only (without reading body)."""
+        try:
+            self.s3_client.head_object(Bucket=self.config.bucket_name, Key=key)
+            return {"success": True, "exists": True, "key": key}
+        except Exception as e:
+            raw_code = ""
+            try:
+                raw_code = str(e.response.get("Error", {}).get("Code", "")).strip()  # type: ignore[attr-defined]
+            except Exception:
+                raw_code = ""
+            low_code = raw_code.lower()
+            not_found = low_code in {"404", "nosuchkey", "notfound"}
+            return {
+                "success": False,
+                "exists": False if not_found else None,
+                "not_found": not_found,
+                "error_code": raw_code or None,
+                "error": str(e),
+                "key": key,
+                "storage_type": self.config.storage_type,
+            }
+
+    def get_object_size_and_sha256(self, key: str, chunk_size: int = 1024 * 1024) -> Dict[str, Any]:
+        """Stream object content to compute size and SHA256."""
+        body = None
+        try:
+            resp = self.s3_client.get_object(Bucket=self.config.bucket_name, Key=key)
+            body = resp.get("Body")
+            if body is None:
+                return {
+                    "success": False,
+                    "error": "object body is empty",
+                    "storage_type": self.config.storage_type,
+                }
+
+            hasher = hashlib.sha256()
+            total = 0
+            while True:
+                chunk = body.read(chunk_size)
+                if not chunk:
+                    break
+                total += len(chunk)
+                hasher.update(chunk)
+
+            return {
+                "success": True,
+                "size": total,
+                "checksum_sha256": hasher.hexdigest(),
+                "storage_type": self.config.storage_type,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "storage_type": self.config.storage_type,
+            }
+        finally:
+            if body is not None:
+                try:
+                    body.close()
+                except Exception as close_error:
+                    logger.warning("Failed to close object body for key '%s': %s", key, close_error)
 
 
 _storage_client: Optional["S3StorageClient"] = None

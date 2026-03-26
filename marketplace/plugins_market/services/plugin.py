@@ -12,7 +12,7 @@ import re
 from typing import Any
 
 import yaml
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from plugins_market.core.errors import PublishError
@@ -21,8 +21,9 @@ from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersio
 from plugins_market.repositories import (
     MarketAssetRepository,
     MarketAssetVersionRepository,
+    PluginFetchRecordRepository,
 )
-from plugins_market.schemas.plugin import PluginPublishResult
+from plugins_market.schemas.plugin import PluginDownloadData, PluginPublishResult
 
 
 MAX_FILE_SIZE = 512 * 1024 * 1024
@@ -759,4 +760,128 @@ def publish(
         status=version_row.status or "ACTIVE",
         published_at=published_at,
         storage_url=storage_url,
+    )
+
+
+def _build_artifact_key(publisher_id: str, asset_id: str, version: str, name: str) -> str:
+    safe_name = name.strip().replace(" ", "-")
+    return f"plugins/{publisher_id}/{asset_id}/{version}/{safe_name}_{version}.zip"
+
+
+def _resolve_latest_version_for_download(
+    *,
+    asset_id: str,
+    latest_version: str | None,
+    version_repo: MarketAssetVersionRepository,
+):
+    if latest_version:
+        row = version_repo.get_version(asset_id=asset_id, version=latest_version)
+        if row:
+            return row
+    return version_repo.get_latest_version(asset_id=asset_id)
+
+
+def get_download_info(
+    *,
+    asset_id: str,
+    db: Session,
+    storage: S3StorageClient,
+) -> PluginDownloadData:
+    """Resolve latest artifact and return public download info."""
+    asset_repo = MarketAssetRepository(db)
+    version_repo = MarketAssetVersionRepository(db)
+    fetch_repo = PluginFetchRecordRepository(db)
+
+    asset = asset_repo.get_by_asset_id(asset_id)
+    if not asset:
+        raise PublishError(
+            code=404,
+            error="plugin_not_found",
+            message=f"插件 '{asset_id}' 不存在",
+        )
+
+    version_row = _resolve_latest_version_for_download(
+        asset_id=asset.asset_id,
+        latest_version=asset.latest_version,
+        version_repo=version_repo,
+    )
+    if not version_row:
+        raise PublishError(
+            code=404,
+            error="plugin_not_found",
+            message=f"插件 '{asset.asset_id}' 暂无可下载版本",
+        )
+
+    key = _build_artifact_key(
+        publisher_id=asset.publisher_id,
+        asset_id=asset.asset_id,
+        version=version_row.version,
+        name=asset.name,
+    )
+
+    head = storage.head_object(key)
+    if not head.get("success"):
+        if head.get("not_found"):
+            raise PublishError(
+                code=404,
+                error="version_deleted",
+                message="插件版本已被删除",
+            )
+        raise PublishError(
+            code=500,
+            error="storage_error",
+            message=f"读取插件包元数据失败: {head.get('error', 'unknown')}",
+        )
+
+    download_url = storage.public_url_for_key(key)
+    if not download_url:
+        raise PublishError(
+            code=500,
+            error="storage_error",
+            message="MARKET_STORAGE_PUBLIC_URL 未配置，无法生成公开下载地址",
+        )
+
+    stat = storage.get_object_size_and_sha256(key)
+    if not stat.get("success"):
+        raise PublishError(
+            code=500,
+            error="storage_error",
+            message=f"读取插件包元数据失败: {stat.get('error', 'unknown')}",
+        )
+
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    try:
+        updated_rows = asset_repo.increase_install_count_atomic(
+            asset_id=asset.asset_id,
+            now_ms=now_ms,
+        )
+        if updated_rows != 1:
+            raise PublishError(
+                code=500,
+                error="db_error",
+                message=f"更新下载统计失败：asset_id={asset.asset_id}",
+            )
+
+        fetch_repo.create_fetch_record(
+            asset_id=asset.asset_id,
+            version_id=version_row.version_id,
+            fetch_user_id=None,
+            create_time=now_ms,
+        )
+        db.commit()
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise PublishError(
+            code=500,
+            error="db_error",
+            message="更新下载统计失败",
+        ) from e
+
+    return PluginDownloadData(
+        download_url=download_url,
+        asset_id=asset.asset_id,
+        name=asset.name,
+        version=version_row.version,
+        file_size=int(stat.get("size", 0)),
+        checksum_sha256=str(stat.get("checksum_sha256", "")),
     )

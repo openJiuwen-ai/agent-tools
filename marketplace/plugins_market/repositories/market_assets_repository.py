@@ -4,7 +4,11 @@ import time
 from sqlalchemy import and_, asc, desc, or_
 from sqlalchemy.orm import Session
 
-from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB
+from plugins_market.models.market_assets import (
+    MarketAssetDB,
+    MarketAssetVersionDB,
+    PluginFetchRecordDB,
+)
 from plugins_market.schemas.plugin import AssetCreate, AssetVersionCreate, PluginListQuery
 from .base_repository import MarketBaseRepository
 
@@ -138,6 +142,24 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         self.db.commit()
         return n
 
+    def increase_install_count_atomic(self, asset_id: str, now_ms: Optional[int] = None) -> int:
+        """
+        原子计数更新：install_count = install_count + 1
+        返回受影响行数。
+        """
+        ts = now_ms if now_ms is not None else int(time.time() * 1000)
+        return (
+            self.query()
+            .filter(MarketAssetDB.asset_id == asset_id)
+            .update(
+                {
+                    MarketAssetDB.install_count: MarketAssetDB.install_count + 1,
+                    MarketAssetDB.update_time: ts,
+                },
+                synchronize_session=False,
+            )
+        )
+
 
 class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
     """Data access for market_asset_versions."""
@@ -170,6 +192,13 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
     ) -> Optional[MarketAssetVersionDB]:
         return self.filter_by(asset_id=asset_id, version=version).first()
 
+    def get_latest_version(self, asset_id: str) -> Optional[MarketAssetVersionDB]:
+        return (
+            self.filter_by(asset_id=asset_id)
+            .order_by(MarketAssetVersionDB.create_time.desc())
+            .first()
+        )
+
     def count_versions(self, asset_id: str) -> int:
         return self.filter_by(asset_id=asset_id).count()
 
@@ -197,3 +226,28 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
         obj_in = params.model_dump()
         obj_in["create_time"] = now_ms
         return self.create(obj_in)
+
+
+class PluginFetchRecordRepository(MarketBaseRepository[PluginFetchRecordDB]):
+    """Data access for plugin_fetch_records."""
+
+    def __init__(self, db: Session):
+        super().__init__(db, PluginFetchRecordDB)
+
+    def create_fetch_record(
+        self,
+        *,
+        asset_id: str,
+        version_id: str,
+        fetch_user_id: Optional[str] = None,
+        create_time: Optional[int] = None,
+    ) -> PluginFetchRecordDB:
+        now_ms = create_time if create_time is not None else int(time.time() * 1000)
+        row = PluginFetchRecordDB(
+            asset_id=asset_id,
+            version_id=version_id,
+            fetch_user_id=fetch_user_id,
+            create_time=now_ms,
+        )
+        self.db.add(row)
+        return row

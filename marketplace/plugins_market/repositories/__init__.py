@@ -7,6 +7,7 @@ from .base_repository import (
 from .market_assets_repository import (
     MarketAssetRepository,
     MarketAssetVersionRepository,
+    PluginFetchRecordRepository,
 )
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "MarketBaseRepository",
     "MarketAssetRepository",
     "MarketAssetVersionRepository",
+    "PluginFetchRecordRepository",
     "PaginationQuery",
     "get_db_session",
 ]

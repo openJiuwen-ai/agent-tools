@@ -9,6 +9,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Path,
     UploadFile,
     status,
 )
@@ -18,9 +19,13 @@ from plugins_market.core.auth import require_auth_with_user_id, verify_bearer_vi
 from plugins_market.core.config import settings
 from plugins_market.core.database import get_db
 from plugins_market.core.s3_storage_client import get_storage_client
-from plugins_market.repositories import MarketAssetRepository, MarketAssetVersionRepository
+from plugins_market.repositories import (
+    MarketAssetRepository,
+    MarketAssetVersionRepository,
+)
 from plugins_market.schemas.common import ResponseModel
 from plugins_market.schemas.plugin import (
+    PluginDownloadData,
     PluginListItem,
     PluginListQuery,
     PluginListResponse,
@@ -28,9 +33,14 @@ from plugins_market.schemas.plugin import (
     PluginPublishResult,
     PluginVersionDeleteData,
 )
-from plugins_market.services import PublishError, publish as plugin_publish
+from plugins_market.services import (
+    PublishError,
+    get_download_info,
+    publish as plugin_publish,
+)
 
 plugin_router = APIRouter(prefix="/plugins", tags=["plugins"])
+artifact_router = APIRouter(prefix="/artifacts", tags=["plugins"])
 
 
 def _auth_error(status_code: int, message: str, *, error: str = "permission_denied") -> HTTPException:
@@ -217,6 +227,31 @@ def list_plugins(
     )
 
 
+@artifact_router.get(
+    "/{id}",
+    response_model=ResponseModel[PluginDownloadData],
+)
+def get_artifact_download(
+    artifact_id: str = Path(..., alias="id"),
+    db: Session = Depends(get_db),
+    storage=Depends(get_storage_client),
+):
+    try:
+        result = get_download_info(
+            asset_id=artifact_id,
+            db=db,
+            storage=storage,
+        )
+    except PublishError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+
+    return ResponseModel(
+        code=status.HTTP_200_OK,
+        message="ok",
+        data=result,
+    )
+
+
 def _key_from_object_uri(storage: Any, uri_or_key: Optional[str]) -> Optional[str]:
     """
     将公开 URL（例如 http://localhost:9000/<bucket>/<key>）或直接 key 规范化为对象 key。
@@ -335,4 +370,6 @@ async def delete_plugin_version(
     )
 
 
-router = plugin_router
+router = APIRouter()
+router.include_router(plugin_router)
+router.include_router(artifact_router)

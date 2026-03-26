@@ -71,3 +71,18 @@ class MarketAssetVersionDB(Base):
         UniqueConstraint("asset_id", "version", name="uk_asset_version"),
     )
 
+
+class PluginFetchRecordDB(Base):
+    __tablename__ = "plugin_fetch_records"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True, nullable=False)
+    asset_id = Column(String(64), nullable=False)
+    version_id = Column(String(64), nullable=False)
+    fetch_user_id = Column(String(64), nullable=True)
+    create_time = Column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        Index("idx_asset_id", asset_id),
+        Index("idx_fetch_user_id", fetch_user_id),
+    )
+
