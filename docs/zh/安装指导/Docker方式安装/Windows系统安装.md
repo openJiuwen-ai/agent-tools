@@ -100,15 +100,16 @@ MARKET_STORAGE_PUBLIC_URL=http://localhost:9000/openjiuwen-market
 在 PowerShell 中执行以下命令启动：
 
 ```powershell
-docker pull swr.ap-southeast-1.myhuaweicloud.com/openjiuwen-online-test/marketplace-tools:0.1.1
+docker pull swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64:0.0.1
 
 docker run --rm --name marketplace-store `
   -p 8100:8100 `
   --env-file "D:\Workspace\agent-tools\.env.docker" `
-  swr.ap-southeast-1.myhuaweicloud.com/openjiuwen-online-test/marketplace-tools:0.1.1
+  swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64:0.0.1
 ```
 
-> 如果你的仓库路径不是 `D:\Workspace\agent-tools`，请把 `--env-file` 后面的路径替换成你实际的绝对路径。
+> 如果你的仓库路径不是 `D:\Workspace\agent-tools`，请把 `--env-file` 后面的路径替换成你实际的绝对路径。\
+> 如果你的主机是arm64架构，请将路径中的amd64替换为arm64。
 
 ## 4. 访问接口
 

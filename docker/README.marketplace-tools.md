@@ -9,7 +9,7 @@ Run from repository root:
 ```powershell
 cd D:\Workspace\agent-tools
 
-docker build -f docker/Dockerfile.marketplace-tools -t marketplace-tools:0.1.1 `
+docker build -f docker/Dockerfile.marketplace-tools -t marketplace-tools:0.0.1 `
   marketplace
 ```
 
@@ -26,7 +26,7 @@ mkdir marketplace\data -Force
 
 docker run --rm -p 8100:8100 `
   -v "${PWD}\marketplace\data:/app/data" `
-  marketplace-tools:0.1.1
+  marketplace-tools:0.0.1
 ```
 
 Endpoints:
