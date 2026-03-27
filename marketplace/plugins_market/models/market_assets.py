@@ -28,7 +28,7 @@ class MarketAssetDB(Base):
     tags = Column(JSON, nullable=True)
     status = Column(String(32), nullable=True, default="PUBLISHED")
     certification = Column(String(32), nullable=True)
-    run_time = Column(Text, nullable=True)
+    plugin_type = Column(String(32), nullable=True)
     latest_version = Column(String(32), nullable=True)
     view_count = Column(Integer, nullable=False, default=0)
     install_count = Column(Integer, nullable=False, default=0)

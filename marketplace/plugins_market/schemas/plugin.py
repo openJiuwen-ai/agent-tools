@@ -28,7 +28,7 @@ class AssetCreate(BaseModel):
     tags: Optional[List[str]] = None
     publisher_id: str = ""
     publisher_name: str = ""
-    run_time: Optional[str] = None
+    plugin_type: Optional[str] = None
     latest_version: Optional[str] = None
 
 
@@ -63,6 +63,24 @@ class PluginVersionDeleteData(BaseModel):
     version: str  # 具体版本号或 "all"
 
 
+class PluginVersionDetail(BaseModel):
+    asset_id: str
+    version: str
+    asset_type: str
+    plugin_type: Optional[str] = None
+    name: str
+    display_name: str
+    short_desc: Optional[str] = None
+    detail_desc: Optional[str] = None
+    publisher_id: str
+    publisher_name: str
+    tags: Optional[List[str]] = None
+    certification: Optional[str] = None
+    changelog: Optional[str] = None
+    file_path: Optional[str] = None
+    icon_uri: Optional[str] = None
+
+
 # ----- GET /api/v1/plugins 列表 -----
 
 
@@ -91,9 +109,9 @@ class PluginListQuery(BaseModel):
     asset_type: Optional[str] = Field(None, description="资产类型")
     publisher_id: Optional[str] = Field(None, description="发布者 ID")
     publisher_name: Optional[str] = Field(None, description="发布者名称（模糊）")
-    run_time: Optional[str] = Field(None, description="运行时类型（精确匹配）")
+    plugin_type: Optional[str] = Field(None, description="插件类型（精确匹配）")
     search_keyword: Optional[str] = Field(
-        None, description="关键词（对 name/short_desc/detail_desc 模糊）"
+        None, description="关键词（对 name/display_name/short_desc/detail_desc 模糊）"
     )
     order_by: str = Field(
         "install_count",
@@ -129,7 +147,7 @@ class PluginListItem(BaseModel):
     publisher_name: str
     tags: Optional[List[str]] = None
     certification: Optional[str] = None
-    run_time: Optional[str] = None
+    plugin_type: Optional[str] = None
     latest_version: Optional[str] = None
     view_count: int = 0
     install_count: int = 0

@@ -83,7 +83,8 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         """
         分页查询插件列表，默认排除 status=OFFLINE 的资源。
         支持按 asset_id、asset_type、publisher_id、publisher_name（模糊）、
-        search_keyword（对 name/short_desc/detail_desc 做 OR 模糊）过滤，
+        plugin_type（精确匹配）、
+        search_keyword（对 name/display_name/short_desc/detail_desc 做 OR 模糊）过滤，
         按 order_by 排序。
         """
         q_assets = self.query().filter(MarketAssetDB.status != "OFFLINE")
@@ -98,14 +99,14 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             q_assets = q_assets.filter(
                 MarketAssetDB.publisher_name.ilike(f"%{params.publisher_name.strip()}%")
             )
-        if params.run_time and params.run_time.strip():
-            # run_time 来自 plugin.yaml 的 runtime.type；这里做精确匹配。
-            q_assets = q_assets.filter(MarketAssetDB.run_time == params.run_time.strip())
+        if params.plugin_type and params.plugin_type.strip():
+            q_assets = q_assets.filter(MarketAssetDB.plugin_type == params.plugin_type.strip())
         if params.search_keyword and params.search_keyword.strip():
             kw = f"%{params.search_keyword.strip()}%"
             q_assets = q_assets.filter(
                 or_(
                     MarketAssetDB.name.ilike(kw),
+                    MarketAssetDB.display_name.ilike(kw),
                     MarketAssetDB.short_desc.ilike(kw),
                     MarketAssetDB.detail_desc.ilike(kw),
                 )

@@ -1,6 +1,4 @@
-import time
-from typing import Any, List, Optional, Tuple
-from urllib.parse import urlparse
+from typing import Any, Optional, Tuple
 
 from fastapi import (
     APIRouter,
@@ -32,9 +30,13 @@ from plugins_market.schemas.plugin import (
     PluginPublishForm,
     PluginPublishResult,
     PluginVersionDeleteData,
+    PluginVersionDetail,
 )
 from plugins_market.services import (
     PublishError,
+    delete_plugin_version_service,
+    get_plugin_version_detail_service,
+    list_plugins_service,
     get_download_info,
     publish as plugin_publish,
 )
@@ -208,23 +210,8 @@ def list_plugins(
     query: PluginListQuery = Depends(),
     db: Session = Depends(get_db),
 ):
-    repo = MarketAssetRepository(db)
-    rows, total = repo.list_plugins(query)
-    items = []
-    for asset, icon_uri in rows:
-        item = PluginListItem.model_validate(asset)
-        item.icon_uri = icon_uri
-        items.append(item)
-    return ResponseModel(
-        code=status.HTTP_200_OK,
-        message="ok",
-        data=PluginListResponse(
-            page=query.page,
-            page_size=query.page_size,
-            total=total,
-            items=items,
-        ),
-    )
+    data = list_plugins_service(query=query, db=db)
+    return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
 @artifact_router.get(
@@ -275,19 +262,17 @@ def _key_from_object_uri(storage: Any, uri_or_key: Optional[str]) -> Optional[st
         return None
 
 
-def _version_prefix_from_file_path(storage: Any, file_path: Optional[str]) -> Optional[str]:
-    """
-    得到用于 delete_prefix 的目录前缀（必须以 / 结尾）。
-
-    file_path 约定为目录路径；若以 / 结尾则原样使用，否则视为漏写尾 /，补上后再 list/delete。
-    """
-    prefix = _key_from_object_uri(storage, file_path)
-    if not prefix:
-        return None
-    prefix = prefix.strip()
-    if prefix.endswith("/"):
-        return prefix
-    return prefix + "/"
+@plugin_router.get(
+    "/{asset_id}/versions/{version}",
+    response_model=ResponseModel[PluginVersionDetail],
+)
+def get_plugin_version_detail(
+    asset_id: str,
+    version: str,
+    db: Session = Depends(get_db),
+):
+    data = get_plugin_version_detail_service(asset_id=asset_id, version=version, db=db)
+    return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
 @plugin_router.delete(
@@ -305,69 +290,14 @@ async def delete_plugin_version(
     删除指定资产的指定版本（version=all 时删除该资产下所有版本并删除资产主表记录）。
     鉴权：Authorization Bearer + user_id 或 X-System-Token 二选一。
     """
-    is_admin, acting_user_id = auth
-    asset_repo = MarketAssetRepository(db)
-    version_repo = MarketAssetVersionRepository(db)
-
-    asset = asset_repo.get_by_asset_id(asset_id)
-    if not asset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
-    if not is_admin and acting_user_id and asset.publisher_id != acting_user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
-
-    prefixes: List[str] = []
-
-    if version.strip().lower() == "all":
-        versions = version_repo.list_versions(asset_id)
-        if not versions:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No versions found for asset")
-        for v in versions:
-            p = _version_prefix_from_file_path(storage, v.file_path)
-            if p:
-                prefixes.append(p)
-        version_repo.delete_all_versions(asset_id)
-        asset_repo.delete_asset(asset_id)
-    else:
-        version_row = version_repo.get_version(asset_id=asset_id, version=version)
-        if not version_row:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
-        p = _version_prefix_from_file_path(storage, version_row.file_path)
-        if p:
-            prefixes.append(p)
-        version_repo.delete_version(asset_id, version)
-        if version_repo.count_versions(asset_id) == 0:
-            asset_repo.delete_asset(asset_id)
-        else:
-            # 仍有版本时，把主表 latest_version 同步为版本表里「最新一条」（与 list_versions 一致：create_time 降序）
-            remaining = version_repo.list_versions(asset_id)
-            if remaining:
-                new_latest = remaining[0].version
-                fresh_asset = asset_repo.get_by_asset_id(asset_id)
-                if fresh_asset:
-                    now_ms = int(time.time() * 1000)
-                    asset_repo.update(
-                        fresh_asset,
-                        {"latest_version": new_latest, "update_time": now_ms},
-                    )
-
-    # 清理对象存储：按 file_path 存的目录前缀清空
-    for p in prefixes:
-        dr = storage.delete_prefix(p)
-        if not dr.get("success"):
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail={
-                    "message": "Object storage delete failed",
-                    "prefix": p,
-                    "errors": dr.get("errors", []),
-                },
-            )
-
-    return ResponseModel(
-        code=status.HTTP_200_OK,
-        message="ok",
-        data=PluginVersionDeleteData(asset_id=asset_id, version=version),
+    data = delete_plugin_version_service(
+        asset_id=asset_id,
+        version=version,
+        auth=auth,
+        db=db,
+        storage=storage,
     )
+    return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
 router = APIRouter()

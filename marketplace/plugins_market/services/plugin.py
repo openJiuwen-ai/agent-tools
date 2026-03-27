@@ -5,12 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import io
+import logging
 import uuid
 import zipfile
 import hashlib
 import re
 from typing import Any
+from urllib.parse import urlparse
 
+from fastapi import HTTPException, status
 import yaml
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -23,7 +26,15 @@ from plugins_market.repositories import (
     MarketAssetVersionRepository,
     PluginFetchRecordRepository,
 )
-from plugins_market.schemas.plugin import PluginDownloadData, PluginPublishResult
+from plugins_market.schemas.plugin import (
+    PluginDownloadData,
+    PluginListItem,
+    PluginListQuery,
+    PluginListResponse,
+    PluginPublishResult,
+    PluginVersionDeleteData,
+    PluginVersionDetail,
+)
 
 
 MAX_FILE_SIZE = 512 * 1024 * 1024
@@ -34,6 +45,7 @@ NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 RUNTIME_TOOLS = "tools"
 RUNTIME_MCP_STDIO = "mcp-stdio"
 RUNTIME_RESTFUL_API = "restful-api"
+logger = logging.getLogger(__name__)
 
 
 def _find_plugin_yaml_path(zf: zipfile.ZipFile) -> str | None:
@@ -300,7 +312,7 @@ def _extract_plugin_metadata(content: bytes) -> dict[str, Any]:
     """
     解析 zip：校验 plugin.yaml、包结构、README、icon。
     返回 name, version, display_name, short_desc, detail_desc, tags, publisher_name,
-    run_time, icon_bytes。
+    plugin_type, icon_bytes。
     """
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
@@ -371,7 +383,7 @@ def _extract_plugin_metadata(content: bytes) -> dict[str, Any]:
         "detail_desc": detail_desc,
         "tags": yaml_public.tags,
         "publisher_name": yaml_public.publisher_name,
-        "run_time": yaml_public.runtime_type,
+        "plugin_type": yaml_public.runtime_type,
         "icon_bytes": icon_bytes,
     }
 
@@ -537,7 +549,7 @@ def publish(
     detail_desc = meta.get("detail_desc")
     tags = meta.get("tags") or []
     publisher_name = meta.get("publisher_name") or ""
-    run_time = meta.get("run_time")
+    plugin_type = meta.get("plugin_type")
     icon_bytes = meta.get("icon_bytes")
 
     asset_repo = MarketAssetRepository(db)
@@ -661,7 +673,7 @@ def publish(
                 publisher_name=publisher_name,
                 tags=tags if tags else None,
                 status="PUBLISHED",
-                run_time=run_time,
+                plugin_type=plugin_type,
                 latest_version=version,
                 create_time=now_ms,
                 update_time=now_ms,
@@ -693,7 +705,7 @@ def publish(
             existing_asset.detail_desc = detail_desc
             existing_asset.tags = tags if tags else None
             existing_asset.publisher_name = publisher_name
-            existing_asset.run_time = run_time
+            existing_asset.plugin_type = plugin_type
 
             if existing_version and force:
                 existing_version.changelog = version_desc
@@ -761,6 +773,196 @@ def publish(
         published_at=published_at,
         storage_url=storage_url,
     )
+
+
+def list_plugins_service(query: PluginListQuery, db: Session) -> PluginListResponse:
+    logger.info(
+        "List plugins request: page=%s page_size=%s asset_id=%s publisher_id=%s plugin_type=%s order_by=%s desc=%s",
+        query.page,
+        query.page_size,
+        query.asset_id,
+        query.publisher_id,
+        query.plugin_type,
+        query.order_by,
+        query.desc,
+    )
+    repo = MarketAssetRepository(db)
+    rows, total = repo.list_plugins(query)
+    logger.info("List plugins query done: total=%s rows=%s", total, len(rows))
+    items = []
+    for asset, icon_uri in rows:
+        item = PluginListItem.model_validate(asset)
+        item.icon_uri = icon_uri
+        items.append(item)
+    return PluginListResponse(
+        page=query.page,
+        page_size=query.page_size,
+        total=total,
+        items=items,
+    )
+
+
+def get_plugin_version_detail_service(asset_id: str, version: str, db: Session) -> PluginVersionDetail:
+    logger.info("Get plugin version detail request: asset_id=%s version=%s", asset_id, version)
+    asset_repo = MarketAssetRepository(db)
+    version_repo = MarketAssetVersionRepository(db)
+
+    asset = asset_repo.get_by_asset_id(asset_id)
+    if not asset:
+        logger.warning("Get plugin version detail failed: asset not found, asset_id=%s", asset_id)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+
+    version_row = version_repo.get_version(asset_id=asset_id, version=version)
+    if not version_row:
+        logger.warning(
+            "Get plugin version detail failed: version not found, asset_id=%s version=%s",
+            asset_id,
+            version,
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+
+    return PluginVersionDetail(
+        asset_id=asset.asset_id,
+        version=version_row.version,
+        asset_type=asset.asset_type,
+        plugin_type=asset.plugin_type,
+        name=asset.name,
+        display_name=asset.display_name,
+        short_desc=asset.short_desc,
+        detail_desc=asset.detail_desc,
+        publisher_id=asset.publisher_id,
+        publisher_name=asset.publisher_name,
+        tags=asset.tags,
+        certification=asset.certification,
+        changelog=version_row.changelog,
+        file_path=version_row.file_path,
+        icon_uri=version_row.icon_uri,
+    )
+
+
+def _key_from_object_uri(storage: Any, uri_or_key: str | None) -> str | None:
+    if not uri_or_key:
+        return None
+    raw = uri_or_key.strip()
+    if not raw:
+        return None
+    if "://" not in raw:
+        return raw
+    try:
+        p = urlparse(raw)
+        path = (p.path or "").lstrip("/")
+        bucket = getattr(getattr(storage, "config", None), "bucket_name", None)
+        if bucket and path.startswith(f"{bucket}/"):
+            return path[len(bucket) + 1:]
+        return path
+    except Exception:
+        return None
+
+
+def _version_prefix_from_file_path(storage: Any, file_path: str | None) -> str | None:
+    prefix = _key_from_object_uri(storage, file_path)
+    if not prefix:
+        return None
+    prefix = prefix.strip()
+    return prefix if prefix.endswith("/") else prefix + "/"
+
+
+def delete_plugin_version_service(
+    asset_id: str,
+    version: str,
+    auth: tuple,
+    db: Session,
+    storage: S3StorageClient,
+) -> PluginVersionDeleteData:
+    logger.info("Delete plugin version request: asset_id=%s version=%s", asset_id, version)
+    is_admin, acting_user_id = auth
+    asset_repo = MarketAssetRepository(db)
+    version_repo = MarketAssetVersionRepository(db)
+
+    asset = asset_repo.get_by_asset_id(asset_id)
+    if not asset:
+        logger.warning("Delete plugin version failed: asset not found, asset_id=%s", asset_id)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    if not is_admin and acting_user_id and asset.publisher_id != acting_user_id:
+        logger.warning(
+            "Delete plugin version forbidden: asset_id=%s acting_user_id=%s publisher_id=%s",
+            asset_id,
+            acting_user_id,
+            asset.publisher_id,
+        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+
+    prefixes: list[str] = []
+
+    if version.strip().lower() == "all":
+        logger.info("Delete all versions for asset_id=%s", asset_id)
+        versions = version_repo.list_versions(asset_id)
+        if not versions:
+            logger.warning("Delete all versions failed: no versions found, asset_id=%s", asset_id)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No versions found for asset")
+        for v in versions:
+            p = _version_prefix_from_file_path(storage, v.file_path)
+            if p:
+                prefixes.append(p)
+        version_repo.delete_all_versions(asset_id)
+        asset_repo.delete_asset(asset_id)
+        logger.info("Delete all versions done: asset deleted, asset_id=%s", asset_id)
+    else:
+        logger.info("Delete single version: asset_id=%s version=%s", asset_id, version)
+        version_row = version_repo.get_version(asset_id=asset_id, version=version)
+        if not version_row:
+            logger.warning(
+                "Delete single version failed: version not found, asset_id=%s version=%s",
+                asset_id,
+                version,
+            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+        p = _version_prefix_from_file_path(storage, version_row.file_path)
+        if p:
+            prefixes.append(p)
+        version_repo.delete_version(asset_id, version)
+        if version_repo.count_versions(asset_id) == 0:
+            asset_repo.delete_asset(asset_id)
+            logger.info("Delete single version done: no versions left, asset deleted, asset_id=%s", asset_id)
+        else:
+            remaining = version_repo.list_versions(asset_id)
+            if remaining:
+                new_latest = remaining[0].version
+                fresh_asset = asset_repo.get_by_asset_id(asset_id)
+                if fresh_asset:
+                    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+                    asset_repo.update(
+                        fresh_asset,
+                        {"latest_version": new_latest, "update_time": now_ms},
+                    )
+                    logger.info(
+                        "Delete single version done: latest_version updated, asset_id=%s latest_version=%s",
+                        asset_id,
+                        new_latest,
+                    )
+
+    for p in prefixes:
+        dr = storage.delete_prefix(p)
+        if not dr.get("success"):
+            logger.error(
+                "Delete storage prefix failed: asset_id=%s version=%s prefix=%s errors=%s",
+                asset_id,
+                version,
+                p,
+                dr.get("errors", []),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "message": "Object storage delete failed",
+                    "prefix": p,
+                    "errors": dr.get("errors", []),
+                },
+            )
+        logger.info("Delete storage prefix success: asset_id=%s prefix=%s", asset_id, p)
+
+    logger.info("Delete plugin version success: asset_id=%s version=%s", asset_id, version)
+    return PluginVersionDeleteData(asset_id=asset_id, version=version)
 
 
 def _build_artifact_key(publisher_id: str, asset_id: str, version: str, name: str) -> str:
