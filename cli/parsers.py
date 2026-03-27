@@ -3,6 +3,15 @@ from __future__ import annotations
 import argparse
 
 
+def _parse_bool_flag(value: str) -> bool:
+    s = str(value).strip().lower()
+    if s in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("must be true or false")
+
+
 def _add_init_parser(plugin_subparsers) -> None:
     init_parser = plugin_subparsers.add_parser("init", help="Initialize a new plugin scaffold")
     init_parser.add_argument("name", help="Plugin name, e.g. weather-plugin")
@@ -80,7 +89,7 @@ def _add_publish_parser(plugin_subparsers) -> None:
 def _add_info_parser(plugin_subparsers) -> None:
     info_parser = plugin_subparsers.add_parser(
         "info",
-        help="Get plugin version details (GET /api/v1/plugins/{asset_id}/version/{version})",
+        help="Get plugin version details (GET /api/v1/plugins/{asset_id}/versions/{version})",
     )
     info_parser.add_argument(
         "asset_id",
@@ -153,9 +162,11 @@ def _add_search_parser(plugin_subparsers) -> None:
         help="order_by（默认 install_count）",
     )
     search_parser.add_argument(
-        "--asc",
-        action="store_true",
-        help="升序；默认降序（对应 API desc=false）",
+        "--desc",
+        type=_parse_bool_flag,
+        default=True,
+        metavar="BOOL",
+        help="是否降序（对应 API desc）；可传 true/false，默认 true",
     )
 
 

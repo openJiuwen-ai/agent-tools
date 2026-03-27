@@ -14,6 +14,8 @@ from cli.plugin import (
     publish_plugin,
     validate_plugin,
 )
+from cli.schemas import PluginListQuery
+from cli.schemas import PublishPluginInput
 
 logger = get_logger(__name__)
 
@@ -144,10 +146,7 @@ def handle_publish(args) -> int:
     user_id = str(user_id).strip()
 
     try:
-        result = publish_plugin(
-            market_url=market_url,
-            user_token=token_to_pass if token_to_pass else None,
-            system_token=system_token if system_token else None,
+        publish_input = PublishPluginInput(
             user_id=user_id,
             plugin_path=Path(args.path).resolve() if args.path else None,
             zip_path=Path(args.file).resolve() if args.file else None,
@@ -156,16 +155,25 @@ def handle_publish(args) -> int:
             version_desc=args.version_desc or None,
             force=args.force,
         )
+        result = publish_plugin(
+            market_url=market_url,
+            user_token=token_to_pass if token_to_pass else None,
+            system_token=system_token if system_token else None,
+            publish_input=publish_input,
+        )
     except PublishError as e:
         logger.error("publish failed: %s", e.detail)
+        return 1
+    except ValueError as e:
+        logger.error("publish failed: %s", e)
         return 1
 
     logger.info(
         "published: plugin_id=%s name=%s version=%s status=%s",
-        result.get("plugin_id"),
-        result.get("name"),
-        result.get("version"),
-        result.get("status"),
+        result.plugin_id,
+        result.name,
+        result.version,
+        result.status,
     )
     logger.info(
         "提示：请保存上方 plugin_id，后续发新版本时需传 --plugin-id；若未保存可执行 openjiuwen_plugin search <关键词> 查询"
@@ -179,7 +187,7 @@ def handle_info(args) -> int:
         logger.error("info requires --market-url or OPENJIUWEN_MARKET_URL")
         return 1
     try:
-        detail = get_plugin_version_detail(market_url, args.asset_id, args.version, token=None)
+        detail = get_plugin_version_detail(market_url, args.asset_id, args.version)
     except FileNotFoundError as e:
         logger.error("%s", e)
         return 1
@@ -187,23 +195,20 @@ def handle_info(args) -> int:
         logger.error("info failed: %s", exc)
         return 1
 
-    if not detail:
-        logger.info("no detail returned")
-        return 0
+    # 直接按 PluginVersionDetail 字段输出（按 schema 定义顺序）
+    logger.info("asset_id: %s", detail.asset_id or args.asset_id)
+    for key in detail.__class__.model_fields:
+        if key == "asset_id":
+            continue
+        val = getattr(detail, key)
+        if val in (None, ""):
+            continue
+        if key == "tags":
+            if isinstance(val, list) and val:
+                logger.info("tags: %s", ", ".join(str(x) for x in val))
+            continue
+        logger.info("%s: %s", key, val)
 
-    logger.info("asset_id: %s", detail.get("asset_id", args.asset_id))
-    zip_url = detail.get("zip_url") or detail.get("storage_url")
-    icon_url = detail.get("icon_url") or detail.get("icon_uri")
-    readme_url = detail.get("readme_url") or detail.get("readme")
-    changelog_url = detail.get("changelog_url") or detail.get("changelog")
-    if zip_url:
-        logger.info("zip_url: %s", zip_url)
-    if icon_url:
-        logger.info("icon.png: %s", icon_url)
-    if readme_url:
-        logger.info("readme: %s", readme_url)
-    if changelog_url:
-        logger.info("changelog: %s", changelog_url)
     return 0
 
 
@@ -219,20 +224,28 @@ def handle_search(args) -> int:
         if args.page_size is not None and (args.page_size < 1 or args.page_size > 100):
             logger.error("search --page-size must be between 1 and 100")
             return 1
-        search_plugins(
-            market_url,
-            args.query or "",
-            logger,
+        query = PluginListQuery(
+            search_keyword=args.query or "",
             plugin_type=args.plugin_type,
             publisher_name=args.author,
             asset_id=args.search_asset_id,
             asset_type=args.search_asset_type,
             publisher_id=args.search_publisher_id,
-            page=args.page,
-            page_size=args.page_size,
-            order_by=args.order_by,
-            asc=bool(args.asc),
+            page=args.page or 1,
+            page_size=args.page_size or 20,
+            order_by=args.order_by or "install_count",
+            desc=args.desc,
         )
+        result = search_plugins(market_url, query)
+        if not result.items:
+            logger.info("no results.")
+            return 0
+        logger.info("page=%s page_size=%s total=%s", result.page, result.page_size, result.total)
+        for item in result.items:
+            aid = item.asset_id
+            name = item.name
+            ver = item.latest_version
+            logger.info("  %s  %s  %s", aid, name, ver)
     except Exception as exc:
         logger.error("search failed: %s", exc)
         return 1
@@ -297,7 +310,14 @@ def handle_install(args) -> int:
 
     pip_prefix = Path(args.pip_prefix).resolve() if args.pip_prefix else None
     try:
-        download_artifact_zip(market_url, asset_id, zip_path)
+        dl_info = download_artifact_zip(market_url, asset_id, zip_path)
+        if dl_info.verified:
+            logger.info(
+                "download checksum verified: %s",
+                dl_info.actual_checksum_sha256,
+            )
+        else:
+            logger.warning("download checksum not provided by server; skip verification")
         installed_root = install_plugin_from_zip(zip_path, pip_prefix=pip_prefix)
         logger.info("plugin installed under: %s", installed_root)
     except Exception as exc:

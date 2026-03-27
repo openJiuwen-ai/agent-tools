@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "marketplace_tools"
-version = "0.1.1"
+version = "0.0.1"
 description = "Minimal Store service for openJiuwen marketplace"
 requires-python = ">=3.11.4"
 dependencies = [

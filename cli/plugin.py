@@ -18,6 +18,7 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from cli.logging_config import get_logger
 from cli.market import PublishError
 from cli.market import upload_plugin as _market_upload_plugin
+from cli.schemas import PluginPublishResult, PublishPluginInput, PublishRequest
 
 logger = get_logger(__name__)
 
@@ -190,7 +191,7 @@ def pack_plugin(plugin_path: Path, output_dir: Path | None = None) -> Path:
 
 
 def _pack_plugin_tools(root: Path, name: str, version: str, prefix: str, zip_path: Path) -> None:
-    """tools 类型：先 build wheel，再打包 plugin.yaml、README.md、icon.png、schemas/tools.json、dist/*.whl。"""
+    """tools 类型：先 build wheel，再打包基础元数据、src 与 dist/*.whl。"""
     pyproject = root / "pyproject.toml"
     if not pyproject.exists():
         raise ValueError("tools type requires pyproject.toml in plugin root")
@@ -215,6 +216,12 @@ def _pack_plugin_tools(root: Path, name: str, version: str, prefix: str, zip_pat
             p = root / rel
             if p.is_file():
                 zf.write(p, f"{prefix}/{rel}".replace("\\", "/"))
+        src_dir = root / "src"
+        if src_dir.is_dir():
+            for fpath in src_dir.rglob("*"):
+                if fpath.is_file():
+                    rel = fpath.relative_to(root)
+                    zf.write(fpath, f"{prefix}/{rel}".replace("\\", "/"))
         for whl in whls:
             zf.write(whl, f"{prefix}/dist/{whl.name}".replace("\\", "/"))
 
@@ -256,39 +263,35 @@ def publish_plugin(
     market_url: str,
     user_token: str | None,
     system_token: str | None,
-    user_id: str,
-    *,
-    plugin_path: Path | None = None,
-    zip_path: Path | None = None,
-    plugin_id: str | None = None,
-    plugin_version: str | None = None,
-    version_desc: str | None = None,
-    force: bool = False,
-) -> dict:
+    publish_input: PublishPluginInput,
+) -> PluginPublishResult:
     """
     上传插件到市场。指定 zip_path 时直接上传该 zip；否则从 plugin_path 先 pack 再上传。
     成功返回市场响应 data 字典；失败抛出 PublishError（由 market 抛出）。
     """
-    if zip_path is not None:
-        z = zip_path.resolve()
+    if publish_input.zip_path is not None:
+        z = publish_input.zip_path
         if not z.is_file():
             raise PublishError(400, f"zip file not found: {z}")
         checksum_sha256 = _file_sha256_hex(z)
-        return _market_upload_plugin(
-            market_url,
-            user_token,
-            system_token,
-            user_id,
-            z,
-            checksum_sha256=checksum_sha256,
-            plugin_id=plugin_id,
-            plugin_version=_strip_version_prefix(plugin_version) if plugin_version else None,
-            version_desc=version_desc,
-            force=force,
+        pv = (
+            _strip_version_prefix(publish_input.plugin_version)
+            if publish_input.plugin_version
+            else None
         )
-    if plugin_path is None:
+        req = PublishRequest(
+            user_id=publish_input.user_id,
+            zip_path=z,
+            checksum_sha256=checksum_sha256,
+            plugin_id=publish_input.plugin_id,
+            plugin_version=pv,
+            version_desc=publish_input.version_desc,
+            force=publish_input.force,
+        )
+        return _market_upload_plugin(market_url, user_token, system_token, req)
+    root = publish_input.plugin_path
+    if root is None:
         raise PublishError(400, "either plugin_path or zip_path must be provided")
-    root = plugin_path.resolve()
     if not root.exists():
         raise PublishError(400, f"plugin path not found: {root}")
     if not root.is_dir():
@@ -298,18 +301,21 @@ def publish_plugin(
         out_dir = Path(tmp)
         z = pack_plugin(root, out_dir)
         checksum_sha256 = _file_sha256_hex(z)
-        return _market_upload_plugin(
-            market_url,
-            user_token,
-            system_token,
-            user_id,
-            z,
-            checksum_sha256=checksum_sha256,
-            plugin_id=plugin_id,
-            plugin_version=_strip_version_prefix(plugin_version) if plugin_version else None,
-            version_desc=version_desc,
-            force=force,
+        pv = (
+            _strip_version_prefix(publish_input.plugin_version)
+            if publish_input.plugin_version
+            else None
         )
+        req = PublishRequest(
+            user_id=publish_input.user_id,
+            zip_path=z,
+            checksum_sha256=checksum_sha256,
+            plugin_id=publish_input.plugin_id,
+            plugin_version=pv,
+            version_desc=publish_input.version_desc,
+            force=publish_input.force,
+        )
+        return _market_upload_plugin(market_url, user_token, system_token, req)
 
 
 def _safe_extractall(zf: zipfile.ZipFile, dest: Path) -> None:
@@ -338,7 +344,7 @@ def install_plugin_from_zip(zip_path: Path, *, pip_prefix: Path | None = None) -
     """
     解压市场下载的插件 zip，校验结构后按 ``runtime.type`` 执行 ``pip install``。
 
-    - **tools**：若存在 ``dist/*.whl`` 则安装这些 wheel；否则在插件根目录执行 ``pip install .``（需 ``pyproject.toml``）。
+    - **tools**：仅安装 ``dist/*.whl``（发布包语义）；若缺失 wheel 直接失败。
     - **mcp-stdio** / **restful-api**：在插件根目录执行 ``pip install .``。
 
     返回解压后的插件根目录路径（位于临时目录内；调用方若需保留目录应在同进程内复制）。
@@ -377,14 +383,8 @@ def install_plugin_from_zip(zip_path: Path, *, pip_prefix: Path | None = None) -
                         pip_base + [str(w) for w in whls],
                         check=True,
                     )
-                elif (plugin_root / "pyproject.toml").is_file():
-                    subprocess.run(
-                        pip_base + ["."],
-                        cwd=plugin_root,
-                        check=True,
-                    )
                 else:
-                    raise ValueError("tools plugin zip has no dist/*.whl and no pyproject.toml")
+                    raise ValueError("tools plugin zip has no dist/*.whl")
             else:
                 if not (plugin_root / "pyproject.toml").is_file():
                     raise ValueError(f"{runtime_type} plugin requires pyproject.toml in plugin root")
@@ -553,22 +553,8 @@ def _validate_plugin_yaml(
         elif not isinstance(api_data.get("base_url"), str) or not api_data.get("base_url", "").strip():
             errors.append("api.base_url must be non-empty string")
 
-    if isinstance(name, str) and NAME_PATTERN.match(name):
-        package_dir = _find_package_dir(root, name)
-        if package_dir is None:
-            errors.append(f"missing package directory: src/{name.replace('-', '_')}")
-            return
-        if not (package_dir / "__init__.py").exists():
-            errors.append(f"missing required entry: {package_dir.relative_to(root) / '__init__.py'}")
-        if runtime_type == "tools":
-            if not (package_dir / "plugin.py").exists():
-                errors.append(f"missing required entry: {package_dir.relative_to(root) / 'plugin.py'}")
-        elif runtime_type == "mcp-stdio":
-            if not (package_dir / "mcp_server.py").exists():
-                errors.append(f"missing required entry: {package_dir.relative_to(root) / 'mcp_server.py'}")
-        elif runtime_type == "restful-api":
-            if not (package_dir / "rest_api.py").exists():
-                errors.append(f"missing required entry: {package_dir.relative_to(root) / 'rest_api.py'}")
+    # 不再根据 plugin.yaml 的 runtime/name 去强校验具体源码文件名；
+    # 文件结构只要求存在 src 目录，避免实现入口文件名被写死。
 
 
 def _validate_tools_json(tools_data: dict[str, Any], errors: list[str]) -> None:

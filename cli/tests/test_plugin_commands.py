@@ -1,19 +1,41 @@
-import logging
 import os
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import yaml
 
 from cli.main import main
-from cli.market import search_plugins
+from cli.market import download_artifact_zip, get_plugin_version_detail, search_plugins
 from cli.plugin import info_plugin, init_plugin, install_plugin_from_zip, pack_plugin, validate_plugin
+from cli.schemas import PluginListQuery, PluginVersionDetail, PublishRequest
 
 
 class PluginCommandsTest(unittest.TestCase):
+    def test_publish_request_invalid_checksum(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "demo.zip"
+            zip_path.write_bytes(b"PK\x03\x04")
+            with self.assertRaisesRegex(ValueError, "checksum_sha256"):
+                PublishRequest(
+                    user_id="u1",
+                    zip_path=zip_path,
+                    checksum_sha256="bad-checksum",
+                )
+
+    def test_publish_request_zip_not_found(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "missing.zip"
+            with self.assertRaisesRegex(ValueError, "zip file not found"):
+                PublishRequest(
+                    user_id="u1",
+                    zip_path=zip_path,
+                    checksum_sha256="a" * 64,
+                )
+
     def test_init_and_validate_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             plugin_root = init_plugin("demo-plugin", Path(tmp))
@@ -163,6 +185,24 @@ def another_tool() -> dict:
             self.assertIn("pip", pip_cmd)
             self.assertEqual(pip_cmd[-1], ".")
 
+    def test_install_tools_wheel_only_zip_calls_pip_install_whl(self) -> None:
+        """tools 发布包仅含 dist/*.whl 时，install 应直接安装 wheel。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_root = init_plugin("demo-wheel", Path(tmp), plugin_type="tools")
+            out_dir = Path(tmp) / "out"
+            zip_path = pack_plugin(plugin_root, out_dir)
+
+            with patch("cli.plugin.subprocess.run") as m_run:
+                m_run.return_value = None
+                installed_root = install_plugin_from_zip(zip_path)
+
+            self.assertTrue((installed_root / "plugin.yaml").exists())
+            self.assertEqual(m_run.call_count, 1)
+            pip_cmd = m_run.call_args[0][0]
+            self.assertIn("-m", pip_cmd)
+            self.assertIn("pip", pip_cmd)
+            self.assertTrue(any(str(x).endswith(".whl") for x in pip_cmd))
+
     def test_info_reads_readme_local(self) -> None:
         """本地插件目录读取（plugin.info_plugin），非 CLI 市场接口。"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -176,19 +216,68 @@ def another_tool() -> dict:
     def test_info_from_market(self) -> None:
         """plugin info 通过版本详情 API 拉取摘要字段。"""
         with patch("cli.handlers.get_plugin_version_detail") as m:
-            m.return_value = {
-                "asset_id": "demo-id",
-                "zip_url": "http://example.com/demo.zip",
-                "icon_uri": "http://example.com/icon.png",
-                "readme_url": "http://example.com/readme.md",
-                "changelog_url": "http://example.com/changelog.log",
-            }
+            m.return_value = PluginVersionDetail.model_validate(
+                {
+                    "asset_id": "demo-id",
+                    "version": "1.0.0",
+                    "asset_type": "plugin",
+                    "plugin_type": "tools",
+                    "name": "demo-plugin",
+                    "display_name": "Demo Plugin",
+                    "publisher_id": "u-1",
+                    "publisher_name": "Alice",
+                    "file_path": "plugins/u-1/demo-id/1.0.0/demo-plugin-1.0.0.zip",
+                    "icon_uri": "http://example.com/icon.png",
+                    "changelog": "initial release",
+                }
+            )
             code = main(["info", "demo-id", "--version", "1.0.0", "--market-url", "http://localhost:8000"])
             self.assertEqual(code, 0)
             m.assert_called_once()
             call_kw = m.call_args
             self.assertEqual(call_kw[0][1], "demo-id")
             self.assertEqual(call_kw[0][2], "1.0.0")
+
+    def test_get_plugin_version_detail_uses_versions_path(self) -> None:
+        with patch("cli.market.requests.get") as m:
+            m.return_value.status_code = 200
+            m.return_value.headers = {"content-type": "application/json"}
+            m.return_value.json.return_value = {
+                "code": 200,
+                "message": "ok",
+                "data": {
+                    "asset_id": "demo-id",
+                    "version": "1.0.0",
+                    "asset_type": "plugin",
+                    "plugin_type": "tools",
+                    "name": "demo-plugin",
+                    "display_name": "Demo Plugin",
+                    "publisher_id": "u-1",
+                    "publisher_name": "Alice",
+                },
+            }
+            detail = get_plugin_version_detail("http://127.0.0.1:8100", "demo-id", "1.0.0")
+            self.assertEqual(detail.asset_id, "demo-id")
+            called_url = m.call_args[0][0]
+            self.assertTrue(called_url.endswith("/api/v1/plugins/demo-id/versions/1.0.0"))
+
+    def test_get_plugin_version_detail_missing_fields_not_error(self) -> None:
+        with patch("cli.market.requests.get") as m:
+            m.return_value.status_code = 200
+            m.return_value.headers = {"content-type": "application/json"}
+            m.return_value.json.return_value = {
+                "code": 200,
+                "message": "ok",
+                "data": {
+                    "asset_id": "demo-id",
+                    "version": "1.0.0",
+                    # display_name / publisher_name 等缺失
+                },
+            }
+            detail = get_plugin_version_detail("http://127.0.0.1:8100", "demo-id", "1.0.0")
+            self.assertEqual(detail.asset_id, "demo-id")
+            self.assertEqual(detail.version, "1.0.0")
+            self.assertEqual(detail.display_name, "")
 
     def test_publish_with_system_token(self) -> None:
         """publish 使用 --system-token 时应走 X-System-Token 路径。"""
@@ -218,12 +307,12 @@ def another_tool() -> dict:
 
                 self.assertEqual(m.call_count, 1)
                 # upload_plugin signature:
-                # (market_url, user_token, system_token, user_id, zip_path, checksum_sha256=...)
+                # (market_url, user_token, system_token, req: PublishRequest)
                 call_args = m.call_args
                 self.assertEqual(call_args[0][0], "http://localhost:8000")
                 self.assertIsNone(call_args[0][1])
                 self.assertEqual(call_args[0][2], "sys-token-123")
-                self.assertEqual(call_args[0][3], "user-sys")
+                self.assertEqual(call_args[0][3].user_id, "user-sys")
 
     def test_publish_user_id_from_env(self) -> None:
         """publish 可从 OPENJIUWEN_USER_ID 取得 user_id（省略 --user-id）。"""
@@ -247,7 +336,7 @@ def another_tool() -> dict:
                     )
                 self.assertEqual(code, 0)
                 call_args = m.call_args
-                self.assertEqual(call_args[0][3], "from-env-user")
+                self.assertEqual(call_args[0][3].user_id, "from-env-user")
 
     def test_delete_rejects_both_token_and_system_token(self) -> None:
         """delete 同时传 --token 与 --system-token 时应直接失败。"""
@@ -311,21 +400,25 @@ def another_tool() -> dict:
         with patch("cli.market.requests.get") as m:
             m.return_value.status_code = 200
             m.return_value.headers = {"content-type": "application/json"}
-            m.return_value.json.return_value = {"data": {"items": [], "total": 0}}
-            log = logging.getLogger("test_search")
+            m.return_value.json.return_value = {
+                "code": 200,
+                "message": "ok",
+                "data": {"page": 3, "page_size": 15, "items": [], "total": 0},
+            }
             search_plugins(
                 "http://127.0.0.1:9",
-                "keyword",
-                log,
-                plugin_type="tools",
-                publisher_name="Alice",
-                asset_id="asset-1",
-                asset_type="plugin",
-                publisher_id="pub-1",
-                page=3,
-                page_size=15,
-                order_by="create_time",
-                asc=False,
+                PluginListQuery(
+                    search_keyword="keyword",
+                    plugin_type="tools",
+                    publisher_name="Alice",
+                    asset_id="asset-1",
+                    asset_type="plugin",
+                    publisher_id="pub-1",
+                    page=3,
+                    page_size=15,
+                    order_by="create_time",
+                    desc=True,
+                ),
             )
             m.assert_called_once()
             params = m.call_args[1]["params"]
@@ -340,14 +433,92 @@ def another_tool() -> dict:
             self.assertEqual(params["order_by"], "create_time")
             self.assertTrue(params["desc"])
 
-    def test_search_plugins_asc_sets_desc_false(self) -> None:
+    def test_search_plugins_desc_true_by_default(self) -> None:
         with patch("cli.market.requests.get") as m:
             m.return_value.status_code = 200
             m.return_value.headers = {"content-type": "application/json"}
-            m.return_value.json.return_value = {"data": {"items": [], "total": 0}}
-            log = logging.getLogger("test_search_asc")
-            search_plugins("http://127.0.0.1:9", "", log, order_by="install_count", asc=True)
+            m.return_value.json.return_value = {"code": 200, "message": "ok", "data": {"items": [], "total": 0}}
+            search_plugins("http://127.0.0.1:9", PluginListQuery(order_by="install_count"))
+            self.assertTrue(m.call_args[1]["params"]["desc"])
+
+    def test_search_plugins_desc_true_when_flag_set(self) -> None:
+        with patch("cli.market.requests.get") as m:
+            m.return_value.status_code = 200
+            m.return_value.headers = {"content-type": "application/json"}
+            m.return_value.json.return_value = {"code": 200, "message": "ok", "data": {"items": [], "total": 0}}
+            search_plugins("http://127.0.0.1:9", PluginListQuery(order_by="install_count", desc=True))
+            self.assertTrue(m.call_args[1]["params"]["desc"])
+
+    def test_search_plugins_desc_false_when_explicitly_set(self) -> None:
+        with patch("cli.market.requests.get") as m:
+            m.return_value.status_code = 200
+            m.return_value.headers = {"content-type": "application/json"}
+            m.return_value.json.return_value = {"code": 200, "message": "ok", "data": {"items": [], "total": 0}}
+            search_plugins("http://127.0.0.1:9", PluginListQuery(order_by="install_count", desc=False))
             self.assertFalse(m.call_args[1]["params"]["desc"])
+
+    def test_download_artifact_zip_verifies_checksum(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "plugin.zip"
+            zip_bytes = (
+                b"PK\x03\x04\x14\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+                b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            )
+            import hashlib
+
+            digest = hashlib.sha256(zip_bytes).hexdigest()
+            meta_resp = SimpleNamespace(
+                ok=True,
+                status_code=200,
+                headers={"content-type": "application/json"},
+                json=lambda: {"data": {"download_url": "http://download.local/plugin.zip", "checksum_sha256": digest}},
+                text="",
+            )
+            file_resp = SimpleNamespace(
+                ok=True,
+                status_code=200,
+                headers={"content-type": "application/zip"},
+                iter_content=lambda chunk_size=0: [zip_bytes],
+                text="",
+            )
+            with patch("cli.market.requests.get", side_effect=[meta_resp, file_resp]) as m_get:
+                info = download_artifact_zip("http://market.local", "asset-1", out)
+            self.assertTrue(out.exists())
+            self.assertTrue(info.verified)
+            self.assertEqual(info.actual_checksum_sha256, digest)
+            self.assertEqual(m_get.call_count, 2)
+
+    def test_download_artifact_zip_checksum_mismatch_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "plugin.zip"
+            zip_bytes = (
+                b"PK\x03\x04\x14\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+                b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            )
+            meta_resp = SimpleNamespace(
+                ok=True,
+                status_code=200,
+                headers={"content-type": "application/json"},
+                json=lambda: {
+                    "data": {
+                        "download_url": "http://download.local/plugin.zip",
+                        "checksum_sha256": "0" * 64,
+                    }
+                },
+                text="",
+            )
+            file_resp = SimpleNamespace(
+                ok=True,
+                status_code=200,
+                headers={"content-type": "application/zip"},
+                iter_content=lambda chunk_size=0: [zip_bytes],
+                text="",
+            )
+            with patch("cli.market.requests.get", side_effect=[meta_resp, file_resp]):
+                with self.assertRaises(RuntimeError) as ctx:
+                    download_artifact_zip("http://market.local", "asset-1", out)
+            self.assertIn("checksum mismatch", str(ctx.exception))
+            self.assertFalse(out.exists())
 
 
 if __name__ == "__main__":
