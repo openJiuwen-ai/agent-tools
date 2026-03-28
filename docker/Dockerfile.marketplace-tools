@@ -9,6 +9,7 @@ WORKDIR /app
 
 # Build context should be marketplace/ directory.
 COPY pyproject.toml ./
+COPY common ./common
 COPY plugins_market ./plugins_market
 COPY main.py ./main.py
 
