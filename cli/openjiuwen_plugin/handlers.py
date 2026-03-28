@@ -4,9 +4,9 @@ import os
 import tempfile
 from pathlib import Path
 
-from cli.logging_config import get_logger
-from cli.market import delete_plugin, download_artifact_zip, get_plugin_version_detail, search_plugins
-from cli.plugin import (
+from openjiuwen_plugin.logging_config import get_logger
+from openjiuwen_plugin.market import delete_plugin, download_artifact_zip, get_plugin_version_detail, search_plugins
+from openjiuwen_plugin.plugin import (
     PublishError,
     init_plugin,
     install_plugin_from_zip,
@@ -14,8 +14,8 @@ from cli.plugin import (
     publish_plugin,
     validate_plugin,
 )
-from cli.schemas import PluginListQuery
-from cli.schemas import PublishPluginInput
+from openjiuwen_plugin.schemas import PluginListQuery
+from openjiuwen_plugin.schemas import PublishPluginInput
 
 logger = get_logger(__name__)
 
@@ -176,7 +176,7 @@ def handle_publish(args) -> int:
         result.status,
     )
     logger.info(
-        "提示：请保存上方 plugin_id，后续发新版本时需传 --plugin-id；若未保存可执行 openjiuwen_plugin search <关键词> 查询"
+        "提示：请保存上方 plugin_id，后续发新版本时需传 --plugin-id；若未保存可执行 openjiuwen-plugin search <关键词> 查询"
     )
     return 0
 

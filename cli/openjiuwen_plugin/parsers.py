@@ -75,7 +75,7 @@ def _add_publish_parser(plugin_subparsers) -> None:
         "--plugin-id",
         help=(
             "Plugin id (optional for first publish; printed after first publish, "
-            "or get via 'openjiuwen_plugin search')"
+            "or get via 'openjiuwen-plugin search')"
         ),
     )
     publish_parser.add_argument(
@@ -224,7 +224,7 @@ def _add_install_parser(plugin_subparsers) -> None:
     )
 
 
-def build_plugin_parser(prog_name: str = "openjiuwen_plugin") -> argparse.ArgumentParser:
+def build_plugin_parser(prog_name: str = "openjiuwen-plugin") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=prog_name)
     plugin_subparsers = parser.add_subparsers(dest="plugin_command")
     _add_init_parser(plugin_subparsers)

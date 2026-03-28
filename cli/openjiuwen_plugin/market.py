@@ -9,7 +9,7 @@ from typing import Any, TypeVar
 
 import requests
 from pydantic import TypeAdapter, ValidationError
-from cli.schemas import (
+from openjiuwen_plugin.schemas import (
     DownloadArtifactResult,
     PluginDownloadData,
     PluginListQuery,

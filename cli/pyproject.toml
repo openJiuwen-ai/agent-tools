@@ -3,22 +3,25 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openjiuwen_plugin"
+name = "openjiuwen-plugin"
 version = "0.0.1"
 description = "openJiuwen Plugin CLI utilities"
 readme = "README.md"
 requires-python = ">=3.11.4"
-dependencies = ["PyYAML>=6.0", "requests>=2.28", "packaging>=23.0"]
+dependencies = [
+    "PyYAML>=6.0",
+    "requests>=2.28",
+    "packaging>=23.0",
+    "pydantic>=2.0",
+]
 
 [project.scripts]
-# PyPI 安装后的唯一入口（包名 openjiuwen-plugin-cli）
-openjiuwen_plugin = "cli.main:main"
-
-# 包在上级目录 agent-tools 下，可编辑安装会把 agent-tools 加入 path，任意目录运行 plugin 都能 import cli
-[tool.setuptools.package-dir]
-"" = ".."
+openjiuwen-plugin = "openjiuwen_plugin.main:main"
 
 [tool.setuptools.packages.find]
-where = [".."]
-include = ["cli*"]
-exclude = ["tests*"]
+where = ["."]
+include = ["openjiuwen_plugin", "openjiuwen_plugin.*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

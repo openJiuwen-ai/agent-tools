@@ -15,10 +15,10 @@ from typing import Any
 import yaml
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
-from cli.logging_config import get_logger
-from cli.market import PublishError
-from cli.market import upload_plugin as _market_upload_plugin
-from cli.schemas import PluginPublishResult, PublishPluginInput, PublishRequest
+from openjiuwen_plugin.logging_config import get_logger
+from openjiuwen_plugin.market import PublishError
+from openjiuwen_plugin.market import upload_plugin as _market_upload_plugin
+from openjiuwen_plugin.schemas import PluginPublishResult, PublishPluginInput, PublishRequest
 
 logger = get_logger(__name__)
 

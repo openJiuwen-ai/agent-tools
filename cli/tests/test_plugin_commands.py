@@ -8,10 +8,10 @@ from unittest.mock import patch
 
 import yaml
 
-from cli.main import main
-from cli.market import download_artifact_zip, get_plugin_version_detail, search_plugins
-from cli.plugin import info_plugin, init_plugin, install_plugin_from_zip, pack_plugin, validate_plugin
-from cli.schemas import PluginListQuery, PluginVersionDetail, PublishRequest
+from openjiuwen_plugin.main import main
+from openjiuwen_plugin.market import download_artifact_zip, get_plugin_version_detail, search_plugins
+from openjiuwen_plugin.plugin import info_plugin, init_plugin, install_plugin_from_zip, pack_plugin, validate_plugin
+from openjiuwen_plugin.schemas import PluginListQuery, PluginVersionDetail, PublishRequest
 
 
 class PluginCommandsTest(unittest.TestCase):
@@ -157,7 +157,7 @@ def another_tool() -> dict:
             zip_path = pack_plugin(plugin_root, out_dir)
 
             # 避免真实 pip 安装（网络/环境不稳定）；验证分支选择与命令参数
-            with patch("cli.plugin.subprocess.run") as m_run:
+            with patch("openjiuwen_plugin.plugin.subprocess.run") as m_run:
                 m_run.return_value = None
                 installed_root = install_plugin_from_zip(zip_path)
 
@@ -174,7 +174,7 @@ def another_tool() -> dict:
             out_dir = Path(tmp) / "out"
             zip_path = pack_plugin(plugin_root, out_dir)
 
-            with patch("cli.plugin.subprocess.run") as m_run:
+            with patch("openjiuwen_plugin.plugin.subprocess.run") as m_run:
                 m_run.return_value = None
                 installed_root = install_plugin_from_zip(zip_path)
 
@@ -192,7 +192,7 @@ def another_tool() -> dict:
             out_dir = Path(tmp) / "out"
             zip_path = pack_plugin(plugin_root, out_dir)
 
-            with patch("cli.plugin.subprocess.run") as m_run:
+            with patch("openjiuwen_plugin.plugin.subprocess.run") as m_run:
                 m_run.return_value = None
                 installed_root = install_plugin_from_zip(zip_path)
 
@@ -215,7 +215,7 @@ def another_tool() -> dict:
 
     def test_info_from_market(self) -> None:
         """plugin info 通过版本详情 API 拉取摘要字段。"""
-        with patch("cli.handlers.get_plugin_version_detail") as m:
+        with patch("openjiuwen_plugin.handlers.get_plugin_version_detail") as m:
             m.return_value = PluginVersionDetail.model_validate(
                 {
                     "asset_id": "demo-id",
@@ -239,7 +239,7 @@ def another_tool() -> dict:
             self.assertEqual(call_kw[0][2], "1.0.0")
 
     def test_get_plugin_version_detail_uses_versions_path(self) -> None:
-        with patch("cli.market.requests.get") as m:
+        with patch("openjiuwen_plugin.market.requests.get") as m:
             m.return_value.status_code = 200
             m.return_value.headers = {"content-type": "application/json"}
             m.return_value.json.return_value = {
@@ -262,7 +262,7 @@ def another_tool() -> dict:
             self.assertTrue(called_url.endswith("/api/v1/plugins/demo-id/versions/1.0.0"))
 
     def test_get_plugin_version_detail_missing_fields_not_error(self) -> None:
-        with patch("cli.market.requests.get") as m:
+        with patch("openjiuwen_plugin.market.requests.get") as m:
             m.return_value.status_code = 200
             m.return_value.headers = {"content-type": "application/json"}
             m.return_value.json.return_value = {
@@ -286,33 +286,34 @@ def another_tool() -> dict:
             out_zip = Path(tmp) / "out"
             zip_path = pack_plugin(plugin_root, out_zip)
 
-            # cli/plugin.py 在导入时把 upload_plugin 固化为 _market_upload_plugin，
+            # openjiuwen_plugin/plugin.py 在导入时把 upload_plugin 固化为 _market_upload_plugin，
             # 因此测试需要 patch 这个别名，才能真正避免网络请求。
-            with patch("cli.plugin._market_upload_plugin") as m:
-                # 避免交互输入：提供 --system-token 即可
-                code = main(
-                    [
-                        "publish",
-                        "--file",
-                        str(zip_path),
-                        "--user-id",
-                        "user-sys",
-                        "--system-token",
-                        "sys-token-123",
-                        "--market-url",
-                        "http://localhost:8000",
-                    ]
-                )
-                self.assertEqual(code, 0)
+            with patch.dict(os.environ, {"OPENJIUWEN_USER_TOKEN": ""}, clear=False):
+                with patch("openjiuwen_plugin.plugin._market_upload_plugin") as m:
+                    # 避免交互输入：提供 --system-token 即可；清空用户 token 环境以免与 system 双鉴权冲突
+                    code = main(
+                        [
+                            "publish",
+                            "--file",
+                            str(zip_path),
+                            "--user-id",
+                            "user-sys",
+                            "--system-token",
+                            "sys-token-123",
+                            "--market-url",
+                            "http://localhost:8000",
+                        ]
+                    )
+                    self.assertEqual(code, 0)
 
-                self.assertEqual(m.call_count, 1)
-                # upload_plugin signature:
-                # (market_url, user_token, system_token, req: PublishRequest)
-                call_args = m.call_args
-                self.assertEqual(call_args[0][0], "http://localhost:8000")
-                self.assertIsNone(call_args[0][1])
-                self.assertEqual(call_args[0][2], "sys-token-123")
-                self.assertEqual(call_args[0][3].user_id, "user-sys")
+                    self.assertEqual(m.call_count, 1)
+                    # upload_plugin signature:
+                    # (market_url, user_token, system_token, req: PublishRequest)
+                    call_args = m.call_args
+                    self.assertEqual(call_args[0][0], "http://localhost:8000")
+                    self.assertIsNone(call_args[0][1])
+                    self.assertEqual(call_args[0][2], "sys-token-123")
+                    self.assertEqual(call_args[0][3].user_id, "user-sys")
 
     def test_publish_user_id_from_env(self) -> None:
         """publish 可从 OPENJIUWEN_USER_ID 取得 user_id（省略 --user-id）。"""
@@ -321,8 +322,12 @@ def another_tool() -> dict:
             out_zip = Path(tmp) / "out"
             zip_path = pack_plugin(plugin_root, out_zip)
 
-            with patch("cli.plugin._market_upload_plugin") as m:
-                with patch.dict(os.environ, {"OPENJIUWEN_USER_ID": "from-env-user"}, clear=False):
+            with patch.dict(
+                os.environ,
+                {"OPENJIUWEN_USER_ID": "from-env-user", "OPENJIUWEN_USER_TOKEN": ""},
+                clear=False,
+            ):
+                with patch("openjiuwen_plugin.plugin._market_upload_plugin") as m:
                     code = main(
                         [
                             "publish",
@@ -334,13 +339,13 @@ def another_tool() -> dict:
                             "http://localhost:8000",
                         ]
                     )
-                self.assertEqual(code, 0)
-                call_args = m.call_args
-                self.assertEqual(call_args[0][3].user_id, "from-env-user")
+                    self.assertEqual(code, 0)
+                    call_args = m.call_args
+                    self.assertEqual(call_args[0][3].user_id, "from-env-user")
 
     def test_delete_rejects_both_token_and_system_token(self) -> None:
         """delete 同时传 --token 与 --system-token 时应直接失败。"""
-        with patch("cli.market.delete_plugin") as m:
+        with patch("openjiuwen_plugin.market.delete_plugin") as m:
             code = main(
                 [
                     "delete",
@@ -397,7 +402,7 @@ def another_tool() -> dict:
 
     def test_search_plugins_maps_plugin_list_query_params(self) -> None:
         """search_plugins 透传 PluginListQuery 相关 query 参数。"""
-        with patch("cli.market.requests.get") as m:
+        with patch("openjiuwen_plugin.market.requests.get") as m:
             m.return_value.status_code = 200
             m.return_value.headers = {"content-type": "application/json"}
             m.return_value.json.return_value = {
@@ -434,7 +439,7 @@ def another_tool() -> dict:
             self.assertTrue(params["desc"])
 
     def test_search_plugins_desc_true_by_default(self) -> None:
-        with patch("cli.market.requests.get") as m:
+        with patch("openjiuwen_plugin.market.requests.get") as m:
             m.return_value.status_code = 200
             m.return_value.headers = {"content-type": "application/json"}
             m.return_value.json.return_value = {"code": 200, "message": "ok", "data": {"items": [], "total": 0}}
@@ -442,7 +447,7 @@ def another_tool() -> dict:
             self.assertTrue(m.call_args[1]["params"]["desc"])
 
     def test_search_plugins_desc_true_when_flag_set(self) -> None:
-        with patch("cli.market.requests.get") as m:
+        with patch("openjiuwen_plugin.market.requests.get") as m:
             m.return_value.status_code = 200
             m.return_value.headers = {"content-type": "application/json"}
             m.return_value.json.return_value = {"code": 200, "message": "ok", "data": {"items": [], "total": 0}}
@@ -450,7 +455,7 @@ def another_tool() -> dict:
             self.assertTrue(m.call_args[1]["params"]["desc"])
 
     def test_search_plugins_desc_false_when_explicitly_set(self) -> None:
-        with patch("cli.market.requests.get") as m:
+        with patch("openjiuwen_plugin.market.requests.get") as m:
             m.return_value.status_code = 200
             m.return_value.headers = {"content-type": "application/json"}
             m.return_value.json.return_value = {"code": 200, "message": "ok", "data": {"items": [], "total": 0}}
@@ -481,7 +486,7 @@ def another_tool() -> dict:
                 iter_content=lambda chunk_size=0: [zip_bytes],
                 text="",
             )
-            with patch("cli.market.requests.get", side_effect=[meta_resp, file_resp]) as m_get:
+            with patch("openjiuwen_plugin.market.requests.get", side_effect=[meta_resp, file_resp]) as m_get:
                 info = download_artifact_zip("http://market.local", "asset-1", out)
             self.assertTrue(out.exists())
             self.assertTrue(info.verified)
@@ -514,7 +519,7 @@ def another_tool() -> dict:
                 iter_content=lambda chunk_size=0: [zip_bytes],
                 text="",
             )
-            with patch("cli.market.requests.get", side_effect=[meta_resp, file_resp]):
+            with patch("openjiuwen_plugin.market.requests.get", side_effect=[meta_resp, file_resp]):
                 with self.assertRaises(RuntimeError) as ctx:
                     download_artifact_zip("http://market.local", "asset-1", out)
             self.assertIn("checksum mismatch", str(ctx.exception))
