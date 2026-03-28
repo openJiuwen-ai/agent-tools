@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from common.security.security_utils import SecurityUtils
 from .config import settings
 
 
@@ -37,7 +38,7 @@ def _build_database_url_from_shared_env() -> str | None:
         host = os.getenv("DB_HOST", "localhost")
         port = os.getenv("DB_PORT", "3306")
         user = os.getenv("DB_USER", "root")
-        password = os.getenv("DB_PASSWORD", "")
+        password = SecurityUtils.get_decrypt_secret("DB_PASSWORD", default="") or ""
         
         store_db_name = os.getenv("STORE_DB_NAME", "openjiuwen_market")
 

@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 import httpx
 from fastapi import Header, HTTPException, Query, Request, status
 
+from common.security.security_utils import SecurityUtils
 from plugins_market.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,10 @@ def _has_bearer(authorization: Optional[str]) -> bool:
 
 def _has_system_token(x_system_token: Optional[str]) -> bool:
     return bool(x_system_token is not None and x_system_token.strip())
+
+
+def _resolved_system_admin_token() -> str:
+    return SecurityUtils.get_decrypt_secret("SYSTEM_ADMIN_TOKEN", default="") or ""
 
 
 async def verify_bearer_with_studio(token: str) -> bool:
@@ -66,7 +71,8 @@ async def require_auth(
         )
 
     if has_system:
-        if settings.system_admin_token and x_system_token.strip() == settings.system_admin_token:
+        system_admin_token = _resolved_system_admin_token()
+        if system_admin_token and x_system_token.strip() == system_admin_token:
             return
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -144,7 +150,8 @@ async def require_auth_with_user_id(
         )
 
     if has_system:
-        if settings.system_admin_token and x_system_token.strip() == settings.system_admin_token:
+        system_admin_token = _resolved_system_admin_token()
+        if system_admin_token and x_system_token.strip() == system_admin_token:
             return (True, None)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

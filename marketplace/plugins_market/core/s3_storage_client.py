@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, List
 
 import boto3
 from botocore.config import Config
+from common.security.security_utils import SecurityUtils
 
 STORAGE_TYPES = ("MinIO", "OBS")
 logger = logging.getLogger(__name__)
@@ -30,8 +31,8 @@ class S3StorageConfig:
         # Public URL：优先 MARKET_STORAGE_PUBLIC_URL；否则 endpoint+bucket
         self.public_base_url = (os.getenv("MARKET_STORAGE_PUBLIC_URL") or "").rstrip("/")
         self.endpoint_url = (os.getenv("MARKET_S3_ENDPOINT") or "").rstrip("/")
-        self.access_key = os.getenv("MARKET_S3_ACCESS_KEY") or ""
-        self.secret_key = os.getenv("MARKET_S3_SECRET_KEY") or ""
+        self.access_key = SecurityUtils.get_decrypt_secret("MARKET_S3_ACCESS_KEY", default="") or ""
+        self.secret_key = SecurityUtils.get_decrypt_secret("MARKET_S3_SECRET_KEY", default="") or ""
         self.bucket_name = os.getenv("MARKET_BUCKET_NAME", "openjiuwen-market")
         self.region_name = os.getenv("MARKET_S3_REGION", "us-east-1")
 

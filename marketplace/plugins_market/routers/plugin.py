@@ -1,4 +1,5 @@
 from typing import Any, Optional, Tuple
+from urllib.parse import urlparse
 
 from fastapi import (
     APIRouter,
@@ -13,6 +14,7 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from common.security.security_utils import SecurityUtils
 from plugins_market.core.auth import require_auth_with_user_id, verify_bearer_via_user
 from plugins_market.core.config import settings
 from plugins_market.core.database import get_db
@@ -156,7 +158,8 @@ def get_publish_auth(
         )
 
     if has_system:
-        if settings.system_admin_token and x_system_token.strip() == settings.system_admin_token:
+        system_admin_token = SecurityUtils.get_decrypt_secret("SYSTEM_ADMIN_TOKEN", default="") or ""
+        if system_admin_token and x_system_token.strip() == system_admin_token:
             return (None, True)
         raise _auth_error(status.HTTP_403_FORBIDDEN, "Invalid X-System-Token")
 
