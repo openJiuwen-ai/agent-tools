@@ -1,0 +1,6 @@
+# Shell 脚本在 Linux 容器中必须用 LF，否则会出现 exec ... no such file or directory
+docker/*.sh text eol=lf
+*.sh text eol=lf
+
+# 语言包须为 UTF-8，避免 Vite 按 UTF-8 打包时出现中文乱码
+frontend/src/locales/*.json text eol=lf

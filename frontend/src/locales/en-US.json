@@ -1,0 +1,101 @@
+{
+  "common": {
+    "lang": {
+      "zh": "中文",
+      "en": "English",
+      "switchAria": "Switch language"
+    },
+    "buttons": {
+      "close": "Close"
+    },
+    "view": {
+      "gridView": "Grid View",
+      "tableView": "Table View"
+    },
+    "pagination": {
+      "previous": "Previous",
+      "next": "Next",
+      "first": "First",
+      "last": "Last",
+      "pagePrefix": "Page",
+      "pageSuffix": "/ {{total}}",
+      "total": "{{total}} items",
+      "pageSize": "Page size",
+      "items": "items"
+    }
+  },
+  "plugins": {
+    "title": "Plugin Management",
+    "marketTitle": "openJiuwen Plugin Market",
+    "searchPlaceholder": "Search plugin names or descriptions",
+    "tabs": {
+      "market": "Plugin Market"
+    },
+    "tableView": {
+      "columns": {
+        "plugin": "Plugin",
+        "summary": "Summary",
+        "type": "Runtime",
+        "publisher": "Publisher",
+        "version": "Version",
+        "viewCount": "Views",
+        "installCount": "Downloads",
+        "likeCount": "Likes",
+        "actions": "Actions"
+      }
+    },
+    "metrics": {
+      "view": "Views",
+      "install": "Downloads",
+      "like": "Likes"
+    },
+    "cardTags": {
+      "runtimeType": "Runtime type",
+      "version": "Version",
+      "tag": "Tag",
+      "overflowIntro": "Additional tags not shown in full"
+    },
+    "filters": {
+      "allCategories": "All runtimes"
+    },
+    "viewMode": {
+      "grid": "Grid View",
+      "list": "List View"
+    },
+    "noDescription": "No description",
+    "noMatching": "No matching plugins",
+    "noMatchingDescription": "Try adjusting search or filters",
+    "loading": "Loading...",
+    "actions": {
+      "view": "View",
+      "refresh": "Refresh",
+      "download": "Download",
+      "favorite": "Favorite",
+      "favoritePending": "Favorite feature is not available yet",
+      "downloadPending": "Download feature is not available yet",
+      "downloadFailed": "Failed to get download link. Please try again later."
+    },
+    "runtime": {
+      "tools": "Tools",
+      "mcpStdio": "MCP Stdio",
+      "restfulApi": "RESTful API",
+      "unknown": "Unknown: {{type}}"
+    },
+    "detail": {
+      "summary": "Summary",
+      "description": "Description",
+      "publisher": "Publisher",
+      "runtime": "Runtime",
+      "version": "Latest Version",
+      "rating": "Rating",
+      "ratingTooltip": "Rating",
+      "installCount": "Downloads",
+      "reviewCount": "Reviews",
+      "viewCount": "Views",
+      "likeCount": "Likes",
+      "createTime": "Created",
+      "updateTime": "Updated",
+      "tags": "Tags"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+# docker build -f docker/Dockerfile.web-tools .
+node_modules
+**/node_modules
+**/dist
+.git
+.gitignore
+.cursor
+**/.env
+**/.env.local
+**/.env.*.local

@@ -1,0 +1,101 @@
+{
+  "common": {
+    "lang": {
+      "zh": "中文",
+      "en": "English",
+      "switchAria": "切换语言"
+    },
+    "buttons": {
+      "close": "关闭"
+    },
+    "view": {
+      "gridView": "网格视图",
+      "tableView": "表格视图"
+    },
+    "pagination": {
+      "previous": "上一页",
+      "next": "下一页",
+      "first": "首页",
+      "last": "尾页",
+      "pagePrefix": "第",
+      "pageSuffix": "/ {{total}} 页",
+      "total": "共 {{total}} 条记录",
+      "pageSize": "每页显示",
+      "items": "条"
+    }
+  },
+  "plugins": {
+    "title": "插件管理",
+    "marketTitle": "openJiuwen插件市场",
+    "searchPlaceholder": "搜索插件名称、简介",
+    "tabs": {
+      "market": "插件市场"
+    },
+    "tableView": {
+      "columns": {
+        "plugin": "插件",
+        "summary": "简介",
+        "type": "运行时",
+        "publisher": "发布者",
+        "version": "版本",
+        "viewCount": "浏览",
+        "installCount": "下载",
+        "likeCount": "点赞",
+        "actions": "操作"
+      }
+    },
+    "metrics": {
+      "view": "浏览",
+      "install": "下载",
+      "like": "点赞"
+    },
+    "cardTags": {
+      "runtimeType": "运行时类型",
+      "version": "版本",
+      "tag": "标签",
+      "overflowIntro": "以下标签未完整展示"
+    },
+    "filters": {
+      "allCategories": "全部运行时"
+    },
+    "viewMode": {
+      "grid": "网格视图",
+      "list": "列表视图"
+    },
+    "noDescription": "暂无描述",
+    "noMatching": "未找到匹配的插件",
+    "noMatchingDescription": "尝试调整搜索或筛选条件",
+    "loading": "加载中...",
+    "actions": {
+      "view": "详情",
+      "refresh": "刷新",
+      "download": "下载",
+      "favorite": "收藏",
+      "favoritePending": "收藏功能待支持",
+      "downloadPending": "下载功能待支持",
+      "downloadFailed": "获取下载链接失败，请稍后重试"
+    },
+    "runtime": {
+      "tools": "Tools",
+      "mcpStdio": "MCP Stdio",
+      "restfulApi": "RESTful API",
+      "unknown": "未知类型：{{type}}"
+    },
+    "detail": {
+      "summary": "简介",
+      "description": "详细说明",
+      "publisher": "发布者",
+      "runtime": "运行时",
+      "version": "最新版本",
+      "rating": "评分",
+      "ratingTooltip": "评分",
+      "installCount": "下载量",
+      "reviewCount": "评论数",
+      "viewCount": "浏览量",
+      "likeCount": "点赞数",
+      "createTime": "创建时间",
+      "updateTime": "更新时间",
+      "tags": "标签"
+    }
+  }
+}

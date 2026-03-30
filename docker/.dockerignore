@@ -1,0 +1,7 @@
+# 构建上下文为仓库根时，减小发送体积（与根目录 .dockerignore 二选一即可）
+**/node_modules
+**/dist
+.git
+.gitignore
+*.md
+!docker/README_WEB.md

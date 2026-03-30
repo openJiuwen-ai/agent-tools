@@ -1,0 +1,44 @@
+# 构建上下文：仓库根目录
+#   docker build -f docker/Dockerfile.web-tools -t agent-tools-frontend:latest .
+
+# -----------------------------------------------------------------------------
+# Stage 1: 构建 Vite 前端（envDir 为 frontend 上级目录，需在 /app 写入 .env）
+# -----------------------------------------------------------------------------
+FROM node:20-alpine AS builder
+
+ARG VITE_API_BASE_URL=
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
+WORKDIR /app
+
+# Vite loadEnv 从 frontend 的上一级加载；构建时注入 VITE_* 到该文件
+RUN printf '%s\n' "VITE_API_BASE_URL=${VITE_API_BASE_URL}" > .env
+
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+WORKDIR /app/frontend
+RUN npm ci
+
+COPY frontend ./
+
+RUN npm run build
+
+# -----------------------------------------------------------------------------
+# Stage 2：Nginx 托管静态资源
+# -----------------------------------------------------------------------------
+FROM nginx:alpine
+
+COPY --from=builder /app/frontend/dist /usr/share/nginx/html
+COPY frontend/nginx.conf /etc/nginx/nginx.conf
+
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+# Windows 检出 CRLF 时会导致 shebang 变成 /bin/sh\r，出现 “no such file or directory”
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
+
+RUN chown -R nginx:nginx /usr/share/nginx/html
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q -O- http://127.0.0.1/api/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

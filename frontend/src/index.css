@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-harmony: "HarmonyHeiti", "HarmonyOS Sans SC", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+}
+
+html,
+body,
+#root,
+* {
+  font-family: var(--font-harmony) !important;
+}
