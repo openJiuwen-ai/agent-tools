@@ -1,0 +1,13 @@
+name: firecrawl_plugin
+version: 0.0.1
+display_name: Firecrawl Plugin
+description: openJiuwen 插件，通过 Firecrawl API（firecrawl-py V2）实现单页抓取、站点 Map、同步深度爬取（crawl）。
+runtime:
+  type: python-package
+metadata:
+  author: openJiuwen
+  tags: [search, crawl, scrape, utilities]
+compatibility:
+  python: ">=3.11,<3.14"
+  agent_core: ">=0.1.5,<0.2.0"
+  firecrawl-py: ">=4,<6"

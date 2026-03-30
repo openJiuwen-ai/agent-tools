@@ -1,0 +1,166 @@
+{
+    "tools": [
+        {
+            "name": "openweathermap_weather",
+            "description": "基于 OpenWeather Current weather data API (2.5) 查询当前天气，支持经纬度或城市名。Query current weather by lat/lon or city using OpenWeather API 2.5.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "lat": {
+                        "type": "number",
+                        "description": "可选，纬度，十进制度数，范围 -90~90。未提供时可用 city。"
+                    },
+                    "lon": {
+                        "type": "number",
+                        "description": "可选，经度，十进制度数，范围 -180~180。未提供时可用 city。"
+                    },
+                    "city": {
+                        "type": "string",
+                        "description": "可选，城市名称（英文，如 Beijing、London），使用 API 内置 q 参数。"
+                    },
+                    "units": {
+                        "type": "string",
+                        "description": "温度单位：standard、metric（摄氏度）或 imperial（华氏度）。",
+                        "enum": [
+                            "standard",
+                            "metric",
+                            "imperial"
+                        ],
+                        "default": "metric"
+                    },
+                    "lang": {
+                        "type": "string",
+                        "description": "返回描述的语言代码，如 zh_cn、en。",
+                        "default": "zh_cn"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "openweathermap_forecast_5d",
+            "description": "基于 OpenWeather 5 Day / 3 Hour Forecast API 查询未来 1~5 天（3 小时一档）预报，支持经纬度或城市名。Query 1-5 day 3-hour step forecast by lat/lon or city.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "lat": {
+                        "type": "number",
+                        "description": "可选，纬度 -90~90。未提供时用 city。"
+                    },
+                    "lon": {
+                        "type": "number",
+                        "description": "可选，经度 -180~180。未提供时用 city。"
+                    },
+                    "city": {
+                        "type": "string",
+                        "description": "可选，城市英文名，如 Beijing、London。"
+                    },
+                    "cnt": {
+                        "type": "integer",
+                        "description": "可选，返回时间点数量 1~40，不传则返回完整约 40 档。",
+                        "minimum": 1,
+                        "maximum": 40
+                    },
+                    "units": {
+                        "type": "string",
+                        "enum": [
+                            "standard",
+                            "metric",
+                            "imperial"
+                        ],
+                        "default": "metric"
+                    },
+                    "lang": {
+                        "type": "string",
+                        "default": "zh_cn"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "openweathermap_forecast_16d",
+            "description": "基于 OpenWeather Daily Forecast 16 Days API 查询未来 1~16 天每日预报，支持经纬度或城市名；需 Pro 订阅。Query 1-16 day daily forecast by lat/lon or city. Requires Pro.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "lat": {
+                        "type": "number",
+                        "description": "可选，纬度 -90~90。未提供时用 city。"
+                    },
+                    "lon": {
+                        "type": "number",
+                        "description": "可选，经度 -180~180。未提供时用 city。"
+                    },
+                    "city": {
+                        "type": "string",
+                        "description": "可选，城市英文名，如 Beijing、London。"
+                    },
+                    "cnt": {
+                        "type": "integer",
+                        "description": "返回天数 1~16，默认 7。",
+                        "minimum": 1,
+                        "maximum": 16,
+                        "default": 7
+                    },
+                    "units": {
+                        "type": "string",
+                        "enum": [
+                            "standard",
+                            "metric",
+                            "imperial"
+                        ],
+                        "default": "metric"
+                    },
+                    "lang": {
+                        "type": "string",
+                        "default": "zh_cn"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "openweathermap_forecast_30d",
+            "description": "基于 OpenWeather Climatic forecast 30 days API 查询未来 1~30 天每日气候预报，支持经纬度或城市名；需 Pro 订阅。Query 1-30 day climatic forecast by lat/lon or city. Requires Pro.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "lat": {
+                        "type": "number",
+                        "description": "可选，纬度 -90~90。未提供时用 city。"
+                    },
+                    "lon": {
+                        "type": "number",
+                        "description": "可选，经度 -180~180。未提供时用 city。"
+                    },
+                    "city": {
+                        "type": "string",
+                        "description": "可选，城市英文名，如 Beijing、London。"
+                    },
+                    "cnt": {
+                        "type": "integer",
+                        "description": "返回天数 1~30，默认 7。",
+                        "minimum": 1,
+                        "maximum": 30,
+                        "default": 7
+                    },
+                    "units": {
+                        "type": "string",
+                        "enum": [
+                            "standard",
+                            "metric",
+                            "imperial"
+                        ],
+                        "default": "metric"
+                    },
+                    "lang": {
+                        "type": "string",
+                        "default": "zh_cn"
+                    }
+                },
+                "required": []
+            }
+        }
+    ]
+}

@@ -1,0 +1,12 @@
+name: datetime_plugin
+version: 0.0.1
+display_name: DateTime Plugin
+description: openJiuwen 插件，获取当前时间，支持指定时区与格式化输出。
+runtime:
+  type: python-package
+metadata:
+  author: openJiuwen
+  tags: [utility, time]
+compatibility:
+  python: ">=3.11,<3.14"
+  agent_core: ">=0.1.5,<0.2.0"

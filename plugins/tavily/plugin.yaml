@@ -1,0 +1,12 @@
+name: tavily_plugin
+version: 0.0.1
+display_name: Tavily Plugin
+description: openJiuwen 插件，通过 Tavily API 执行搜索、提取、映射和研究。
+runtime:
+  type: python-package
+metadata:
+  author: openJiuwen
+  tags: [search, extract, map, research]
+compatibility:
+  python: ">=3.11,<3.14"
+  agent_core: ">=0.1.5,<0.2.0"

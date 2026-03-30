@@ -1,0 +1,326 @@
+{
+    "tools": [
+        {
+            "name": "tavily_extract",
+            "description": "使用 Tavily Extract 从一个或多个指定 URL 提取网页内容。Extract raw content from web pages with basic or advanced extraction modes.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "urls": {
+                        "type": "string",
+                        "description": "One or more URLs to extract content from (comma-separated if multiple)."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional query string to rerank extracted content chunks based on relevance to user intent."
+                    },
+                    "include_images": {
+                        "type": "boolean",
+                        "description": "Include images from the URLs in the response. Default is false.",
+                        "default": False
+                    },
+                    "include_favicon": {
+                        "type": "boolean",
+                        "description": "When set to true, includes the favicon URL for each result.",
+                        "default": False
+                    },
+                    "extract_depth": {
+                        "type": "string",
+                        "description": "Extraction depth - 'basic' (default, faster) or 'advanced' (more data, higher cost).",
+                        "enum": [
+                            "basic",
+                            "advanced"
+                        ],
+                        "default": "basic"
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": "Format of extracted content - 'markdown' (default) or 'text' (plain text).",
+                        "enum": [
+                            "markdown",
+                            "text"
+                        ],
+                        "default": "markdown"
+                    },
+                    "chunks_per_source": {
+                        "type": "integer",
+                        "description": "Maximum number of relevant content chunks (1-5) returned per source. Default is 3.",
+                        "minimum": 1,
+                        "maximum": 5,
+                        "default": 3
+                    },
+                    "timeout": {
+                        "type": "number",
+                        "description": "Request timeout in seconds (1.0-60.0). Default is 10s for basic, 30s for advanced.",
+                        "minimum": 1,
+                        "maximum": 60
+                    },
+                    "include_usage": {
+                        "type": "boolean",
+                        "description": "When set to true, includes API credit usage information in the response.",
+                        "default": False
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Optional project ID for usage tracking and analytics. Will be sent as X-Project-ID header."
+                    }
+                },
+                "required": [
+                    "urls"
+                ]
+            }
+        },
+        {
+            "name": "tavily_map",
+            "description": "使用 Tavily Map 从根 URL 开始发现所有 URL，映射网站结构。Map a website's structure by discovering all URLs starting from a root URL.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The root URL to begin the website mapping from."
+                    },
+                    "instructions": {
+                        "type": "string",
+                        "description": "Natural language guidance for crawling behavior. Note that using instructions doubles API credit consumption."
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Exploration distance from base URL. Range is 1-5. Default is 1.",
+                        "minimum": 1,
+                        "maximum": 5,
+                        "default": 1
+                    },
+                    "max_breadth": {
+                        "type": "integer",
+                        "description": "Number of links followed per page level. Range is 1-500. Default is 20.",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 20
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Total links processed before halting. Minimum is 1. Default is 50.",
+                        "minimum": 1,
+                        "default": 50
+                    },
+                    "select_paths": {
+                        "type": "string",
+                        "description": "Comma-separated regex patterns to filter URLs by path. Only URLs matching these patterns will be included."
+                    },
+                    "select_domains": {
+                        "type": "string",
+                        "description": "Comma-separated regex patterns to filter URLs by domain. Only URLs from matching domains will be included."
+                    },
+                    "exclude_paths": {
+                        "type": "string",
+                        "description": "Comma-separated regex patterns to exclude URLs by path. URLs matching these patterns will be omitted."
+                    },
+                    "exclude_domains": {
+                        "type": "string",
+                        "description": "Comma-separated regex patterns to exclude URLs by domain. URLs from matching domains will be blocked."
+                    },
+                    "allow_external": {
+                        "type": "boolean",
+                        "description": "When set to true, includes external domain links in results. Default is true.",
+                        "default": True
+                    },
+                    "timeout": {
+                        "type": "number",
+                        "description": "Maximum wait duration in seconds. Range is 10-150. Default is 150.",
+                        "minimum": 10,
+                        "maximum": 150,
+                        "default": 150
+                    },
+                    "include_usage": {
+                        "type": "boolean",
+                        "description": "When set to true, includes API credit usage information in the response.",
+                        "default": False
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Optional project ID for usage tracking and analytics. Will be sent as X-Project-ID header."
+                    }
+                },
+                "required": [
+                    "url"
+                ]
+            }
+        },
+        {
+            "name": "tavily_research",
+            "description": "使用 Tavily Research API 对任何主题进行深度研究，返回带引用的综合报告。Conduct deep, comprehensive research on any topic, returning detailed reports with citations and sources.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "input": {
+                        "type": "string",
+                        "description": "The research task or question to investigate. Be specific and detailed for better results."
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Research model: 'mini' (quick, targeted), 'pro' (comprehensive), 'auto' (automatic selection).",
+                        "enum": [
+                            "auto",
+                            "mini",
+                            "pro"
+                        ],
+                        "default": "auto"
+                    },
+                    "citation_format": {
+                        "type": "string",
+                        "description": "Citation format for sources: numbered, MLA, APA, or Chicago style.",
+                        "enum": [
+                            "numbered",
+                            "mla",
+                            "apa",
+                            "chicago"
+                        ],
+                        "default": "numbered"
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Optional project ID for tracking and analytics. Sent as X-Project-ID header."
+                    }
+                },
+                "required": [
+                    "input"
+                ]
+            }
+        },
+        {
+            "name": "tavily_search",
+            "description": "专为 AI 代理构建的搜索引擎，提供实时、准确的结果。A search engine built for AI agents (LLMs), delivering real-time, accurate, and factual results.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query you want to execute with Tavily."
+                    },
+                    "search_depth": {
+                        "type": "string",
+                        "description": "Depth of search: 'basic' (standard), 'advanced' (comprehensive), 'fast', 'ultra-fast'.",
+                        "enum": [
+                            "basic",
+                            "advanced",
+                            "fast",
+                            "ultra-fast"
+                        ],
+                        "default": "basic"
+                    },
+                    "topic": {
+                        "type": "string",
+                        "description": "Category of the search: 'general', 'news', or 'finance'.",
+                        "enum": [
+                            "general",
+                            "news",
+                            "finance"
+                        ],
+                        "default": "general"
+                    },
+                    "time_range": {
+                        "type": "string",
+                        "description": "Time range to filter results: 'not_specified', 'day', 'week', 'month', 'year'.",
+                        "enum": [
+                            "not_specified",
+                            "day",
+                            "week",
+                            "month",
+                            "year"
+                        ],
+                        "default": "not_specified"
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date for filtering results (YYYY-MM-DD)."
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End date for filtering results (YYYY-MM-DD)."
+                    },
+                    "country": {
+                        "type": "string",
+                        "description": "Boost results from a specific country (e.g. 'china', 'us'). Only when topic is general."
+                    },
+                    "auto_parameters": {
+                        "type": "boolean",
+                        "description": "Automatically configure search parameters based on query. Default false.",
+                        "default": False
+                    },
+                    "include_images": {
+                        "type": "boolean",
+                        "description": "Include query-related images in the response. Default false.",
+                        "default": False
+                    },
+                    "include_image_descriptions": {
+                        "type": "boolean",
+                        "description": "When include_images is true, add descriptions for each image. Default false.",
+                        "default": False
+                    },
+                    "include_favicon": {
+                        "type": "boolean",
+                        "description": "Include favicon URL for each result. Default false.",
+                        "default": False
+                    },
+                    "include_answer": {
+                        "type": "string",
+                        "description": "Include a short answer: false, true/basic, or advanced for detailed answer.",
+                        "enum": [
+                            "false",
+                            "true",
+                            "basic",
+                            "advanced"
+                        ],
+                        "default": "false"
+                    },
+                    "include_raw_content": {
+                        "type": "string",
+                        "description": "Include raw content per result: false, true/markdown, or text.",
+                        "enum": [
+                            "false",
+                            "true",
+                            "markdown",
+                            "text"
+                        ],
+                        "default": "false"
+                    },
+                    "include_domains": {
+                        "type": "string",
+                        "description": "Comma- or space-separated list of domains to include in search."
+                    },
+                    "exclude_domains": {
+                        "type": "string",
+                        "description": "Comma- or space-separated list of domains to exclude from search."
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of search results to return (1-20). Default 5.",
+                        "minimum": 1,
+                        "maximum": 20,
+                        "default": 5
+                    },
+                    "chunks_per_source": {
+                        "type": "integer",
+                        "description": "Max content chunks per source (1-3). Only when search_depth is advanced. Default 3.",
+                        "minimum": 1,
+                        "maximum": 3,
+                        "default": 3
+                    },
+                    "include_usage": {
+                        "type": "boolean",
+                        "description": "Include API usage (token counts, credits) in the response. Default false.",
+                        "default": False
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Optional project ID for tracking. Sent as X-Project-ID header."
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        }
+    ]
+}

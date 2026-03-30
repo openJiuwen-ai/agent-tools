@@ -1,0 +1,12 @@
+name: wikipedia_plugin
+version: 0.0.1
+display_name: Wikipedia Plugin
+description: openJiuwen 插件，基于维基百科 API 进行搜索并获取页面摘要。
+runtime:
+  type: python-package
+metadata:
+  author: openJiuwen
+  tags: [search, knowledge]
+compatibility:
+  python: ">=3.11,<3.14"
+  agent_core: ">=0.1.5,<0.2.0"

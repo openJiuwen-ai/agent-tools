@@ -1,0 +1,12 @@
+name: openweathermap_plugin
+version: 0.0.1
+display_name: OpenWeatherMap Plugin
+description: openJiuwen 插件，通过 OpenWeatherMap REST API 查询城市天气，支持温度单位与多语言。
+runtime:
+  type: python-package
+metadata:
+  author: openJiuwen
+  tags: [weather, openweathermap]
+compatibility:
+  python: ">=3.11,<3.14"
+  agent_core: ">=0.1.5,<0.2.0"

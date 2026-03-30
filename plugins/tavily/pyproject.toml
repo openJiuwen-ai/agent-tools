@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tavily-plugin"
+version = "0.0.1"
+description = "openJiuwen plugin for Tavily API: Search, Extract, Map, and Research tools."
+license = { text = "MIT" }
+authors = [{ name = "Tavily Plugin author" }]
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    'Development Status :: 4 - Beta',
+    'Programming Language :: Python',
+    'Programming Language :: Python :: Implementation :: CPython',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3 :: Only',
+    'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
+    'Programming Language :: Python :: 3.13',
+    'Programming Language :: Python :: 3.14',
+]
+dependencies = [
+    "openjiuwen>=0.1.5",
+    "tavily-python==0.7.19",
+]

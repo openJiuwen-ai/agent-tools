@@ -1,0 +1,40 @@
+{
+    "tools": [
+        {
+            "name": "azure_dalle3",
+            "description": "使用 Azure OpenAI 上部署的 DALL-E 3 根据文本提示生成图像。DALL-E 3 text-to-image via Azure OpenAI.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "图像提示词，尽量具体描述画面内容、风格与构图。"
+                    },
+                    "seed_id": {
+                        "type": "string",
+                        "description": "可选。种子 ID，用于系列图一致性（约 8 位字母数字）。"
+                    },
+                    "size": {
+                        "type": "string",
+                        "description": "画幅：square 1024x1024、vertical 1024x1792、horizontal 1792x1024。",
+                        "enum": ["square", "vertical", "horizontal"],
+                        "default": "square"
+                    },
+                    "quality": {
+                        "type": "string",
+                        "description": "standard 或 hd。",
+                        "enum": ["standard", "hd"],
+                        "default": "standard"
+                    },
+                    "style": {
+                        "type": "string",
+                        "description": "vivid 或 natural。",
+                        "enum": ["vivid", "natural"],
+                        "default": "vivid"
+                    }
+                },
+                "required": ["prompt"]
+            }
+        }
+    ]
+}

@@ -1,0 +1,24 @@
+{
+    "tools": [
+        {
+            "name": "get_current_time",
+            "description": "获取当前时间。可指定时区（如 Asia/Shanghai、UTC、America/New_York）和输出格式，返回格式化后的时间字符串。Get current time with optional timezone and format.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "timezone": {
+                        "type": "string",
+                        "description": "时区名称（IANA），如 Asia/Shanghai、UTC、America/New_York、Europe/London。留空则使用本机本地时间。",
+                        "default": "UTC"
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": "输出格式：预设 iso|datetime|date|time|full，或自定义 strftime 格式（如 %Y-%m-%d %H:%M:%S）。",
+                        "default": "datetime"
+                    }
+                },
+                "required": []
+            }
+        }
+    ]
+}

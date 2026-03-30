@@ -1,0 +1,39 @@
+{
+    "tools": [
+        {
+            "name": "wikipedia_search",
+            "description": "在维基百科中搜索并返回页面摘要。适用于人物、地点、公司、事实、历史事件等通用知识。输入应为搜索关键词。A tool for Wikipedia search and page summaries. Input should be a search query.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "搜索关键词 / Search query."
+                    },
+                    "language": {
+                        "type": "string",
+                        "description": "维基百科语言代码，如 en（英语）、zh（中文）、ja（日语）。Language code: en, zh, ja, de, fr, ko, etc.",
+                        "default": "en"
+                    },
+                    "top_k_results": {
+                        "type": "integer",
+                        "description": "返回的条目数量上限（1-10）",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 3
+                    },
+                    "doc_content_chars_max": {
+                        "type": "integer",
+                        "description": "返回内容的最大字符数",
+                        "minimum": 500,
+                        "maximum": 8000,
+                        "default": 4000
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        }
+    ]
+}

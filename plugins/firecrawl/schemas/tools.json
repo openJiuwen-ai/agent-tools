@@ -1,0 +1,73 @@
+{
+  "tools": [
+    {
+      "name": "firecrawl_scrape",
+      "description": "将指定 URL 转为干净、可供大模型使用的数据（Firecrawl /v1/scrape）。Scrape a URL via Firecrawl.",
+      "input_params": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "要抓取的页面 URL" },
+          "formats": {
+            "type": "string",
+            "description": "输出格式，逗号分隔：markdown, html, rawHtml, links, screenshot, extract, screenshot@fullPage"
+          },
+          "onlyMainContent": {
+            "type": "boolean",
+            "description": "仅返回正文",
+            "default": true
+          },
+          "includeTags": { "type": "string", "description": "仅保留的标签/类/id，逗号分隔" },
+          "excludeTags": { "type": "string", "description": "排除的标签/类/id，逗号分隔" },
+          "headers": { "type": "string", "description": "请求头 JSON 字符串" },
+          "waitFor": { "type": "integer", "description": "等待毫秒数", "default": 0 },
+          "timeout": { "type": "integer", "description": "超时毫秒数", "default": 30000 },
+          "schema": { "type": "string", "description": "提取用 JSON Schema 字符串" },
+          "systemPrompt": { "type": "string", "description": "提取 system prompt" },
+          "prompt": { "type": "string", "description": "无 schema 时的提取 prompt" }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "name": "firecrawl_map",
+      "description": "站点 URL 映射（Firecrawl /v1/map）。Map URLs on a site.",
+      "input_params": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "起始 URL" },
+          "search": { "type": "string", "description": "可选搜索关键词" },
+          "ignoreSitemap": { "type": "boolean", "default": true },
+          "includeSubdomains": { "type": "boolean", "default": false },
+          "limit": { "type": "integer", "default": 5000 }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "name": "firecrawl_crawl",
+      "description": "深度爬取（Firecrawl V2 crawl）。同步等待任务完成后再返回。",
+      "input_params": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "起始 URL" },
+          "poll_interval": { "type": "integer", "default": 5, "description": "轮询间隔（秒）" },
+          "excludePaths": { "type": "string", "description": "排除模式，逗号分隔" },
+          "includePaths": { "type": "string", "description": "包含模式，逗号分隔" },
+          "maxDepth": { "type": "integer", "default": 2 },
+          "ignoreSitemap": { "type": "boolean", "default": true },
+          "limit": { "type": "integer", "default": 5 },
+          "allowBackwardLinks": { "type": "boolean", "default": false },
+          "allowExternalLinks": { "type": "boolean", "default": false },
+          "webhook": { "type": "string" },
+          "formats": { "type": "string", "description": "scrape 格式，逗号分隔" },
+          "headers": { "type": "string", "description": "JSON 字符串" },
+          "includeTags": { "type": "string" },
+          "excludeTags": { "type": "string" },
+          "onlyMainContent": { "type": "boolean", "default": false },
+          "waitFor": { "type": "integer", "default": 0 }
+        },
+        "required": ["url"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+    "tools": [
+        {
+            "name": "mcp_list_tools",
+            "description": "获取 MCP 服务端的工具列表（远程工具清单）。注意：返回的工具名不是本地工具，不能直接调用；需要通过 mcp_call_tool 间接调用。配置从环境变量 MCP_SERVERS_CONFIG 读取。Fetch MCP servers tools list (remote tools). Use mcp_call_tool to execute.",
+            "input_params": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "mcp_call_tool",
+            "description": "用于执行 mcp_list_tools 返回的远程 MCP 工具（请勿直接调用列表中的工具名）。tool_name 取自 mcp_list_tools 返回的 name，arguments 为 JSON 字符串并符合该工具的 parameters。Call remote MCP tools listed by mcp_list_tools.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "servers_config": {
+                        "type": "string",
+                        "description": "可选；不传则使用环境变量 MCP_SERVERS_CONFIG。"
+                    },
+                    "tool_name": {
+                        "type": "string",
+                        "description": "要执行的 MCP 工具名称（来自 mcp_list_tools 返回的 name）。"
+                    },
+                    "arguments": {
+                        "type": "string",
+                        "description": "工具参数，JSON 字符串，格式为 Python dict。例如: {\"query\": \"hello\"}"
+                    }
+                },
+                "required": [
+                    "tool_name",
+                    "arguments"
+                ]
+            }
+        }
+    ]
+}

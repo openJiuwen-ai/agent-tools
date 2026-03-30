@@ -1,0 +1,119 @@
+{
+  "tools": [
+    {
+      "name": "jina_reader",
+      "description": "获取目标网址（可为 PDF/网页）并输出适合大模型处理的文本/Markdown。Fetch a URL via Jina Reader and return LLM-friendly content.",
+      "input_params": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "目标网页/PDF URL"
+          },
+          "request_params": {
+            "type": "string",
+            "description": "请求 querystring 参数（JSON 字符串），如 {\"key\":\"value\"}"
+          },
+          "target_selector": {
+            "type": "string",
+            "description": "CSS 选择器，仅抓取匹配元素"
+          },
+          "wait_for_selector": {
+            "type": "string",
+            "description": "等待某元素出现后再抓取"
+          },
+          "remove_images": {
+            "type": "boolean",
+            "description": "移除图片",
+            "default": false
+          },
+          "image_caption": {
+            "type": "boolean",
+            "description": "为图片生成说明",
+            "default": false
+          },
+          "gather_all_links_at_the_end": {
+            "type": "boolean",
+            "description": "在末尾汇总链接",
+            "default": false
+          },
+          "gather_all_images_at_the_end": {
+            "type": "boolean",
+            "description": "在末尾汇总图片",
+            "default": false
+          },
+          "proxy_server": {
+            "type": "string",
+            "description": "代理 URL"
+          },
+          "no_cache": {
+            "type": "boolean",
+            "description": "绕过缓存",
+            "default": false
+          },
+          "no_cache_track": {
+            "type": "boolean",
+            "description": "不缓存/不追踪",
+            "default": false
+          },
+          "content_format": {
+            "type": "string",
+            "description": "可选：default/markdown/html/text/screenshot/pageshot",
+            "enum": [
+              "default",
+              "markdown",
+              "html",
+              "text",
+              "screenshot",
+              "pageshot"
+            ],
+            "default": "default"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "jina_search",
+      "description": "针对给定查询在互联网上进行搜索，并返回适合大模型处理的结果文本。Search the public web via Jina Search and return LLM-friendly content.",
+      "input_params": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "搜索查询（问题/关键词）"
+          },
+          "image_caption": {
+            "type": "boolean",
+            "description": "为图片生成说明",
+            "default": false
+          },
+          "gather_all_links_at_the_end": {
+            "type": "boolean",
+            "description": "在末尾汇总链接",
+            "default": false
+          },
+          "gather_all_images_at_the_end": {
+            "type": "boolean",
+            "description": "在末尾汇总图片",
+            "default": false
+          },
+          "proxy_server": {
+            "type": "string",
+            "description": "代理 URL"
+          },
+          "no_cache": {
+            "type": "boolean",
+            "description": "绕过缓存",
+            "default": false
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  ]
+}

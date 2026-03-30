@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-sse-plugin"
+version = "0.0.1"
+description = "openJiuwen plugin for MCP (Model Context Protocol) via HTTP with SSE or Streamable HTTP."
+license = { text = "MIT" }
+authors = [{ name = "openJiuwen" }]
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "openjiuwen>=0.1.5,<0.2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

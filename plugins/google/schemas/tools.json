@@ -1,0 +1,80 @@
+{
+    "tools": [
+        {
+            "name": "google_image_search",
+            "description": "执行 Google 图片搜索并返回图片链接与缩略图。输入应为图片搜索关键词。A tool for Google image search, returning image URLs and thumbnails.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "图片搜索关键词 / Image search query."
+                    },
+                    "hl": {
+                        "type": "string",
+                        "description": "搜索界面语言代码。详见 https://serpapi.com/google-languages",
+                        "default": "en"
+                    },
+                    "gl": {
+                        "type": "string",
+                        "description": "国家/地区代码。详见 https://serpapi.com/google-countries",
+                        "default": "us"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "可选。搜索发起位置。"
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "返回图片数量上限（1-20）",
+                        "minimum": 1,
+                        "maximum": 20,
+                        "default": 3
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        },
+        {
+            "name": "google_search",
+            "description": "执行 Google 网页搜索并返回片段与链接。适用于实时信息、事实核查。输入应为搜索关键词。A tool for Google SERP search, returning snippets and links.",
+            "input_params": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "搜索关键词 / Search query."
+                    },
+                    "hl": {
+                        "type": "string",
+                        "description": "搜索界面语言代码，如 en、zh-cn。详见 https://serpapi.com/google-languages",
+                        "default": "en"
+                    },
+                    "gl": {
+                        "type": "string",
+                        "description": "搜索国家/地区代码，如 us、cn、uk。详见 https://serpapi.com/google-countries",
+                        "default": "us"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "可选。搜索发起位置（城市等），用于模拟当地用户。"
+                    },
+                    "result_type": {
+                        "type": "string",
+                        "description": "Result type: 'link' for links only, or omit for full results.",
+                        "enum": [
+                            "link",
+                            "full"
+                        ],
+                        "default": "full"
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        }
+    ]
+}
