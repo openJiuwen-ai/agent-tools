@@ -9,12 +9,10 @@ WORKDIR /app
 
 # Build context should be marketplace/ directory.
 COPY pyproject.toml ./
-COPY common ./common
-COPY plugins_market ./plugins_market
-COPY main.py ./main.py
+RUN pip install --no-cache-dir uv -i ${INDEX_URL}
 
-RUN pip install --no-cache-dir uv -i ${INDEX_URL} \
-    && uv sync \
+COPY . .
+RUN uv sync \
     && uv build --out-dir /app/dist
 
 # Stage 2: Runtime — install wheel only (use slimmer image)
