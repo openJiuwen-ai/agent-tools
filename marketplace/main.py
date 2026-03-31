@@ -25,9 +25,9 @@ def create_app() -> FastAPI:
     fastapi_app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        docs_url="/api/docs",
-        redoc_url="/api/redoc",
-        openapi_url="/api/openapi.json",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
 
     fastapi_app.add_middleware(
@@ -60,15 +60,6 @@ def create_app() -> FastAPI:
             status_code=500,
             content={"detail": str(exc) or "服务器内部错误，请稍后重试"},
         )
-
-    @fastapi_app.get("/")
-    async def root():
-        return {
-            "service": settings.app_name,
-            "version": settings.app_version,
-            "docs": "/api/docs",
-            "health": "/api/health",
-        }
 
     @fastapi_app.get("/api/health")
     async def health():
