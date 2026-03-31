@@ -98,7 +98,11 @@ MARKET_S3_SECRET_KEY=minioadmin
 
 ## 3. 拉取镜像并启动
 
-在 PowerShell 中执行以下命令启动：
+以下分为 **后端（marketplace-tools）** 与 **前端（Web 静态页 + Nginx 反代）**。请按需执行；若只需 API，可只启动后端；若要在浏览器访问插件市场页面，需启动前端，并保证 **`BACKEND_UPSTREAM`** 指向已运行的后端地址。
+
+### 3.1 后端服务（marketplace-tools）
+
+在 PowerShell 中执行：
 
 ```powershell
 docker pull swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64
@@ -110,12 +114,37 @@ docker run --rm --name marketplace-store `
 ```
 
 > 如果你的仓库路径不是 `D:\Workspace\agent-tools`，请把 `--env-file` 后面的路径替换成你实际的绝对路径。\
-> 如果你的主机是arm64架构，请将路径中的amd64替换为arm64。
+> 如果你的主机是 arm64 架构，请将路径中的 `amd64` 替换为 `arm64`。
+
+### 3.2 前端（插件市场 Web）
+
+前端镜像（华为云 SWR，请以仓库实际 **Web/前端** 镜像名为准）：
+
+`swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64:latest`
+
+拉取并启动示例（将宿主机 **8100** 上的后端作为 API 上游；与上一节中 `-p 8100:8100` 的后端对应）：
+
+```powershell
+docker pull swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64:latest
+
+docker run -d --rm --name marketplace-web `
+  -p 9002:80 `
+  -e BACKEND_UPSTREAM=host.docker.internal:8100 `
+  swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64:latest
+```
+
+说明：
+
+- **`-p 9002:80`**：浏览器访问 **`http://localhost:9002`**。如需其它端口，请改左侧宿主机端口。
+- **`BACKEND_UPSTREAM`**：镜像内 Nginx 将 `/api/` 转发到该上游（形如 `主机:端口`，无 `http://`）。后端监听在宿主机 `8100` 时，Docker Desktop 下通常使用 **`host.docker.internal:8100`**。
+- 若后端与前端在同一 Docker **自定义网络** 中，且后端容器名为 `marketplace-store`，可改为 **`-e BACKEND_UPSTREAM=marketplace-store:8100`**，并去掉仅适用于宿主机端口的写法；请按实际容器名与端口调整。
+- 请先启动 **3.1 后端**，再启动前端，否则页面无法拉到接口数据。
 
 ## 4. 访问接口
 
-- 健康检查：`http://localhost:8100/api/health`
+- 后端健康检查：`http://localhost:8100/api/health`
 - Swagger 文档：`http://localhost:8100/api/docs`
+- 插件市场 Web（已按 **3.2** 启动前端）：一般为 `http://localhost:9002`（与 `-p` 映射一致）
 
 如果你使用 `X-System-Token` 鉴权，请确保 `.env.docker` 中的系统 token 与请求头一致。
 

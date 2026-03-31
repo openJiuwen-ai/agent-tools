@@ -13,7 +13,8 @@ export interface MarketplacePluginListRequest {
   page?: number
   page_size?: number
   search_keyword?: string
-  run_time?: string
+  /** 与后端 Query 一致：`plugin_type`（如 tools / mcp-stdio / restful-api） */
+  plugin_type?: string
   order_by?: MarketplacePluginOrderBy
   desc?: boolean
 }
@@ -34,6 +35,8 @@ export interface MarketplacePluginItem {
   publisher_name: string
   tags?: string[] | null
   certification?: string | null
+  plugin_type?: string | null
+  /** 旧字段名，仅作兼容 */
   run_time?: string | null
   latest_version?: string | null
   view_count: number
@@ -125,7 +128,7 @@ export async function getPlugins(
       page: request.page ?? 1,
       page_size: request.page_size ?? 20,
       search_keyword: request.search_keyword || undefined,
-      run_time: request.run_time || undefined,
+      plugin_type: request.plugin_type || undefined,
       order_by: request.order_by ?? 'install_count',
       desc: request.desc ?? true,
     },

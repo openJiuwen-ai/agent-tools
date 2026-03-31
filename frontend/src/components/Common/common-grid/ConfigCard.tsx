@@ -52,6 +52,8 @@ export interface ConfigCardProps {
   className?: string
   nameMaxLength?: number
   descriptionMaxLength?: number
+  /** 非编辑态悬停提示（如简介截断后展示全文） */
+  descriptionTitle?: string
   inlineError?: string
 }
 
@@ -106,6 +108,7 @@ export const ConfigCard: React.FC<ConfigCardProps> = ({
   className = '',
   nameMaxLength,
   descriptionMaxLength,
+  descriptionTitle,
   inlineError,
 }) => {
   const { t } = useTranslation()
@@ -537,7 +540,15 @@ export const ConfigCard: React.FC<ConfigCardProps> = ({
                 className={`text-[#6B7280] text-xs leading-relaxed line-clamp-2 overflow-hidden h-[39px] whitespace-pre-line break-words ${onEdit ? 'cursor-text' : ''}`}
                 onMouseDown={onEdit ? handleFieldMouseDown('description') : undefined}
                 onDoubleClick={onEdit ? handleFieldDoubleClick('description') : undefined}
-                title={onEdit ? `${t('common.messages.doubleClickToEdit')}` : undefined}
+                title={
+                  isEditingThis && editingState.field === 'description'
+                    ? undefined
+                    : descriptionTitle
+                      ? descriptionTitle
+                      : onEdit
+                        ? `${t('common.messages.doubleClickToEdit')}`
+                        : undefined
+                }
               >
                 {description || t('common.messages.noDescription')}
               </p>

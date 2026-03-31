@@ -35,7 +35,7 @@
       "columns": {
         "plugin": "Plugin",
         "summary": "Summary",
-        "type": "Runtime",
+        "type": "Plugin type",
         "publisher": "Publisher",
         "version": "Version",
         "viewCount": "Views",
@@ -50,13 +50,13 @@
       "like": "Likes"
     },
     "cardTags": {
-      "runtimeType": "Runtime type",
+      "runtimeType": "Plugin type",
       "version": "Version",
       "tag": "Tag",
       "overflowIntro": "Additional tags not shown in full"
     },
     "filters": {
-      "allCategories": "All runtimes"
+      "allCategories": "All plugin types"
     },
     "viewMode": {
       "grid": "Grid View",
@@ -79,13 +79,13 @@
       "tools": "Tools",
       "mcpStdio": "MCP Stdio",
       "restfulApi": "RESTful API",
-      "unknown": "Unknown: {{type}}"
+      "unknown": "Unknown plugin type: {{type}}"
     },
     "detail": {
       "summary": "Summary",
       "description": "Description",
       "publisher": "Publisher",
-      "runtime": "Runtime",
+      "runtime": "Plugin type",
       "version": "Latest Version",
       "rating": "Rating",
       "ratingTooltip": "Rating",

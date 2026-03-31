@@ -35,7 +35,7 @@
       "columns": {
         "plugin": "插件",
         "summary": "简介",
-        "type": "运行时",
+        "type": "插件类型",
         "publisher": "发布者",
         "version": "版本",
         "viewCount": "浏览",
@@ -50,13 +50,13 @@
       "like": "点赞"
     },
     "cardTags": {
-      "runtimeType": "运行时类型",
+      "runtimeType": "插件类型",
       "version": "版本",
       "tag": "标签",
       "overflowIntro": "以下标签未完整展示"
     },
     "filters": {
-      "allCategories": "全部运行时"
+      "allCategories": "全部插件类型"
     },
     "viewMode": {
       "grid": "网格视图",
@@ -79,13 +79,13 @@
       "tools": "Tools",
       "mcpStdio": "MCP Stdio",
       "restfulApi": "RESTful API",
-      "unknown": "未知类型：{{type}}"
+      "unknown": "未知插件类型：{{type}}"
     },
     "detail": {
       "summary": "简介",
       "description": "详细说明",
       "publisher": "发布者",
-      "runtime": "运行时",
+      "runtime": "插件类型",
       "version": "最新版本",
       "rating": "评分",
       "ratingTooltip": "评分",

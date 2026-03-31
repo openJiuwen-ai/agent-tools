@@ -64,7 +64,7 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
     publisherName: item.publisher_name,
     tags: item.tags || [],
     certification: item.certification || '',
-    runTime: item.run_time || '',
+    runTime: firstString(item.plugin_type, item.run_time),
     latestVersion: item.latest_version || '',
     viewCount: item.view_count,
     installCount: item.install_count,
@@ -81,7 +81,7 @@ export function usePluginMarketConfigs(params: UsePluginMarketConfigsParams): Us
     page: params.page,
     page_size: params.pageSize,
     search_keyword: params.searchKeyword || undefined,
-    run_time: params.runTime || undefined,
+    plugin_type: params.runTime || undefined,
     order_by: params.orderBy ?? 'install_count',
     desc: params.desc ?? true,
   })

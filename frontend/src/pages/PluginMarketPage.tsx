@@ -98,6 +98,21 @@ const editingState: EditingState = {
 
 const PAGE_SIZE_OPTIONS = [20, 60, 100]
 
+/** 列表/卡片简介展示字符上限（Unicode 标量），超出显示 … */
+const PLUGIN_INTRO_DISPLAY_MAX = 50
+
+function truncatePluginIntro(
+  text: string,
+  maxChars: number,
+): { display: string; full: string; truncated: boolean } {
+  const full = text
+  const chars = [...full]
+  if (chars.length <= maxChars) {
+    return { display: full, full, truncated: false }
+  }
+  return { display: `${chars.slice(0, maxChars).join('')}...`, full, truncated: true }
+}
+
 /** 卡片上：类型 / 版本 / 标签 最多展示条数，超出部分收入 +N */
 const PLUGIN_CARD_TAG_MAX = 3
 
@@ -398,7 +413,9 @@ export default function PluginMarketPage() {
 
     return (
       <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
-        {marketPlugins.map(plugin => (
+        {marketPlugins.map(plugin => {
+          const intro = truncatePluginIntro(plugin.shortDesc || t('plugins.noDescription'), PLUGIN_INTRO_DISPLAY_MAX)
+          return (
           <div key={plugin.assetId} className="w-full">
             <ConfigCard
               id={plugin.assetId}
@@ -415,7 +432,8 @@ export default function PluginMarketPage() {
                   </span>
                 </div>
               }
-              description={plugin.shortDesc || t('plugins.noDescription')}
+              description={intro.display}
+              descriptionTitle={intro.truncated ? intro.full : undefined}
               tags={buildPluginCardTags(plugin, getRuntimeText(plugin.runTime), {
                 runtimeType: t('plugins.cardTags.runtimeType'),
                 version: t('plugins.cardTags.version'),
@@ -484,7 +502,8 @@ export default function PluginMarketPage() {
               }
             />
           </div>
-        ))}
+          )
+        })}
       </div>
     )
   }, [marketPlugins, searchKeyword, t, handleDownloadPlugin, downloadingAssetId])
@@ -526,15 +545,26 @@ export default function PluginMarketPage() {
         dataIndex: 'shortDesc',
         align: 'center',
         width: 240,
-        render: ({ row }) => (
-          <button
-            type="button"
-            onClick={() => handleViewPlugin(row)}
-            className="max-w-[220px] truncate text-center text-sm text-gray-600 hover:text-gray-800"
-          >
-            {row.shortDesc || t('plugins.noDescription')}
-          </button>
-        ),
+        render: ({ row }) => {
+          const raw = row.shortDesc || t('plugins.noDescription')
+          const intro = truncatePluginIntro(raw, PLUGIN_INTRO_DISPLAY_MAX)
+          const cell = (
+            <button
+              type="button"
+              onClick={() => handleViewPlugin(row)}
+              className="max-w-[220px] truncate text-center text-sm text-gray-600 hover:text-gray-800"
+            >
+              {intro.display}
+            </button>
+          )
+          return intro.truncated ? (
+            <Tooltip {...pluginCardTooltipProps} title={intro.full}>
+              <span className="inline-flex max-w-full justify-center">{cell}</span>
+            </Tooltip>
+          ) : (
+            cell
+          )
+        },
       },
       {
         key: 'runtime',
