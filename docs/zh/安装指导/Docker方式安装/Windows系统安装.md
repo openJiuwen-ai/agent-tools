@@ -76,11 +76,11 @@ docker run -d --name minio `
 
 然后打开 MinIO Console：`http://localhost:9001`，登录后创建 Bucket（桶名需要与你的 `.env.docker` 里 `MARKET_BUCKET_NAME` 一致）。
 
-请将对应 Bucket 的访问策略配置为 **公开（PUBLIC / public 读）**（例如在 MinIO Console 中进入该桶的 **Access Policy**，选择允许匿名读取或自定义策略放行 `GetObject`），以便浏览器通过 `MARKET_STORAGE_PUBLIC_URL` 访问插件图标等对象；若桶为私有，页面可能无法直链加载资源。
+桶应保持 **私有**（禁止匿名/Public 读）。插件包与图标由服务端生成 **预签名临时 URL**，客户端不拼接桶直链。
 
 #### 2) 在 `.env.docker` 配置 MinIO（示例）
 
-`marketplace-tools` 跑在容器内时，S3 API 需连宿主机上的 MinIO，故 `MARKET_S3_ENDPOINT` 使用 `host.docker.internal`；浏览器访问公开对象地址仍可用本机 `localhost`。
+`marketplace-tools` 跑在容器内时，S3 API 需连宿主机上的 MinIO，故 `MARKET_S3_ENDPOINT` 使用 `host.docker.internal`。
 
 ```env
 STORAGE_TYPE=MinIO
@@ -88,7 +88,8 @@ MARKET_BUCKET_NAME=openjiuwen-market
 MARKET_S3_ENDPOINT=http://host.docker.internal:9000
 MARKET_S3_ACCESS_KEY=minioadmin
 MARKET_S3_SECRET_KEY=minioadmin
-MARKET_STORAGE_PUBLIC_URL=http://localhost:9000/openjiuwen-market
+# 可选：预签名有效期（秒），默认 1800
+# MARKET_S3_PRESIGNED_EXPIRES=1800
 ```
 
 若你在 MinIO 启动命令里改过 `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`，请把上述 `MARKET_S3_ACCESS_KEY`、`MARKET_S3_SECRET_KEY` 改成相同值。可选：`MARKET_S3_REGION=us-east-1`（与代码默认一致时可省略）。

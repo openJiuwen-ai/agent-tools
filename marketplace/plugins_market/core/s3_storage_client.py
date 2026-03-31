@@ -1,14 +1,77 @@
 import os
 import hashlib
 import logging
+import time
+from datetime import datetime
 from typing import Dict, Any, Optional, List
+from urllib.parse import urlparse
 
 import boto3
 from botocore.config import Config
+from common.huaweicloud.huaweicloud_iam import HuaweiCloudIAM
 from common.security.security_utils import SecurityUtils
 
 STORAGE_TYPES = ("MinIO", "OBS")
 logger = logging.getLogger(__name__)
+
+
+def _normalize_market_credentials_mode(raw: str, *, default: str) -> str:
+    v = (raw or "").strip().lower() or default
+    if v in ("static", "dynamic"):
+        return v
+    raise ValueError(
+        "MARKET_CREDENTIALS_MODE 须为 static 或 dynamic"
+        f"（MinIO 未配置时默认 static，OBS 未配置时默认 dynamic），当前: {raw!r}"
+    )
+
+
+def _int_env_seconds(name: str, default: int, *, min_s: int = 60, max_s: int = 604800) -> int:
+    """Parse optional env int for presigned TTL; clamp to S3/OBS 常见范围（约 7 天内）。"""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        v = int(raw)
+        return max(min_s, min(v, max_s))
+    except ValueError:
+        return default
+
+
+def _resolve_sts_session_duration_seconds() -> int:
+    """OBS IAM 换临时凭证时的会话时长（秒），未配置则 3600。"""
+    if os.getenv("MARKET_S3_STS_DURATION_SECONDS", "").strip():
+        return _int_env_seconds(
+            "MARKET_S3_STS_DURATION_SECONDS", 3600, min_s=900, max_s=43200
+        )
+    return 3600
+
+
+def _sts_cred_expires_at_to_ts(expires_at: Optional[str]) -> float:
+    """华为 IAM 返回的 credential.expires_at → Unix 秒。"""
+    if not expires_at:
+        return 0.0
+    try:
+        return datetime.fromisoformat(expires_at.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _new_botocore_config(*, s3_subconfig: Dict[str, Any]) -> Config:
+    """
+    构造 botocore Config。
+    - signature_version 固定 s3v4
+    - OBS 需要关闭 payload signing（见 _s3_botocore_subconfig）
+    - checksum 相关开关尽量走 Config，避免写入进程级环境变量
+    """
+    try:
+        return Config(
+            signature_version="s3v4",
+            s3=s3_subconfig,
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
+        )
+    except TypeError:
+        return Config(signature_version="s3v4", s3=s3_subconfig)
 
 
 class S3StorageConfig:
@@ -28,11 +91,27 @@ class S3StorageConfig:
                 f"STORAGE_TYPE must be one of {STORAGE_TYPES}, got: {storage_type!r}"
             )
 
-        # Public URL：优先 MARKET_STORAGE_PUBLIC_URL；否则 endpoint+bucket
-        self.public_base_url = (os.getenv("MARKET_STORAGE_PUBLIC_URL") or "").rstrip("/")
         self.endpoint_url = (os.getenv("MARKET_S3_ENDPOINT") or "").rstrip("/")
-        self.access_key = SecurityUtils.get_decrypt_secret("MARKET_S3_ACCESS_KEY", default="") or ""
-        self.secret_key = SecurityUtils.get_decrypt_secret("MARKET_S3_SECRET_KEY", default="") or ""
+        _cred_default = "static" if self.storage_type == "MinIO" else "dynamic"
+        self.credentials_mode = _normalize_market_credentials_mode(
+            os.getenv("MARKET_CREDENTIALS_MODE", ""),
+            default=_cred_default,
+        )
+        if self.storage_type == "MinIO" and self.credentials_mode == "dynamic":
+            raise ValueError("MARKET_CREDENTIALS_MODE=dynamic 仅适用于 STORAGE_TYPE=OBS")
+        # MinIO / OBS static：永久 MARKET_S3_ACCESS_KEY、MARKET_S3_SECRET_KEY
+        # OBS dynamic：运行时经 HUAWEICLOUD_* 调 IAM securitytokens，不读 STS 相关 env
+        if self.storage_type == "OBS" and self.credentials_mode == "dynamic":
+            self.access_key = ""
+            self.secret_key = ""
+            self.session_token = None
+            self.sts_session_duration_seconds = _resolve_sts_session_duration_seconds()
+        else:
+            self.access_key = SecurityUtils.get_decrypt_secret("MARKET_S3_ACCESS_KEY", default="") or ""
+            self.secret_key = SecurityUtils.get_decrypt_secret("MARKET_S3_SECRET_KEY", default="") or ""
+            self.session_token = None
+            self.sts_session_duration_seconds = 3600
+
         self.bucket_name = os.getenv("MARKET_BUCKET_NAME", "openjiuwen-market")
         self.region_name = os.getenv("MARKET_S3_REGION", "us-east-1")
 
@@ -51,62 +130,177 @@ class S3StorageConfig:
             else:
                 self.use_ssl = True
 
-        if not self.public_base_url and self.endpoint_url:
-            self.public_base_url = f"{self.endpoint_url}/{self.bucket_name}"
+        # GET 预签名有效期（秒），默认 1800（30 分钟）；插件包与图标仅通过预签名 URL 访问
+        self.presigned_expires_seconds = _int_env_seconds(
+            "MARKET_S3_PRESIGNED_EXPIRES", 1800
+        )
 
 
 class S3StorageClient:
     """S3存储客户端，支持本地MinIO和云端S3"""
-    
+
     def __init__(self, config: S3StorageConfig):
         """
         初始化S3客户端
         :param config: S3存储配置
         """
         self.config = config
-
-        if config.storage_type == "OBS":
-            os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"] = "WHEN_REQUIRED"
-            os.environ["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "WHEN_REQUIRED"
-
-        addressing_style = "virtual" if config.storage_type == "OBS" else "path"
-        s3_config: Dict[str, Any] = {"addressing_style": addressing_style}
-        if config.storage_type == "OBS":
-            s3_config["payload_signing_enabled"] = False
-
-        self.s3_client = boto3.client(
-            "s3",
-            endpoint_url=config.endpoint_url,
-            aws_access_key_id=config.access_key,
-            aws_secret_access_key=config.secret_key,
-            region_name=config.region_name,
-            use_ssl=config.use_ssl,
-            config=Config(
-                signature_version="s3v4",
-                s3=s3_config,
-            ),
+        self._obs_iam_dynamic = (
+            config.storage_type == "OBS" and config.credentials_mode == "dynamic"
         )
+        self._static_s3_client: Optional[Any] = None
+        self._obs_iam_client: Optional[Any] = None
 
-        # 确保存储桶存在
+        if self._obs_iam_dynamic:
+            self._obs_iam_client = HuaweiCloudIAM.from_env()
+            try:
+                _ = self._new_s3_client_from_iam_sts()
+            except Exception as e:
+                raise RuntimeError(
+                    f"OBS dynamic：调用华为 IAM 换取临时凭证失败，请检查 HUAWEICLOUD_*: {e}"
+                ) from e
+            logger.info("OBS storage: IAM securitytokens 链路校验通过")
+        else:
+            if not config.access_key or not config.secret_key:
+                raise RuntimeError("请配置 MARKET_S3_ACCESS_KEY 与 MARKET_S3_SECRET_KEY")
+            self._static_s3_client = self._new_boto3_s3_client(
+                config.access_key, config.secret_key, config.session_token
+            )
+
         self._ensure_bucket_exists()
 
+    def _s3_botocore_subconfig(self) -> Dict[str, Any]:
+        addressing_style = "virtual" if self.config.storage_type == "OBS" else "path"
+        s3_cfg: Dict[str, Any] = {"addressing_style": addressing_style}
+        if self.config.storage_type == "OBS":
+            s3_cfg["payload_signing_enabled"] = False
+        return s3_cfg
+
+    def _new_boto3_s3_client(
+        self, access_key: str, secret_key: str, session_token: Optional[str]
+    ):
+        kwargs: Dict[str, Any] = {
+            "endpoint_url": self.config.endpoint_url,
+            "aws_access_key_id": access_key,
+            "aws_secret_access_key": secret_key,
+            "region_name": self.config.region_name,
+            "use_ssl": self.config.use_ssl,
+            "config": _new_botocore_config(s3_subconfig=self._s3_botocore_subconfig()),
+        }
+        if session_token:
+            kwargs["aws_session_token"] = session_token
+        return boto3.client("s3", **kwargs)
+
+    def _new_s3_client_from_iam_sts(self):
+        """OBS dynamic：每次新建 boto3 client；STS 由本客户端持有的 HuaweiCloudIAM 换发。"""
+        if self._obs_iam_client is None:
+            raise RuntimeError("OBS dynamic：HuaweiCloudIAM 客户端未初始化")
+        sts = self._obs_iam_client.get_temporary_credentials_from_env(
+            duration_seconds=self.config.sts_session_duration_seconds,
+        )
+        return self._new_boto3_s3_client(
+            sts["access"], sts["secret"], sts["securitytoken"]
+        )
+
+    def _sts_for_presign(self, desired_seconds: int) -> tuple[dict, int]:
+        """
+        预签名在 OBS dynamic 下受 STS 剩余寿命限制。
+        返回：用于签名的一组 sts（access/secret/securitytoken/expires_at）与最终 ExpiresIn。
+        """
+        if self._obs_iam_client is None:
+            raise RuntimeError("OBS dynamic：HuaweiCloudIAM 客户端未初始化")
+
+        buffer = 5.0
+        last_cap = 0
+        for attempt in range(2):
+            sts = self._obs_iam_client.get_temporary_credentials_from_env(
+                duration_seconds=self.config.sts_session_duration_seconds,
+            )
+            exp_ts = _sts_cred_expires_at_to_ts(sts.get("expires_at"))
+            rem = (exp_ts - time.time()) if exp_ts > 0 else 0.0
+            cap = int(rem - buffer)
+            last_cap = cap
+
+            if cap >= desired_seconds:
+                return sts, desired_seconds
+            if attempt == 0:
+                self._obs_iam_client.invalidate_sts_cache()
+                continue
+            if cap >= 1:
+                return sts, min(desired_seconds, cap)
+            break
+
+        raise RuntimeError(
+            f"OBS 临时凭证剩余有效过短（约 {max(0, last_cap)} 秒），无法生成预签名链接。"
+        )
+
+    @property
+    def s3_client(self):
+        """static/MinIO：构建期单例。OBS+dynamic：每次访问新建 client。"""
+        if self._obs_iam_dynamic:
+            return self._new_s3_client_from_iam_sts()
+        return self._static_s3_client
+
     def _ensure_bucket_exists(self):
-        """确保存储桶存在，如果不存在则抛出异常"""
+        client = self.s3_client
         try:
-            self.s3_client.head_bucket(Bucket=self.config.bucket_name)
-        except self.s3_client.exceptions.ClientError as e:
+            client.head_bucket(Bucket=self.config.bucket_name)
+        except client.exceptions.ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')
             if error_code == '404':
                 raise Exception(f"存储桶 '{self.config.bucket_name}' 不存在，请联系管理员创建存储桶") from e
             if self.config.storage_type == "OBS" and str(error_code) in {"403", "AccessDenied", "Forbidden"}:
+                logger.warning(
+                    "head_bucket 返回 403（可能无权限或策略限制），将跳过存在性校验：bucket=%s",
+                    self.config.bucket_name,
+                )
                 return
             raise Exception(f"无法访问存储桶 '{self.config.bucket_name}': {str(e)}") from e
     
-    def public_url_for_key(self, key: str) -> str:
-        """Build public URL for an object key (for icon_uri etc.)."""
-        if not self.config.public_base_url:
-            return ""
-        return f"{self.config.public_base_url.rstrip('/')}/{key}"
+    def resolve_object_key(self, uri_or_key: Optional[str]) -> Optional[str]:
+        """
+        将对象 Key，或带 bucket 路径的完整访问 URL，解析为桶内对象 Key。
+        """
+        if not uri_or_key:
+            return None
+        raw = uri_or_key.strip()
+        if not raw:
+            return None
+        if "://" not in raw:
+            return raw
+        try:
+            p = urlparse(raw)
+            path = (p.path or "").lstrip("/")
+            bucket = self.config.bucket_name
+            if bucket and path.startswith(f"{bucket}/"):
+                return path[len(bucket) + 1:]
+            return path or None
+        except Exception:
+            return None
+
+    def presigned_get_url(self, key: str, expires_in: Optional[int] = None) -> str:
+        """生成临时下载链接。"""
+        desired = (
+            expires_in
+            if expires_in is not None
+            else self.config.presigned_expires_seconds
+        )
+        if desired < 1:
+            raise ValueError("预签名 ExpiresIn 须 >= 1 秒")
+
+        if self._obs_iam_dynamic:
+            sts, exp = self._sts_for_presign(desired)
+            client = self._new_boto3_s3_client(
+                sts["access"], sts["secret"], sts["securitytoken"]
+            )
+        else:
+            exp = desired
+            client = self.s3_client
+        return client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.config.bucket_name, "Key": key},
+            ExpiresIn=exp,
+        )
 
     def delete_object(self, key: str) -> Dict[str, Any]:
         """Delete one object by key. Key is path within bucket."""
@@ -117,7 +311,6 @@ class S3StorageClient:
             return {"success": False, "error": str(e), "key": key, "storage_type": self.config.storage_type}
 
     def delete_objects(self, keys: list) -> Dict[str, Any]:
-        """删除多个对象：统一逐条 delete_object（MinIO / OBS 同一套逻辑）。"""
         errors: List[Dict[str, Any]] = []
         for k in keys:
             if not k:

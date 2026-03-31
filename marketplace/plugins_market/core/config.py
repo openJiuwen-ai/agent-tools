@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8100
 
-    db_url: str = "sqlite:///./data/store.db"
+    db_url: str = ""
 
     # 鉴权：鉴权服务地址（环境变量 AUTH_SERVICE_HOST / AUTH_SERVICE_PORT）
     auth_service_host: str = Field(default="localhost", validation_alias="AUTH_SERVICE_HOST")

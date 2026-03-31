@@ -655,8 +655,6 @@ def publish(
                 message=r.get("error", "插件 README 上传失败"),
             )
 
-    icon_uri = storage.public_url_for_key(f"{version_dir}icon.png")
-
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
     try:
@@ -686,7 +684,6 @@ def publish(
                 status="ACTIVE",
                 create_time=now_ms,
                 file_path=file_path,
-                icon_uri=icon_uri,
             )
             db.add(asset_obj)
             db.add(version_obj)
@@ -711,7 +708,6 @@ def publish(
                 existing_version.changelog = version_desc
                 existing_version.status = "ACTIVE"
                 existing_version.file_path = file_path
-                existing_version.icon_uri = icon_uri
                 version_row = existing_version
             else:
                 version_row = MarketAssetVersionDB(
@@ -722,7 +718,6 @@ def publish(
                     status="ACTIVE",
                     create_time=now_ms,
                     file_path=file_path,
-                    icon_uri=icon_uri,
                 )
                 db.add(version_row)
             db.add(existing_asset)
@@ -775,7 +770,27 @@ def publish(
     )
 
 
-def list_plugins_service(query: PluginListQuery, db: Session) -> PluginListResponse:
+def _icon_presigned_url_from_file_path(
+    storage: S3StorageClient,
+    file_path: str | None,
+) -> str | None:
+    """图标固定为版本目录下 icon.png，与 file_path 拼出对象 Key 后预签名。"""
+    prefix = _version_prefix_from_file_path(storage, file_path)
+    if not prefix:
+        return None
+    icon_key = f"{prefix}icon.png"
+    try:
+        return storage.presigned_get_url(icon_key)
+    except Exception as e:
+        logger.warning("预签名图标链接失败 key=%s: %s", icon_key, e)
+        return None
+
+
+def list_plugins_service(
+    query: PluginListQuery,
+    db: Session,
+    storage: S3StorageClient,
+) -> PluginListResponse:
     logger.info(
         "List plugins request: page=%s page_size=%s asset_id=%s publisher_id=%s plugin_type=%s order_by=%s desc=%s",
         query.page,
@@ -790,9 +805,9 @@ def list_plugins_service(query: PluginListQuery, db: Session) -> PluginListRespo
     rows, total = repo.list_plugins(query)
     logger.info("List plugins query done: total=%s rows=%s", total, len(rows))
     items = []
-    for asset, icon_uri in rows:
+    for asset, latest_file_path in rows:
         item = PluginListItem.model_validate(asset)
-        item.icon_uri = icon_uri
+        item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path)
         items.append(item)
     return PluginListResponse(
         page=query.page,
@@ -802,7 +817,12 @@ def list_plugins_service(query: PluginListQuery, db: Session) -> PluginListRespo
     )
 
 
-def get_plugin_version_detail_service(asset_id: str, version: str, db: Session) -> PluginVersionDetail:
+def get_plugin_version_detail_service(
+    asset_id: str,
+    version: str,
+    db: Session,
+    storage: S3StorageClient,
+) -> PluginVersionDetail:
     logger.info("Get plugin version detail request: asset_id=%s version=%s", asset_id, version)
     asset_repo = MarketAssetRepository(db)
     version_repo = MarketAssetVersionRepository(db)
@@ -836,7 +856,7 @@ def get_plugin_version_detail_service(asset_id: str, version: str, db: Session) 
         certification=asset.certification,
         changelog=version_row.changelog,
         file_path=version_row.file_path,
-        icon_uri=version_row.icon_uri,
+        icon_uri=_icon_presigned_url_from_file_path(storage, version_row.file_path),
     )
 
 
@@ -1035,13 +1055,7 @@ def get_download_info(
             message=f"读取插件包元数据失败: {head.get('error', 'unknown')}",
         )
 
-    download_url = storage.public_url_for_key(key)
-    if not download_url:
-        raise PublishError(
-            code=500,
-            error="storage_error",
-            message="MARKET_STORAGE_PUBLIC_URL 未配置，无法生成公开下载地址",
-        )
+    download_url = storage.presigned_get_url(key)
 
     stat = storage.get_object_size_and_sha256(key)
     if not stat.get("success"):

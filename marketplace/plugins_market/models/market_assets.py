@@ -65,7 +65,6 @@ class MarketAssetVersionDB(Base):
     status = Column(String(32), nullable=True, default="ACTIVE")
     create_time = Column(BigInteger, nullable=True)
     file_path = Column(String(512), nullable=True)
-    icon_uri = Column(String(512), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("asset_id", "version", name="uk_asset_version"),

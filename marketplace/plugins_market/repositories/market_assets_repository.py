@@ -131,7 +131,7 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
                     MarketAssetVersionDB.version == MarketAssetDB.latest_version,
                 ),
             )
-            .add_columns(MarketAssetVersionDB.icon_uri)
+            .add_columns(MarketAssetVersionDB.file_path)
         )
         rows: List[Tuple[MarketAssetDB, Optional[str]]] = q.offset(offset).limit(page_size).all()
 

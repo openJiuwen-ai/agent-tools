@@ -212,8 +212,9 @@ async def publish_plugin(
 def list_plugins(
     query: PluginListQuery = Depends(),
     db: Session = Depends(get_db),
+    storage=Depends(get_storage_client),
 ):
-    data = list_plugins_service(query=query, db=db)
+    data = list_plugins_service(query=query, db=db, storage=storage)
     return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
@@ -273,8 +274,14 @@ def get_plugin_version_detail(
     asset_id: str,
     version: str,
     db: Session = Depends(get_db),
+    storage=Depends(get_storage_client),
 ):
-    data = get_plugin_version_detail_service(asset_id=asset_id, version=version, db=db)
+    data = get_plugin_version_detail_service(
+        asset_id=asset_id,
+        version=version,
+        db=db,
+        storage=storage,
+    )
     return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 

@@ -41,7 +41,6 @@ class AssetVersionCreate(BaseModel):
     changelog: Optional[str] = None
     status: str = "ACTIVE"
     file_path: Optional[str] = None
-    icon_uri: Optional[str] = None
 
 
 class PluginPublishResult(BaseModel):
