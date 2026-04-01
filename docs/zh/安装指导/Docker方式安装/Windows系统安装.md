@@ -94,7 +94,20 @@ MARKET_S3_SECRET_KEY=minioadmin
 
 若你在 MinIO 启动命令里改过 `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`，请把上述 `MARKET_S3_ACCESS_KEY`、`MARKET_S3_SECRET_KEY` 改成相同值。可选：`MARKET_S3_REGION=us-east-1`（与代码默认一致时可省略）。
 
-> 鉴权服务等若也部署在**宿主机**上：`AUTH_SERVICE_HOST` 等同样可设为 `host.docker.internal`（与上文 MySQL、MinIO 一致）。若该主机名不可用，请改用宿主机实际 IP 或 `--add-host`。
+### 对象存储 / 向量存储：华为云 OBS 对接（示例）
+
+若你希望对接[华为云 OBS](https://support.huaweicloud.com/obs/index.html)（S3 兼容接口），可按以下方式配置（桶建议保持 **私有**；访问对象仅通过接口返回的 **预签名 URL**）：
+
+```env
+STORAGE_TYPE=OBS
+MARKET_S3_ENDPOINT=https://obs.<区域>.myhuaweicloud.com
+MARKET_S3_ACCESS_KEY=你的_ACCESS_KEY
+MARKET_S3_SECRET_KEY=你的_SECRET_KEY
+# 与桶所在区域一致
+MARKET_S3_REGION=<区域>
+# 与 OBS 桶名一致
+MARKET_BUCKET_NAME=<你的桶名>
+```
 
 ## 3. 拉取镜像并启动
 
@@ -120,17 +133,17 @@ docker run --rm --name marketplace-store `
 
 前端镜像（华为云 SWR，请以仓库实际 **Web/前端** 镜像名为准）：
 
-`swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64:latest`
+`swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-web-amd64:latest`
 
 拉取并启动示例（将宿主机 **8100** 上的后端作为 API 上游；与上一节中 `-p 8100:8100` 的后端对应）：
 
 ```powershell
-docker pull swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64:latest
+docker pull swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-web-amd64:latest
 
 docker run -d --rm --name marketplace-web `
   -p 9002:80 `
   -e BACKEND_UPSTREAM=host.docker.internal:8100 `
-  swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64:latest
+  swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-web-amd64:latest
 ```
 
 说明：
@@ -142,9 +155,15 @@ docker run -d --rm --name marketplace-web `
 
 ## 4. 访问接口
 
-- 后端健康检查：`http://localhost:8100/api/health`
-- Swagger 文档：`http://localhost:8100/api/docs`
+- 接口访问前缀：`http://localhost:8100/`
 - 插件市场 Web（已按 **3.2** 启动前端）：一般为 `http://localhost:9002`（与 `-p` 映射一致）
 
-如果你使用 `X-System-Token` 鉴权，请确保 `.env.docker` 中的系统 token 与请求头一致。
+插件列表接口示例（curl）：
+
+```bash
+curl --location 'http://localhost:8100/api/v1/plugins'
+```
+
+如果你使用 `X-System-Token` 鉴权，请确保 `.env.docker` 中的系统 token 与请求头一致。\
+如果你使用 `Authorization` 鉴权，请先[注册 GitCode 账号](https://gitcode.com/)并[申请访问令牌](https://docs.gitcode.com/docs/help/home/user_center/security_management/user_pat)作为 Bearer Token。
 
