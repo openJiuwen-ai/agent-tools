@@ -1,4 +1,4 @@
-from pydantic import Field, computed_field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -14,16 +14,18 @@ class Settings(BaseSettings):
 
     db_url: str = ""
 
-    # 鉴权：鉴权服务地址（环境变量 AUTH_SERVICE_HOST / AUTH_SERVICE_PORT）
-    auth_service_host: str = Field(default="localhost", validation_alias="AUTH_SERVICE_HOST")
-    auth_service_port: int = Field(default=8000, validation_alias="AUTH_SERVICE_PORT")
     # 鉴权：系统管理员 token，与请求头 X-System-Token 比对（环境变量 SYSTEM_ADMIN_TOKEN）
     system_admin_token: str = Field(default="", validation_alias="SYSTEM_ADMIN_TOKEN")
+    # 系统管理员用户标识（管理员请求时作为 publisher_id / user_id 写入）；默认 system_admin
+    system_admin_user: str = Field(default="system_admin", validation_alias="SYSTEM_ADMIN_USER")
+    # 用户信息接口（默认 GitCode https://gitcode.com/api/v5/user，使用 query access_token）
+    auth_user_api_url: str = Field(default="https://gitcode.com/api/v5/user", validation_alias="AUTH_USER_API_URL")
 
-    @computed_field
-    @property
-    def auth_service_base_url(self) -> str:
-        return f"http://{self.auth_service_host}:{self.auth_service_port}"
+    @field_validator("system_admin_user", mode="before")
+    @classmethod
+    def _normalize_system_admin_user(cls, v: object) -> str:
+        s = "" if v is None else str(v).strip()
+        return s or "system_admin"
 
     class Config:
         env_prefix = "MARKET_"

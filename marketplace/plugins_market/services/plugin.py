@@ -1008,6 +1008,7 @@ def get_download_info(
     asset_id: str,
     db: Session,
     storage: S3StorageClient,
+    fetch_user_id: str | None = None,
 ) -> PluginDownloadData:
     """Resolve latest artifact and return public download info."""
     asset_repo = MarketAssetRepository(db)
@@ -1081,7 +1082,7 @@ def get_download_info(
         fetch_repo.create_fetch_record(
             asset_id=asset.asset_id,
             version_id=version_row.version_id,
-            fetch_user_id=None,
+            fetch_user_id=fetch_user_id,
             create_time=now_ms,
         )
         db.commit()

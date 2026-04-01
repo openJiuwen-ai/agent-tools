@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field, field_validator
 
 @dataclass
 class PluginPublishForm:
-    user_id: str
     file: UploadFile
     checksum: str
     plugin_id: Optional[str]
