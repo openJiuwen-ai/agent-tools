@@ -11,17 +11,30 @@ import yaml
 from openjiuwen_plugin.main import main
 from openjiuwen_plugin.market import download_artifact_zip, get_plugin_version_detail, search_plugins
 from openjiuwen_plugin.plugin import info_plugin, init_plugin, install_plugin_from_zip, pack_plugin, validate_plugin
-from openjiuwen_plugin.schemas import PluginListQuery, PluginVersionDetail, PublishRequest
+from openjiuwen_plugin.schemas import PluginListQuery, PluginVersionDetail, PublishPluginInput, PublishRequest
 
 
 class PluginCommandsTest(unittest.TestCase):
+    def test_publish_plugin_input_strips_v_and_validates_plugin_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "p"
+            root.mkdir()
+            inp = PublishPluginInput(plugin_path=root, plugin_version=" v1.2.3 ")
+            self.assertEqual(inp.plugin_version, "1.2.3")
+
+    def test_publish_plugin_input_rejects_prerelease_plugin_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "p"
+            root.mkdir()
+            with self.assertRaisesRegex(ValueError, "marketplace format"):
+                PublishPluginInput(plugin_path=root, plugin_version="1.0.0-rc1")
+
     def test_publish_request_invalid_checksum(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             zip_path = Path(tmp) / "demo.zip"
             zip_path.write_bytes(b"PK\x03\x04")
             with self.assertRaisesRegex(ValueError, "checksum_sha256"):
                 PublishRequest(
-                    user_id="u1",
                     zip_path=zip_path,
                     checksum_sha256="bad-checksum",
                 )
@@ -31,7 +44,6 @@ class PluginCommandsTest(unittest.TestCase):
             zip_path = Path(tmp) / "missing.zip"
             with self.assertRaisesRegex(ValueError, "zip file not found"):
                 PublishRequest(
-                    user_id="u1",
                     zip_path=zip_path,
                     checksum_sha256="a" * 64,
                 )
@@ -106,6 +118,19 @@ def another_tool() -> dict:
             result = validate_plugin(plugin_root)
             self.assertTrue(result.ok, msg=f"errors: {result.errors}")
 
+    def test_validate_rejects_prerelease_version(self) -> None:
+        """与 marketplace 一致：version 仅允许 x.y.z 三位数字。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_root = init_plugin("ver-demo", Path(tmp), plugin_type="mcp-stdio")
+            p = plugin_root / "plugin.yaml"
+            data = yaml.safe_load(p.read_text(encoding="utf-8"))
+            assert isinstance(data, dict)
+            data["version"] = "1.0.0-rc1"
+            p.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+            result = validate_plugin(plugin_root)
+            self.assertFalse(result.ok)
+            self.assertTrue(any("x.y.z" in e for e in result.errors))
+
     def test_cli_init_via_main(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             code = main(["init", "demo-plugin", "--path", tmp])
@@ -123,11 +148,11 @@ def another_tool() -> dict:
             out_dir = Path(tmp) / "out"
             zip_path = pack_plugin(plugin_root, out_dir)
             self.assertTrue(zip_path.exists())
-            self.assertEqual(zip_path.name, "pack-demo-0.1.0.zip")
+            self.assertEqual(zip_path.name, "pack-demo-0.0.1.zip")
             with zipfile.ZipFile(zip_path, "r") as zf:
                 names = zf.namelist()
             self.assertTrue(any("plugin.yaml" in n for n in names))
-            self.assertTrue(any("pack-demo-0.1.0" in n for n in names))
+            self.assertTrue(any("pack-demo-0.0.1" in n for n in names))
 
     def test_pack_excludes_plugin_out_directory(self) -> None:
         """mcp/rest 整目录打包时不应包含插件根目录下的 out/（避免历史 zip 被打进新包）。"""
@@ -138,8 +163,31 @@ def another_tool() -> dict:
             zip_path = pack_plugin(plugin_root, Path(tmp) / "publish-out")
             with zipfile.ZipFile(zip_path, "r") as zf:
                 names = zf.namelist()
-            prefix = "skip-mcp-0.1.0"
+            prefix = "skip-mcp-0.0.1"
             self.assertFalse(any(n.replace("\\", "/").startswith(f"{prefix}/out/") for n in names))
+
+    def test_init_skill_validate_pack_install_no_pip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_root = init_plugin("demo-skill", Path(tmp), plugin_type="skill")
+            self.assertTrue((plugin_root / "demo-skill" / "SKILL.md").is_file())
+            self.assertTrue((plugin_root / "demo-skill" / "scripts").is_dir())
+            self.assertFalse((plugin_root / "src").exists())
+            self.assertFalse((plugin_root / "README.md").exists())
+            result = validate_plugin(plugin_root)
+            self.assertTrue(result.ok, msg=f"errors: {result.errors}")
+            out_dir = Path(tmp) / "out"
+            zip_path = pack_plugin(plugin_root, out_dir)
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                names = zf.namelist()
+            prefix = "demo-skill-0.0.1"
+            self.assertFalse(any("README.md" in n for n in names))
+            self.assertFalse(any(f"{prefix}/demo-skill/scripts/" in n.replace("\\", "/") for n in names))
+            inst = Path(tmp) / "install_root"
+            with patch("openjiuwen_plugin.plugin.subprocess.run") as m_run:
+                skill_dir = install_plugin_from_zip(zip_path, extract_dir=inst)
+            m_run.assert_not_called()
+            self.assertTrue((skill_dir / "SKILL.md").is_file())
+            self.assertFalse((inst / "demo-skill-0.1.0").exists())
 
     def test_init_restful_api_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -155,11 +203,12 @@ def another_tool() -> dict:
             plugin_root = init_plugin("demo-mcp", Path(tmp), plugin_type="mcp-stdio")
             out_dir = Path(tmp) / "out"
             zip_path = pack_plugin(plugin_root, out_dir)
+            inst = Path(tmp) / "install_root"
 
             # 避免真实 pip 安装（网络/环境不稳定）；验证分支选择与命令参数
             with patch("openjiuwen_plugin.plugin.subprocess.run") as m_run:
                 m_run.return_value = None
-                installed_root = install_plugin_from_zip(zip_path)
+                installed_root = install_plugin_from_zip(zip_path, extract_dir=inst)
 
             self.assertTrue((installed_root / "plugin.yaml").exists())
             self.assertEqual(m_run.call_count, 1)
@@ -173,10 +222,11 @@ def another_tool() -> dict:
             plugin_root = init_plugin("demo-api", Path(tmp), plugin_type="restful-api")
             out_dir = Path(tmp) / "out"
             zip_path = pack_plugin(plugin_root, out_dir)
+            inst = Path(tmp) / "install_root"
 
             with patch("openjiuwen_plugin.plugin.subprocess.run") as m_run:
                 m_run.return_value = None
-                installed_root = install_plugin_from_zip(zip_path)
+                installed_root = install_plugin_from_zip(zip_path, extract_dir=inst)
 
             self.assertTrue((installed_root / "plugin.yaml").exists())
             self.assertEqual(m_run.call_count, 1)
@@ -191,10 +241,11 @@ def another_tool() -> dict:
             plugin_root = init_plugin("demo-wheel", Path(tmp), plugin_type="tools")
             out_dir = Path(tmp) / "out"
             zip_path = pack_plugin(plugin_root, out_dir)
+            inst = Path(tmp) / "install_root"
 
             with patch("openjiuwen_plugin.plugin.subprocess.run") as m_run:
                 m_run.return_value = None
-                installed_root = install_plugin_from_zip(zip_path)
+                installed_root = install_plugin_from_zip(zip_path, extract_dir=inst)
 
             self.assertTrue((installed_root / "plugin.yaml").exists())
             self.assertEqual(m_run.call_count, 1)
@@ -209,7 +260,7 @@ def another_tool() -> dict:
             plugin_root = init_plugin("info-demo", Path(tmp))
             info = info_plugin(plugin_root)
             self.assertEqual(info.get("name"), "info-demo")
-            self.assertEqual(info.get("version"), "0.1.0")
+            self.assertEqual(info.get("version"), "0.0.1")
             self.assertIsNotNone(info.get("readme"))
             self.assertIn("info-demo", info["readme"])
 
@@ -290,14 +341,12 @@ def another_tool() -> dict:
             # 因此测试需要 patch 这个别名，才能真正避免网络请求。
             with patch.dict(os.environ, {"OPENJIUWEN_USER_TOKEN": ""}, clear=False):
                 with patch("openjiuwen_plugin.plugin._market_upload_plugin") as m:
-                    # 避免交互输入：提供 --system-token 即可；清空用户 token 环境以免与 system 双鉴权冲突
+                    # 提供 --system-token；清空用户 token 环境以免与 system 双鉴权冲突
                     code = main(
                         [
                             "publish",
                             "--file",
                             str(zip_path),
-                            "--user-id",
-                            "user-sys",
                             "--system-token",
                             "sys-token-123",
                             "--market-url",
@@ -313,35 +362,7 @@ def another_tool() -> dict:
                     self.assertEqual(call_args[0][0], "http://localhost:8000")
                     self.assertIsNone(call_args[0][1])
                     self.assertEqual(call_args[0][2], "sys-token-123")
-                    self.assertEqual(call_args[0][3].user_id, "user-sys")
-
-    def test_publish_user_id_from_env(self) -> None:
-        """publish 可从 OPENJIUWEN_USER_ID 取得 user_id（省略 --user-id）。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            plugin_root = init_plugin("publish-env-uid", Path(tmp))
-            out_zip = Path(tmp) / "out"
-            zip_path = pack_plugin(plugin_root, out_zip)
-
-            with patch.dict(
-                os.environ,
-                {"OPENJIUWEN_USER_ID": "from-env-user", "OPENJIUWEN_USER_TOKEN": ""},
-                clear=False,
-            ):
-                with patch("openjiuwen_plugin.plugin._market_upload_plugin") as m:
-                    code = main(
-                        [
-                            "publish",
-                            "--file",
-                            str(zip_path),
-                            "--system-token",
-                            "sys-token-123",
-                            "--market-url",
-                            "http://localhost:8000",
-                        ]
-                    )
-                    self.assertEqual(code, 0)
-                    call_args = m.call_args
-                    self.assertEqual(call_args[0][3].user_id, "from-env-user")
+                    self.assertIsInstance(call_args[0][3], PublishRequest)
 
     def test_delete_rejects_both_token_and_system_token(self) -> None:
         """delete 同时传 --token 与 --system-token 时应直接失败。"""
@@ -352,8 +373,6 @@ def another_tool() -> dict:
                     "demo-id",
                     "--market-url",
                     "http://localhost:8000",
-                    "--user-id",
-                    "user-001",
                     "--token",
                     "user-token-123",
                     "--system-token",
@@ -524,6 +543,102 @@ def another_tool() -> dict:
                     download_artifact_zip("http://market.local", "asset-1", out)
             self.assertIn("checksum mismatch", str(ctx.exception))
             self.assertFalse(out.exists())
+
+    def test_validate_rejects_omitted_runtime_type(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_root = init_plugin("omit-rt", Path(tmp))
+            py = plugin_root / "plugin.yaml"
+            data = yaml.safe_load(py.read_text(encoding="utf-8"))
+            assert isinstance(data, dict) and isinstance(data.get("runtime"), dict)
+            del data["runtime"]["type"]
+            py.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+            result = validate_plugin(plugin_root)
+            self.assertFalse(result.ok)
+            self.assertTrue(any("runtime.type" in e for e in result.errors))
+
+    def test_validate_rejects_unknown_runtime_type(self) -> None:
+        """显式填写未知 runtime.type 须报错；未默认成 tools。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_root = init_plugin("rt-unknown", Path(tmp))
+            py = plugin_root / "plugin.yaml"
+            data = yaml.safe_load(py.read_text(encoding="utf-8"))
+            assert isinstance(data, dict) and isinstance(data.get("runtime"), dict)
+            data["runtime"]["type"] = "custom-unknown"
+            py.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+            result = validate_plugin(plugin_root)
+            self.assertFalse(result.ok)
+            self.assertTrue(any("runtime.type" in e for e in result.errors))
+
+    def test_validate_skill_fails_invalid_frontmatter_name_slug(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_root = init_plugin("slug-skill", Path(tmp), plugin_type="skill")
+            skill_md = plugin_root / "slug-skill" / "SKILL.md"
+            text = skill_md.read_text(encoding="utf-8").replace("name: slug-skill", "name: Bad_Name")
+            skill_md.write_text(text, encoding="utf-8")
+            result = validate_plugin(plugin_root)
+            self.assertFalse(result.ok)
+            self.assertTrue(any("SKILL.md" in e or "name" in e for e in result.errors))
+
+    def test_validate_skill_fails_when_frontmatter_name_differs_from_plugin_yaml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_root = init_plugin("same-skill", Path(tmp), plugin_type="skill")
+            skill_md = plugin_root / "same-skill" / "SKILL.md"
+            text = skill_md.read_text(encoding="utf-8").replace("name: same-skill", "name: other-skill")
+            skill_md.write_text(text, encoding="utf-8")
+            result = validate_plugin(plugin_root)
+            self.assertFalse(result.ok)
+            self.assertTrue(any("skill directory name" in e or "plugin.yaml name" in e for e in result.errors))
+
+    def test_validate_skill_fails_empty_description(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_root = init_plugin("desc-skill", Path(tmp), plugin_type="skill")
+            skill_md = plugin_root / "desc-skill" / "SKILL.md"
+            text = skill_md.read_text(encoding="utf-8")
+            text = text.replace(
+                'description: "TODO: describe this skill for models and users"',
+                'description: "   "',
+            )
+            skill_md.write_text(text, encoding="utf-8")
+            result = validate_plugin(plugin_root)
+            self.assertFalse(result.ok)
+            self.assertTrue(any("description" in e.lower() for e in result.errors))
+
+    def test_install_second_install_without_force_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_root = init_plugin("twice-mcp", Path(tmp), plugin_type="mcp-stdio")
+            zip_path = pack_plugin(plugin_root, Path(tmp) / "out")
+            inst = Path(tmp) / "install_root"
+            with patch("openjiuwen_plugin.plugin.subprocess.run") as m_run:
+                m_run.return_value = None
+                install_plugin_from_zip(zip_path, extract_dir=inst)
+                m_run.reset_mock()
+                with self.assertRaises(FileExistsError):
+                    install_plugin_from_zip(zip_path, extract_dir=inst, force=False)
+
+    def test_install_second_install_with_force_succeeds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_root = init_plugin("force-mcp", Path(tmp), plugin_type="mcp-stdio")
+            zip_path = pack_plugin(plugin_root, Path(tmp) / "out")
+            inst = Path(tmp) / "install_root"
+            with patch("openjiuwen_plugin.plugin.subprocess.run") as m_run:
+                m_run.return_value = None
+                p1 = install_plugin_from_zip(zip_path, extract_dir=inst)
+                p2 = install_plugin_from_zip(zip_path, extract_dir=inst, force=True)
+            self.assertEqual(p1, p2)
+            self.assertTrue((p2 / "plugin.yaml").is_file())
+
+    def test_cli_init_skill_via_main(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code = main(["init", "cli-skill", "--path", tmp, "--type", "skill"])
+            self.assertEqual(code, 0)
+            root = Path(tmp) / "cli-skill"
+            self.assertTrue((root / "cli-skill" / "SKILL.md").is_file())
+
+    def test_init_rejects_unknown_plugin_type_from_api(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError) as ctx:
+                init_plugin("x", Path(tmp), plugin_type="not-a-supported-type")
+            self.assertIn("plugin type", str(ctx.exception).lower())
 
 
 if __name__ == "__main__":

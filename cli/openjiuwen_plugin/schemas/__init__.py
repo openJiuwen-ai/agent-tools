@@ -1,4 +1,5 @@
 from .plugin import (
+    MARKETPLACE_VERSION_PATTERN,
     ResponseModel,
     PublishPluginInput,
     PublishRequest,
@@ -13,6 +14,7 @@ from .plugin import (
 )
 
 __all__ = [
+    "MARKETPLACE_VERSION_PATTERN",
     "ResponseModel",
     "PublishPluginInput",
     "PublishRequest",

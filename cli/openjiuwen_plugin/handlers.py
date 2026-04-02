@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -42,20 +43,16 @@ def _resolve_publish_auth(args) -> tuple[str | None, str | None, int]:
     if system_token:
         return None, system_token, 0
 
-    token_to_pass = user_token
-    if not token_to_pass:
-        try:
-            token_to_pass = input("User token: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            logger.error("user token not provided")
-            return None, None, 1
-        if not token_to_pass:
-            logger.error("user token cannot be empty")
-            return None, None, 1
-    return token_to_pass, None, 0
+    if not user_token:
+        logger.error(
+            "publish requires user token: pass --token or set OPENJIUWEN_USER_TOKEN "
+            "(or use --system-token / OPENJIUWEN_SYSTEM_TOKEN)"
+        )
+        return None, None, 1
+    return user_token, None, 0
 
 
-def _resolve_delete_auth(args) -> tuple[str | None, str | None, str | None, int]:
+def _resolve_delete_auth(args) -> tuple[str | None, str | None, int]:
     user_token = args.user_token or os.getenv("OPENJIUWEN_USER_TOKEN")
     system_token = args.system_token or os.getenv("OPENJIUWEN_SYSTEM_TOKEN")
 
@@ -63,26 +60,18 @@ def _resolve_delete_auth(args) -> tuple[str | None, str | None, str | None, int]
     has_sys = bool(system_token and str(system_token).strip())
     if has_user and has_sys:
         logger.error("delete supports exactly one auth method: use either --token or --system-token")
-        return None, None, None, 1
+        return None, None, 1
 
     if has_sys:
-        return None, str(system_token).strip(), None, 0
+        return None, str(system_token).strip(), 0
 
-    if not user_token or not str(user_token).strip():
-        try:
-            user_token = input("User token: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            logger.error("user token not provided")
-            return None, None, None, 1
-        if not user_token:
-            logger.error("user token cannot be empty")
-            return None, None, None, 1
-
-    user_id = args.user_id or os.getenv("OPENJIUWEN_USER_ID")
-    if not user_id or not str(user_id).strip():
-        logger.error("delete with Bearer requires --user-id or OPENJIUWEN_USER_ID")
-        return None, None, None, 1
-    return str(user_token).strip(), None, str(user_id).strip(), 0
+    if not has_user:
+        logger.error(
+            "delete requires user token: pass --token or set OPENJIUWEN_USER_TOKEN "
+            "(or use --system-token / OPENJIUWEN_SYSTEM_TOKEN)"
+        )
+        return None, None, 1
+    return str(user_token).strip(), None, 0
 
 
 def handle_init(args) -> int:
@@ -112,9 +101,7 @@ def handle_pack(args) -> int:
     try:
         plugin_root = Path(args.path).resolve()
         out_dir = (
-            Path(args.output).resolve()
-            if Path(args.output).is_absolute()
-            else (plugin_root / args.output).resolve()
+            Path(args.output).resolve() if Path(args.output).is_absolute() else (plugin_root / args.output).resolve()
         )
         zip_path = pack_plugin(plugin_root, out_dir)
     except Exception as exc:
@@ -125,7 +112,7 @@ def handle_pack(args) -> int:
 
 
 def handle_publish(args) -> int:
-    token_to_pass, system_token, exit_code = _resolve_publish_auth(args)
+    user_token, system_token, exit_code = _resolve_publish_auth(args)
     if exit_code != 0:
         return exit_code
 
@@ -139,15 +126,8 @@ def handle_publish(args) -> int:
         logger.error("path (plugin directory) is required when not using --file")
         return 1
 
-    user_id = args.user_id or os.getenv("OPENJIUWEN_USER_ID")
-    if not user_id or not str(user_id).strip():
-        logger.error("publish requires --user-id or OPENJIUWEN_USER_ID")
-        return 1
-    user_id = str(user_id).strip()
-
     try:
         publish_input = PublishPluginInput(
-            user_id=user_id,
             plugin_path=Path(args.path).resolve() if args.path else None,
             zip_path=Path(args.file).resolve() if args.file else None,
             plugin_id=args.plugin_id or None,
@@ -157,8 +137,8 @@ def handle_publish(args) -> int:
         )
         result = publish_plugin(
             market_url=market_url,
-            user_token=token_to_pass if token_to_pass else None,
-            system_token=system_token if system_token else None,
+            user_token=user_token,
+            system_token=system_token,
             publish_input=publish_input,
         )
     except PublishError as e:
@@ -192,7 +172,7 @@ def handle_info(args) -> int:
         logger.error("%s", e)
         return 1
     except Exception as exc:
-        logger.error("info failed: %s", exc)
+        logger.error("info failed: %s", exc, exc_info=True)
         return 1
 
     # 直接按 PluginVersionDetail 字段输出（按 schema 定义顺序）
@@ -247,7 +227,7 @@ def handle_search(args) -> int:
             ver = item.latest_version
             logger.info("  %s  %s  %s", aid, name, ver)
     except Exception as exc:
-        logger.error("search failed: %s", exc)
+        logger.error("search failed: %s", exc, exc_info=True)
         return 1
     return 0
 
@@ -260,7 +240,7 @@ def handle_delete(args) -> int:
     if not market_url:
         return 1
     try:
-        user_token, system_token, user_id, exit_code = _resolve_delete_auth(args)
+        user_token, system_token, exit_code = _resolve_delete_auth(args)
         if exit_code != 0:
             return exit_code
         if system_token:
@@ -278,10 +258,9 @@ def handle_delete(args) -> int:
                 logger,
                 version=args.version,
                 user_token=user_token,
-                user_id=user_id,
             )
     except Exception as exc:
-        logger.error("delete failed: %s", exc)
+        logger.error("delete failed: %s", exc, exc_info=True)
         return 1
     return 0
 
@@ -298,16 +277,12 @@ def handle_install(args) -> int:
     if args.plugin_version:
         logger.warning("install --version is ignored for artifacts endpoint")
 
-    zip_path: Path
-    own_tmp: Path | None = None
-    if args.output_zip:
-        zip_path = Path(args.output_zip).resolve()
-    else:
-        fd, tmp_name = tempfile.mkstemp(suffix=".zip", prefix="openjiuwen_dl_")
-        os.close(fd)
-        own_tmp = Path(tmp_name)
-        zip_path = own_tmp
+    fd, tmp_name = tempfile.mkstemp(suffix=".zip", prefix="openjiuwen_dl_")
+    os.close(fd)
+    own_tmp = Path(tmp_name)
+    zip_path = own_tmp
 
+    extract_root = Path(args.output).resolve() if args.output else Path.cwd().resolve()
     pip_prefix = Path(args.pip_prefix).resolve() if args.pip_prefix else None
     try:
         dl_info = download_artifact_zip(market_url, asset_id, zip_path)
@@ -318,17 +293,26 @@ def handle_install(args) -> int:
             )
         else:
             logger.warning("download checksum not provided by server; skip verification")
-        installed_root = install_plugin_from_zip(zip_path, pip_prefix=pip_prefix)
+        if args.save_zip:
+            save_path = Path(args.save_zip).resolve()
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(zip_path, save_path)
+            logger.info("saved zip to: %s", save_path)
+        installed_root = install_plugin_from_zip(
+            zip_path,
+            extract_dir=extract_root,
+            pip_prefix=pip_prefix,
+            force=args.force,
+        )
         logger.info("plugin installed under: %s", installed_root)
     except Exception as exc:
-        logger.error("install failed: %s", exc)
+        logger.error("install failed: %s", exc, exc_info=True)
         return 1
     finally:
-        if own_tmp is not None:
-            try:
-                own_tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
+        try:
+            own_tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
     return 0
 
 

@@ -1,13 +1,15 @@
-"""Market API client: search, delete, upload. 依赖市场提供对应接口。"""
+"""Market API client: search, delete, upload. Depends on market providing corresponding APIs."""
 from __future__ import annotations
 
 import logging
 import hashlib
+import time
 import urllib.parse
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypeVar, Callable
 
 import requests
+from requests import Response
 from pydantic import TypeAdapter, ValidationError
 from openjiuwen_plugin.schemas import (
     DownloadArtifactResult,
@@ -25,16 +27,16 @@ ModelT = TypeVar("ModelT")
 
 
 class PublishError(Exception):
-    """发布/上传失败：网络或市场返回错误。"""
+    """Publish/upload failed: network or market returns error."""
 
     def __init__(self, status_code: int, detail: str) -> None:
-        self.status_code = status_code  # 0 表示本地/网络错误
+        self.status_code = status_code  # 0 for local/network error
         self.detail = detail
         super().__init__(f"{detail} (status={status_code})")
 
 
-def _upload_error_detail(resp) -> str:
-    """从市场错误响应中取可读信息。"""
+def _upload_error_detail(resp: Response) -> str:
+    """Extract readable information from market error response."""
     try:
         j = resp.json()
         if not isinstance(j, dict):
@@ -54,7 +56,7 @@ def _upload_error_detail(resp) -> str:
     return resp.text or f"HTTP {resp.status_code}"
 
 
-def _parse_json_body(resp, *, err_prefix: str = "response") -> dict[str, Any]:
+def _parse_json_body(resp: Response, *, err_prefix: str = "response") -> dict[str, Any]:
     content_type = str(resp.headers.get("content-type") or "")
     if not content_type.startswith("application/json"):
         raise RuntimeError(f"{err_prefix} is not a valid JSON object")
@@ -82,6 +84,85 @@ def _parse_data_as(payload: dict[str, Any], model_type: type[ModelT], *, err_pre
         raise RuntimeError(f"invalid {err_prefix}: {exc}") from exc
 
 
+def _should_retry_response(resp: Response) -> bool:
+    # Retry typical transient / overload responses. Omit 409 (conflict): usually not safe to blindly retry.
+    return resp.status_code in {408, 425, 429, 500, 502, 503, 504}
+
+
+def _brief_http_error_message(resp: Response) -> str:
+    """Best-effort message for logging / final error; safe before resp.close()."""
+    try:
+        return _upload_error_detail(resp)
+    except Exception:
+        try:
+            text = (resp.text or "")[:800]
+            return text.strip() or f"HTTP {resp.status_code}"
+        except Exception:
+            return f"HTTP {resp.status_code}"
+
+
+def _release_response(resp: Response) -> None:
+    try:
+        resp.close()
+    except Exception as exc:
+        logging.getLogger(__name__).debug("response.close() failed: %s", exc, exc_info=True)
+
+
+def _request_with_retry(
+    method: Callable[..., Response],
+    *args: Any,
+    logger: logging.Logger | None = None,
+    **kwargs: Any,
+) -> Response:
+    """
+    Wrapper around requests.* with retries on network errors and selected transient HTTP statuses.
+
+    - Retries: RequestException, and HTTP 408/425/429/5xx (not 409)
+    - Before retrying on HTTP: response body summarized, connection released via close()
+    - Backoff: exponential, capped
+
+    Do not use for mutating market calls without idempotency (e.g. ``upload_plugin`` POST, ``delete_plugin`` DELETE);
+    those use a single ``requests.*`` call.
+    """
+    log = logger or logging.getLogger(__name__)
+
+    max_attempts = 3
+    delay = 0.5
+    last_exc: Exception | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = method(*args, **kwargs)
+            if _should_retry_response(resp):
+                detail = _brief_http_error_message(resp)
+                _release_response(resp)
+                msg = f"HTTP {resp.status_code}: {detail}"
+                if attempt >= max_attempts:
+                    raise requests.RequestException(msg)
+                log.warning(
+                    "transient HTTP (attempt %s/%s): %s; retrying in %.1fs",
+                    attempt,
+                    max_attempts,
+                    msg[:500],
+                    delay,
+                )
+                time.sleep(delay)
+                delay = min(delay * 2, 6.0)
+                continue
+            return resp
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt >= max_attempts:
+                raise
+            log.warning("request failed (attempt %s/%s): %s; retrying in %.1fs", attempt, max_attempts, exc, delay)
+            time.sleep(delay)
+            delay = min(delay * 2, 6.0)
+
+    if last_exc is None:
+        raise RuntimeError("_request_with_retry: loop exited without result or exception")
+    raise last_exc
+
+
 def upload_plugin(
     market_url: str,
     user_token: str | None,
@@ -89,7 +170,12 @@ def upload_plugin(
     req: PublishRequest,
 ) -> PluginPublishResult:
     """
-    将插件 zip 上传到市场。成功返回市场响应的 data 字典；失败抛出 PublishError。
+    Upload plugin zip to market.
+
+    Auth: provide exactly one of Bearer user_token or X-System-Token system_token.
+
+    Single HTTP attempt (no automatic retry): multipart POST is not safely idempotent if the server
+    accepted the first request but the client did not receive the response.
     """
     base = market_url.rstrip("/")
     url = f"{base}/api/v1/plugins"
@@ -103,10 +189,7 @@ def upload_plugin(
         headers["X-System-Token"] = system_token.strip()
     else:
         headers["Authorization"] = f"Bearer {user_token.strip()}"
-    data = {
-        "user_id": req.user_id,
-        "force": "true" if req.force else "false",
-    }
+    data = {"force": "true" if req.force else "false"}
     if req.plugin_id is not None:
         data["plugin_id"] = req.plugin_id
     if req.plugin_version is not None:
@@ -137,13 +220,13 @@ def get_plugin_version_detail(
     asset_id: str,
     version: str,
 ) -> PluginVersionDetail:
-    """从市场获取插件版本详情：GET /api/v1/plugins/{asset_id}/versions/{version}。"""
+    """Get plugin version details from market: GET /api/v1/plugins/{asset_id}/versions/{version}."""
     base = market_url.rstrip("/")
     aid_seg = urllib.parse.quote(asset_id.strip(), safe="")
     ver_seg = urllib.parse.quote(version.strip(), safe="")
     url = f"{base}/api/v1/plugins/{aid_seg}/versions/{ver_seg}"
     try:
-        resp = requests.get(url, timeout=30)
+        resp = _request_with_retry(requests.get, url, timeout=30)
     except requests.RequestException as e:
         raise RuntimeError(f"request failed: {e}") from e
     if resp.status_code == 404:
@@ -157,7 +240,7 @@ PLUGIN_LIST_ORDER_BY = ("install_count", "like_count", "create_time", "update_ti
 
 
 def _plugin_list_order_by_desc(order_by: str | None, desc: bool) -> tuple[str, bool]:
-    """与 PluginListQuery.order_by / desc 一致；CLI 直接使用 desc 语义。"""
+    """Consistent with PluginListQuery.order_by/desc; CLI directly uses desc semantics."""
     key = (order_by or "install_count").strip()
     if key not in PLUGIN_LIST_ORDER_BY:
         key = "install_count"
@@ -169,11 +252,11 @@ def search_plugins(
     query: PluginListQuery,
 ) -> PluginListResponse:
     """
-    调用 GET /api/v1/plugins，查询参数与 PluginListQuery 字段一一对应。
+    Call GET /api/v1/plugins, query parameters correspond one-to-one with PluginListQuery fields.
 
-    公开接口：不发送 Authorization。
+    Public interface: does not send Authorization.
 
-    query 需为 PluginListQuery。
+    Query should be PluginListQuery.
     """
     base = market_url.rstrip("/")
     url = f"{base}/api/v1/plugins"
@@ -210,7 +293,7 @@ def search_plugins(
         params["publisher_id"] = q.publisher_id
 
     try:
-        resp = requests.get(url, params=params, timeout=30)
+        resp = _request_with_retry(requests.get, url, params=params, timeout=30)
     except requests.RequestException as e:
         raise RuntimeError(f"request failed: {e}") from e
     if resp.status_code == 404:
@@ -226,38 +309,38 @@ def delete_plugin(
     logger: logging.Logger,
     *,
     version: str | None = None,
-    user_id: str | None = None,
     user_token: str | None = None,
     system_token: str | None = None,
 ) -> PluginVersionDeleteData:
     """
     DELETE /api/v1/plugins/{asset_id}/versions/{version}
 
-    与 Store 一致：version 缺省为 ``all``（删光版本并删资产）；Bearer 须带 query user_id；
-    系统管理员使用 X-System-Token，勿与 Bearer 同时传。
+    version defaults to ``all`` (delete all versions and the asset).
+
+    Auth: provide exactly one of Bearer user_token or X-System-Token system_token.
+
+    Single HTTP attempt (no automatic retry): same rationale as ``upload_plugin`` — the server may
+    have applied the delete while the client sees a timeout or connection error; retries add
+    ambiguity without an idempotency contract.
     """
     has_user = bool(user_token and user_token.strip())
     has_sys = bool(system_token and system_token.strip())
     if has_user == has_sys:
         raise RuntimeError("provide exactly one of user_token or system_token")
-    if has_user and not (user_id and user_id.strip()):
-        raise RuntimeError("user_id is required when using Bearer (see marketplace require_auth_with_user_id)")
 
     base = market_url.rstrip("/")
     ver_seg = (version or "all").strip()
     path_id = urllib.parse.quote(asset_id.strip(), safe="")
     path_ver = urllib.parse.quote(ver_seg, safe="")
     url = f"{base}/api/v1/plugins/{path_id}/versions/{path_ver}"
-    params: dict[str, str] | None = None
     headers: dict[str, str] = {}
     if has_sys:
         headers["X-System-Token"] = system_token.strip()
     else:
         headers["Authorization"] = f"Bearer {user_token.strip()}"
-        params = {"user_id": user_id.strip()}
 
     try:
-        resp = requests.delete(url, headers=headers, params=params, timeout=60)
+        resp = requests.delete(url, headers=headers, timeout=60)
     except requests.RequestException as e:
         raise RuntimeError(f"request failed: {e}") from e
     if not resp.ok:
@@ -278,13 +361,13 @@ def download_artifact_zip(
     dest_path: Path,
 ) -> DownloadArtifactResult:
     """
-    先调用 GET /api/v1/artifacts/{asset_id} 获取下载信息（download_url/checksum），
-    再下载 zip 到 ``dest_path``，并在服务端给出 checksum_sha256 时执行完整性校验。
+    First call GET /api/v1/artifacts/{asset_id} to get download information (download_url/checksum),
+    then download zip to ``dest_path``, and perform integrity check when the server provides checksum_sha256.
 
-    返回值示例：
+    Return value example:
     {
       "download_url": "...",
-      "expected_checksum_sha256": "...",  # 可能为空
+      "expected_checksum_sha256": "...",  # May be empty
       "actual_checksum_sha256": "...",
       "verified": True/False,
     }
@@ -294,7 +377,7 @@ def download_artifact_zip(
     metadata_url = f"{base}/api/v1/artifacts/{aid_seg}"
 
     try:
-        meta_resp = requests.get(metadata_url, timeout=30)
+        meta_resp = _request_with_retry(requests.get, metadata_url, timeout=30)
     except requests.RequestException as e:
         raise RuntimeError(f"request failed: {e}") from e
 
@@ -315,7 +398,7 @@ def download_artifact_zip(
         raise RuntimeError("artifact metadata checksum_sha256 is invalid")
 
     try:
-        dl_resp = requests.get(download_url, stream=True, timeout=300)
+        dl_resp = _request_with_retry(requests.get, download_url, stream=True, timeout=300)
     except requests.RequestException as e:
         raise RuntimeError(f"request failed: {e}") from e
     if not dl_resp.ok:

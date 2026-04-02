@@ -21,7 +21,7 @@ def _add_init_parser(plugin_subparsers) -> None:
         "--type",
         dest="plugin_type",
         default="tools",
-        choices=("tools", "mcp-stdio", "restful-api"),
+        choices=("tools", "mcp-stdio", "restful-api", "skill"),
         help="Plugin type, default is tools",
     )
 
@@ -59,18 +59,19 @@ def _add_publish_parser(plugin_subparsers) -> None:
     publish_parser.add_argument(
         "--token",
         dest="user_token",
-        help="用户 token（Bearer，普通用户发布/删除时使用）；与 --system-token 二选一。优先级：本参数 > OPENJIUWEN_USER_TOKEN > 交互输入",
+        help=(
+            "End-user Bearer token (Authorization header). Mutually exclusive with --system-token. "
+            "If omitted, reads OPENJIUWEN_USER_TOKEN"
+        ),
     )
     publish_parser.add_argument(
         "--system-token",
-        help="系统管理员 token，走 X-System-Token（与 --token 二选一；可用 OPENJIUWEN_SYSTEM_TOKEN）",
+        help=(
+            "System-admin token (X-System-Token header). Mutually exclusive with --token. "
+            "If omitted, can use OPENJIUWEN_SYSTEM_TOKEN"
+        ),
     )
     publish_parser.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
-    publish_parser.add_argument(
-        "--user-id",
-        default=None,
-        help="发布者 user_id（必填；命令行优先于 OPENJIUWEN_USER_ID）",
-    )
     publish_parser.add_argument(
         "--plugin-id",
         help=(
@@ -80,7 +81,7 @@ def _add_publish_parser(plugin_subparsers) -> None:
     )
     publish_parser.add_argument(
         "--plugin-version",
-        help="Override version (SemVer e.g. 1.0.0; v1.0.0 accepted and stripped; optional)",
+        help="Override version (marketplace: x.y.z e.g. 1.0.0; v1.0.0 accepted and stripped; optional)",
     )
     publish_parser.add_argument("--version-desc", help="Version description")
     publish_parser.add_argument("--force", action="store_true", help="Overwrite existing version")
@@ -93,9 +94,9 @@ def _add_info_parser(plugin_subparsers) -> None:
     )
     info_parser.add_argument(
         "asset_id",
-        help="Asset id（与 publish 返回的 plugin_id 相同）",
+        help="Asset id (same as plugin_id returned by publish)",
     )
-    info_parser.add_argument("--version", "-v", required=True, help="目标版本号")
+    info_parser.add_argument("--version", "-v", required=True, help="Target version")
     info_parser.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
 
 
@@ -104,48 +105,48 @@ def _add_search_parser(plugin_subparsers) -> None:
         "search",
         help="Search plugins on market (no auth); query flags match marketplace PluginListQuery",
     )
-    search_parser.add_argument("query", nargs="?", default="", help="search_keyword（关键词）")
+    search_parser.add_argument("query", nargs="?", default="", help="search keyword")
     search_parser.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
     search_parser.add_argument(
         "--type",
         dest="plugin_type",
         default=None,
         metavar="STR",
-        help="plugin_type（精确匹配 plugin.yaml runtime.type，如 tools / mcp-stdio / restful-api）",
+        help="plugin type (exact match plugin.yaml runtime.type, such as tools / mcp-stdio / restful-api / skill)",
     )
     search_parser.add_argument(
         "--author",
         metavar="NAME",
         default=None,
-        help="publisher_name（发布者展示名模糊）；CLI 使用 --author 以兼容习惯",
+        help="publisher name (fuzzy match)",
     )
     search_parser.add_argument(
         "--asset-id",
         dest="search_asset_id",
         default=None,
         metavar="ID",
-        help="asset_id",
+        help="asset id",
     )
     search_parser.add_argument(
         "--asset-type",
         dest="search_asset_type",
         default=None,
         metavar="TYPE",
-        help="asset_type",
+        help="asset type",
     )
     search_parser.add_argument(
         "--publisher-id",
         dest="search_publisher_id",
         default=None,
         metavar="ID",
-        help="publisher_id",
+        help="publisher id",
     )
     search_parser.add_argument(
         "--page",
         type=int,
         default=None,
         metavar="N",
-        help="page（默认 1）",
+        help="page (default 1)",
     )
     search_parser.add_argument(
         "--page-size",
@@ -153,20 +154,20 @@ def _add_search_parser(plugin_subparsers) -> None:
         type=int,
         default=None,
         metavar="N",
-        help="page_size（默认 20，最大 100）",
+        help="page size (default 20, max 100)",
     )
     search_parser.add_argument(
         "--order-by",
         default=None,
         choices=("install_count", "like_count", "create_time", "update_time", "review_count"),
-        help="order_by（默认 install_count）",
+        help="order by (default install_count)",
     )
     search_parser.add_argument(
         "--desc",
         type=_parse_bool_flag,
         default=True,
         metavar="BOOL",
-        help="是否降序（对应 API desc）；可传 true/false，默认 true",
+        help="descending order (default true)",
     )
 
 
@@ -174,25 +175,27 @@ def _add_delete_parser(plugin_subparsers) -> None:
     delete_parser = plugin_subparsers.add_parser("delete", help="Delete plugin from market (Store delete API)")
     delete_parser.add_argument(
         "plugin_id",
-        help="Asset id（与 publish 返回的 plugin_id 相同）",
+        help="Asset id (same as plugin_id returned by publish)",
     )
     delete_parser.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
     delete_parser.add_argument(
-        "--user-id",
-        help="发布者 user_id（Bearer 时必填；与 OPENJIUWEN_USER_ID）",
-    )
-    delete_parser.add_argument(
         "--system-token",
-        help="系统管理员 token，走 X-System-Token（与 Bearer 二选一；可用 OPENJIUWEN_SYSTEM_TOKEN）",
+        help=(
+            "System-admin token (X-System-Token header). Mutually exclusive with --token. "
+            "If omitted, can use OPENJIUWEN_SYSTEM_TOKEN"
+        ),
     )
     delete_parser.add_argument(
         "--token",
         dest="user_token",
-        help="用户 token（Bearer；与 --system-token 二选一）。默认读取 OPENJIUWEN_USER_TOKEN 或交互输入",
+        help=(
+            "End-user Bearer token (Authorization header). Mutually exclusive with --system-token. "
+            "If omitted, reads OPENJIUWEN_USER_TOKEN"
+        ),
     )
     delete_parser.add_argument(
         "--version",
-        help="要删的版本号；省略则传 all（删光版本并删资产）",
+        help="Version to delete; if omitted then delete all versions",
     )
 
 
@@ -203,24 +206,36 @@ def _add_install_parser(plugin_subparsers) -> None:
     )
     install_parser.add_argument(
         "asset_id",
-        help="市场 asset_id（与 publish 返回的 plugin_id 相同）",
+        help="Market asset_id (same as plugin_id returned by publish)",
     )
     install_parser.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
     install_parser.add_argument(
         "--version",
         dest="plugin_version",
-        help="兼容保留参数（当前 artifacts 下载接口按 asset_id 获取）",
+        help="Preserved parameter (current artifacts download API gets by asset_id)",
     )
     install_parser.add_argument(
         "--prefix",
         dest="pip_prefix",
-        help="传给 pip install --prefix（可选）",
+        help="Pass to pip install --prefix (optional; ignored for skill type)",
     )
     install_parser.add_argument(
         "--output",
         "-o",
-        dest="output_zip",
-        help="将下载的 zip 保存到此路径；省略则使用临时文件并在安装后删除",
+        default=None,
+        help="Extract/install target root directory (default current working directory)",
+    )
+    install_parser.add_argument(
+        "--save-zip",
+        dest="save_zip",
+        default=None,
+        metavar="PATH",
+        help="Save downloaded zip to this path additionally (optional)",
+    )
+    install_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow overwrite when target directory already exists",
     )
 
 
