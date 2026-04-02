@@ -89,6 +89,14 @@ class SecurityUtils:
         Best-effort clear of sensitive in-memory state.
         Note: Python cannot guarantee zeroization of immutable bytes in all cases.
         """
+        if self.kms_client is not None:
+            try:
+                self.kms_client.close()
+            except Exception as e:
+                # best-effort cleanup; do not hide it silently
+                import logging
+
+                logging.getLogger(__name__).warning("Failed to close KMS client: %s", e)
         self.master_key = None
         self.encrypted_root_key = None
         self.kms_client = None

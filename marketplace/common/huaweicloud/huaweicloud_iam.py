@@ -74,6 +74,18 @@ class HuaweiCloudIAM:
         self._cached_sts: Optional[TemporaryCredentials] = None
         self._sts_expire_at_ts: float = 0.0
         self._sts_scope: Optional[tuple[str, str]] = None
+        self._closed: bool = False
+
+    def close(self) -> None:
+        """释放底层 HTTP 连接池资源。"""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._client.close()
+        except Exception:
+            # best-effort
+            pass
 
     @staticmethod
     def _parse_expire_ts(expires_at: Optional[str]) -> float:

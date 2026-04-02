@@ -45,6 +45,7 @@ NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 RUNTIME_TOOLS = "tools"
 RUNTIME_MCP_STDIO = "mcp-stdio"
 RUNTIME_RESTFUL_API = "restful-api"
+RUNTIME_SKILL = "skill"
 logger = logging.getLogger(__name__)
 
 
@@ -188,6 +189,81 @@ def _validate_src_based_layout(zf: zipfile.ZipFile, plugin_yaml_path: str) -> di
     return {"readme_path": readme_path, "icon_path": icon_path}
 
 
+def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
+    """
+    Parse YAML frontmatter:
+    ---
+    key: value
+    ---
+    body...
+    """
+    raw = text.lstrip("\ufeff")
+    if not raw.startswith("---"):
+        return {}, text
+    lines = raw.splitlines()
+    if len(lines) < 3 or lines[0].strip() != "---":
+        return {}, text
+    end_idx = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end_idx = i
+            break
+    if end_idx is None:
+        return {}, text
+    fm_text = "\n".join(lines[1:end_idx]).strip()
+    body = "\n".join(lines[end_idx + 1:]).lstrip("\n")
+    try:
+        fm = yaml.safe_load(fm_text) if fm_text else {}
+    except Exception:
+        fm = {}
+    return (fm if isinstance(fm, dict) else {}), body
+
+
+def _validate_skill_layout(
+    zf: zipfile.ZipFile, plugin_yaml_path: str, *, plugin_name: str
+) -> dict[str, str]:
+    """
+    skill 类型：
+    - 必须存在：{skill-name}/SKILL.md
+    - 可选：scripts/ references/ assets/
+    - SKILL.md frontmatter：name、description 必填
+    """
+    prefix = _plugin_prefix(plugin_yaml_path)
+    names = set(zf.namelist())
+
+    readme_path = _readme_path_in_zip(zf, plugin_yaml_path) or ""
+
+    skill_dir = f"{prefix}{plugin_name}/"
+    skill_md = f"{skill_dir}SKILL.md"
+    if skill_md not in names:
+        raise PublishError(
+            code=400,
+            error="invalid_plugin_structure",
+            message="skill 类型缺少 {skill-name}/SKILL.md",
+        )
+
+    raw = zf.read(skill_md).decode("utf-8", errors="replace")
+    fm, _ = _split_frontmatter(raw)
+    fm_name = str(fm.get("name") or "").strip()
+    fm_desc = str(fm.get("description") or "").strip()
+    if not fm_name or not fm_desc:
+        raise PublishError(
+            code=400,
+            error="invalid_skill_md",
+            message="SKILL.md frontmatter 校验失败：name、description 必填",
+        )
+
+    icon_path = _icon_path_in_zip(zf, plugin_yaml_path)
+    if not icon_path:
+        raise PublishError(
+            code=400,
+            error="invalid_plugin_structure",
+            message="插件包结构不符合要求：skill 类型缺少 icon.png",
+        )
+
+    return {"readme_path": readme_path, "skill_md_path": skill_md, "icon_path": icon_path}
+
+
 def _normalize_runtime_type(raw: str) -> str:
     return (raw or "").strip()
 
@@ -294,17 +370,23 @@ def _validate_plugin_yaml_public(data: dict[str, Any]) -> PluginYamlPublicFields
 
 
 def _validate_package_structure(
-    zf: zipfile.ZipFile, plugin_yaml_path: str, runtime_type: str
+    zf: zipfile.ZipFile,
+    plugin_yaml_path: str,
+    runtime_type: str,
+    *,
+    plugin_name: str,
 ) -> dict[str, str]:
     rt = runtime_type.lower()
     if rt == RUNTIME_TOOLS:
         return _validate_tools_layout(zf, plugin_yaml_path)
     if rt in (RUNTIME_MCP_STDIO.lower(), RUNTIME_RESTFUL_API.lower()):
         return _validate_src_based_layout(zf, plugin_yaml_path)
+    if rt == RUNTIME_SKILL:
+        return _validate_skill_layout(zf, plugin_yaml_path, plugin_name=plugin_name)
     raise PublishError(
         code=400,
         error="invalid_plugin_config",
-        message=f"不支持的 runtime.type: {runtime_type!r}（支持 tools、mcp-stdio、restful-api）",
+        message=f"不支持的 runtime.type: {runtime_type!r}（支持 tools、mcp-stdio、restful-api、skill）",
     )
 
 
@@ -363,8 +445,21 @@ def _extract_plugin_metadata(content: bytes) -> dict[str, Any]:
 
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
-            layout = _validate_package_structure(zf, plugin_yaml_path, yaml_public.runtime_type)
-            detail_desc = zf.read(layout["readme_path"]).decode("utf-8", errors="replace")
+            layout = _validate_package_structure(
+                zf,
+                plugin_yaml_path,
+                yaml_public.runtime_type,
+                plugin_name=yaml_public.name,
+            )
+            if (
+                yaml_public.runtime_type.lower() == RUNTIME_SKILL
+                and not (layout.get("readme_path") or "").strip()
+            ):
+                raw_skill = zf.read(layout["skill_md_path"]).decode("utf-8", errors="replace")
+                fm, _ = _split_frontmatter(raw_skill)
+                detail_desc = str(fm.get("description") or "").strip()
+            else:
+                detail_desc = zf.read(layout["readme_path"]).decode("utf-8", errors="replace")
             icon_bytes = zf.read(layout["icon_path"])
     except PublishError:
         raise
@@ -628,7 +723,13 @@ def publish(
     )
     file_path = version_dir
 
-    upload_result = storage.upload_bytes(content, zip_key)
+    # 写入校验和/大小到对象 metadata，避免下载时读全量对象重复计算
+    zip_sha256 = computed
+    upload_result = storage.upload_bytes(
+        content,
+        zip_key,
+        metadata={"sha256": zip_sha256, "size": str(len(content))},
+    )
     if not upload_result.get("success"):
         raise PublishError(
             code=500,
@@ -1006,11 +1107,12 @@ def _resolve_latest_version_for_download(
 def get_download_info(
     *,
     asset_id: str,
+    version: str | None = None,
     db: Session,
     storage: S3StorageClient,
     fetch_user_id: str | None = None,
 ) -> PluginDownloadData:
-    """Resolve latest artifact and return public download info."""
+    """根据 asset_id（可选 version）返回预签名下载信息。"""
     asset_repo = MarketAssetRepository(db)
     version_repo = MarketAssetVersionRepository(db)
     fetch_repo = PluginFetchRecordRepository(db)
@@ -1023,11 +1125,29 @@ def get_download_info(
             message=f"插件 '{asset_id}' 不存在",
         )
 
-    version_row = _resolve_latest_version_for_download(
-        asset_id=asset.asset_id,
-        latest_version=asset.latest_version,
-        version_repo=version_repo,
-    )
+    version = (version or "").strip() or None
+    if version is not None:
+        if not VERSION_PATTERN.match(version):
+            raise PublishError(
+                code=422,
+                error="invalid_version",
+                data={"version": version},
+                message="version 参数格式错误，应为 x.y.z（如 1.0.0）",
+            )
+        version_row = version_repo.get_version(asset_id=asset.asset_id, version=version)
+        if not version_row:
+            raise PublishError(
+                code=404,
+                error="version_not_found",
+                data={"asset_id": asset.asset_id, "version": version},
+                message=f"插件 '{asset.name}' 不存在版本 '{version}'",
+            )
+    else:
+        version_row = _resolve_latest_version_for_download(
+            asset_id=asset.asset_id,
+            latest_version=asset.latest_version,
+            version_repo=version_repo,
+        )
     if not version_row:
         raise PublishError(
             code=404,
@@ -1058,12 +1178,29 @@ def get_download_info(
 
     download_url = storage.presigned_get_url(key)
 
-    stat = storage.get_object_size_and_sha256(key)
-    if not stat.get("success"):
+    # 下载元数据只从 HEAD + x-amz-meta-* 读取，避免读全量对象
+    metadata = head.get("metadata") or {}
+    checksum_sha256 = str(metadata.get("sha256") or "").strip()
+
+    size_meta = str(metadata.get("size") or "").strip()
+    size: int | None = None
+    if size_meta:
+        try:
+            size = int(size_meta)
+        except ValueError:
+            size = None
+    if size is None:
+        # 兜底取 ContentLength（仍为 HEAD，无需读取对象 body）
+        try:
+            size = int(head.get("size")) if head.get("size") is not None else None
+        except Exception:
+            size = None
+
+    if size is None or not checksum_sha256:
         raise PublishError(
             code=500,
             error="storage_error",
-            message=f"读取插件包元数据失败: {stat.get('error', 'unknown')}",
+            message="插件包对象缺少必要的元数据（sha256/size），请重新发布该版本",
         )
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -1099,6 +1236,6 @@ def get_download_info(
         asset_id=asset.asset_id,
         name=asset.name,
         version=version_row.version,
-        file_size=int(stat.get("size", 0)),
-        checksum_sha256=str(stat.get("checksum_sha256", "")),
+        file_size=int(size),
+        checksum_sha256=checksum_sha256,
     )

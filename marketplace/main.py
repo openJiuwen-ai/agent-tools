@@ -1,4 +1,5 @@
 import os
+import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -17,6 +18,9 @@ from plugins_market.core.database import engine, DATABASE_URL
 from plugins_market.core.errors import PublishError
 from plugins_market.models.base import Base
 from plugins_market.routers.register import router_register
+from plugins_market.core.s3_storage_client import close_storage_client_if_initialized
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -69,6 +73,18 @@ def create_app() -> FastAPI:
 
     Base.metadata.create_all(bind=engine)
 
+    @fastapi_app.on_event("shutdown")
+    async def _shutdown_cleanup() -> None:
+        # best-effort cleanup for long-lived clients / pools
+        try:
+            close_storage_client_if_initialized()
+        except Exception as e:
+            logger.warning("shutdown cleanup: failed to close storage client: %s", e)
+        try:
+            engine.dispose()
+        except Exception as e:
+            logger.warning("shutdown cleanup: failed to dispose db engine: %s", e)
+
     return fastapi_app
 
 
@@ -79,12 +95,19 @@ def main() -> None:
     """Run service via `python main.py`."""
     host = os.getenv("STORE_HOST", settings.host)
     port = int(os.getenv("STORE_PORT", settings.port))
+    workers = int(os.getenv("STORE_WORKERS", "1").strip() or "1")
+
+    # uvicorn reload 与多进程 worker 不建议同时启用
+    reload = bool(settings.debug)
+    if reload:
+        workers = 1
 
     uvicorn.run(
         "main:app",
         host=host,
         port=port,
-        reload=settings.debug,
+        reload=reload,
+        workers=workers,
         log_level="info",
     )
 

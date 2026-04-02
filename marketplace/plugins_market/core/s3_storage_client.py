@@ -169,6 +169,14 @@ class S3StorageClient:
 
         self._ensure_bucket_exists()
 
+    def close(self) -> None:
+        """释放可关闭的底层资源（httpx 连接池等）。"""
+        if self._obs_iam_client is not None:
+            try:
+                self._obs_iam_client.close()
+            except Exception as e:
+                logger.warning("Failed to close HuaweiCloudIAM client: %s", e)
+
     def _s3_botocore_subconfig(self) -> Dict[str, Any]:
         addressing_style = "virtual" if self.config.storage_type == "OBS" else "path"
         s3_cfg: Dict[str, Any] = {"addressing_style": addressing_style}
@@ -349,14 +357,24 @@ class S3StorageClient:
         r = self.delete_objects(keys)
         return {"success": r.get("success", False), "deleted": len(keys), "errors": r.get("errors", [])}
 
-    def upload_bytes(self, body: bytes, s3_key: str) -> Dict[str, Any]:
+    def upload_bytes(
+        self,
+        body: bytes,
+        s3_key: str,
+        *,
+        metadata: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
         """Upload bytes to S3/MinIO. Key is path within bucket (e.g. plugins/...)."""
         try:
-            self.s3_client.put_object(
-                Bucket=self.config.bucket_name,
-                Key=s3_key,
-                Body=body,
-            )
+            kwargs: Dict[str, Any] = {
+                "Bucket": self.config.bucket_name,
+                "Key": s3_key,
+                "Body": body,
+            }
+            if metadata:
+                # S3/OBS 会将其映射为 x-amz-meta-*
+                kwargs["Metadata"] = metadata
+            self.s3_client.put_object(**kwargs)
             return {
                 "success": True,
                 "bucket": self.config.bucket_name,
@@ -373,8 +391,15 @@ class S3StorageClient:
     def head_object(self, key: str) -> Dict[str, Any]:
         """Check object existence via metadata only (without reading body)."""
         try:
-            self.s3_client.head_object(Bucket=self.config.bucket_name, Key=key)
-            return {"success": True, "exists": True, "key": key}
+            resp = self.s3_client.head_object(Bucket=self.config.bucket_name, Key=key)
+            return {
+                "success": True,
+                "exists": True,
+                "key": key,
+                "size": resp.get("ContentLength"),
+                "metadata": resp.get("Metadata") or {},
+                "storage_type": self.config.storage_type,
+            }
         except Exception as e:
             raw_code = ""
             try:
@@ -446,3 +471,14 @@ def get_storage_client() -> "S3StorageClient":
         config = S3StorageConfig(storage_type=storage_type or "MinIO")
         _storage_client = S3StorageClient(config)
     return _storage_client
+
+
+def close_storage_client_if_initialized() -> None:
+    """仅在单例已创建时才做 close，避免关机阶段意外初始化依赖链路。"""
+    global _storage_client
+    if _storage_client is None:
+        return
+    try:
+        _storage_client.close()
+    finally:
+        _storage_client = None

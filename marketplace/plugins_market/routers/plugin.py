@@ -9,6 +9,7 @@ from fastapi import (
     Header,
     HTTPException,
     Path,
+    Query,
     UploadFile,
     status,
 )
@@ -145,7 +146,7 @@ def get_publish_auth(
     auth_count = int(has_system) + int(has_bearer_token)
     if auth_count != 1:
         raise _auth_error(
-            status.HTTP_403_FORBIDDEN,
+            status.HTTP_401_UNAUTHORIZED,
             "Missing/invalid authorization: provide exactly one of "
             "Authorization: Bearer <token>, or X-System-Token",
         )
@@ -155,11 +156,11 @@ def get_publish_auth(
         if system_admin_token and x_system_token.strip() == system_admin_token:
             acting = settings.system_admin_user
             return (None, True, acting)
-        raise _auth_error(status.HTTP_403_FORBIDDEN, "Invalid X-System-Token")
+        raise _auth_error(status.HTTP_401_UNAUTHORIZED, "Invalid X-System-Token")
 
     token = authorization[7:].strip()
     if not token:
-        raise _auth_error(status.HTTP_403_FORBIDDEN, "Invalid or empty token")
+        raise _auth_error(status.HTTP_401_UNAUTHORIZED, "Invalid or empty token")
     return (token, False, None)
 
 
@@ -218,6 +219,7 @@ def list_plugins(
 )
 async def get_artifact_download(
     artifact_id: str = Path(..., alias="id"),
+    version: Optional[str] = Query(None, description="版本号（如 1.0.0），不指定则返回最新版本"),
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
     authorization: Optional[str] = Header(None, description="Authorization: Bearer <token>"),
@@ -237,6 +239,7 @@ async def get_artifact_download(
     try:
         result = get_download_info(
             asset_id=artifact_id,
+            version=version,
             db=db,
             storage=storage,
             fetch_user_id=fetch_user_id,

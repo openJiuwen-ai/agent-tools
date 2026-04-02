@@ -35,6 +35,22 @@ class HuaweiCloudKMS:
             or "RSAES_OAEP_SHA_256"
         )
         self._client = httpx.Client(timeout=30.0)
+        self._closed: bool = False
+
+    def close(self) -> None:
+        """释放底层 HTTP 连接池资源。"""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._client.close()
+        except Exception as e:
+            logger.warning("Failed to close KMS http client: %s", e)
+        try:
+            if self.iam_client is not None:
+                self.iam_client.close()
+        except Exception as e:
+            logger.warning("Failed to close IAM client from KMS: %s", e)
 
     def _get_headers(self) -> dict[str, str]:
         token = self.iam_client.get_token(project_id=self.project_id)
