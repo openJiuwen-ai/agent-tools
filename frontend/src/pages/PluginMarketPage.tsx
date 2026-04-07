@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import {
   AlignLeft,
   BarChart3,
@@ -34,6 +35,7 @@ import { ConfigCard, type ConfigCardTag, type EditingState } from '@/components/
 import { ConfigTable, type TableColumn } from '@/components/Common/common-table'
 import { Empty } from '@/components/Common/Empty'
 import { getPluginArtifactDownload } from '@/api/plugin'
+import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
 
 /**
@@ -314,6 +316,8 @@ function PluginMarketIcon({
 
 export default function PluginMarketPage() {
   const { t, i18n } = useTranslation()
+  const navigate = useNavigate()
+  const { user, isAuthenticated, logout } = useGitCodeAuth()
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const viewType: ViewType = viewMode === 'grid' ? 'grid' : 'table'
   const [searchInput, setSearchInput] = useState('')
@@ -718,6 +722,31 @@ export default function PluginMarketPage() {
   const toolbarRight = useMemo(
     () => (
       <div className="flex items-center gap-2">
+        {isAuthenticated && user ? (
+          <span
+            className="hidden max-w-[160px] truncate text-sm text-[#374151] sm:inline"
+            title={user.name || user.login}
+          >
+            {user.name || user.login}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => navigate('/login')}
+            className="h-10 px-3 text-sm font-medium text-[#0369a1] hover:text-[#0c4a6e] underline-offset-2 hover:underline"
+          >
+            {t('auth.toolbar.login')}
+          </button>
+        )}
+        {isAuthenticated ? (
+          <button
+            type="button"
+            onClick={() => logout()}
+            className="h-10 px-3 bg-white/95 border border-[#d7e2f6] text-[#1f2937] rounded-lg text-sm font-medium shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:bg-[#f8fbff] hover:border-[#bfdbfe] transition-colors"
+          >
+            {t('auth.toolbar.logout')}
+          </button>
+        ) : null}
         <LanguageSwitcher />
         <button
           onClick={handleRefresh}
@@ -729,7 +758,7 @@ export default function PluginMarketPage() {
         </button>
       </div>
     ),
-    [loading, t]
+    [loading, t, isAuthenticated, user, logout, navigate]
   )
 
   return (

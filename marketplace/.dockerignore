@@ -1,0 +1,25 @@
+# Git / IDE
+.git
+.gitignore
+.idea
+.vscode
+.cursor
+
+# Python
+.venv
+venv
+__pycache__
+*.py[cod]
+*$py.class
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Logs / local data（运行时挂载卷）
+logs
+*.log
+data
+
+# 文档（可选：若希望 README 进镜像可删掉下一行）
+*.md

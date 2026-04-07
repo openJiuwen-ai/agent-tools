@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from 'react-query'
 import { BrowserRouter } from 'react-router-dom'
 import { setApiBaseUrl } from '@/api'
+import { GitCodeAuthProvider } from '@/auth/GitCodeAuthContext'
 import { ENV_CONFIG } from '@/config/environment'
 import './i18n'
 import App from './App'
@@ -16,7 +17,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <App />
+        <GitCodeAuthProvider>
+          <App />
+        </GitCodeAuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>

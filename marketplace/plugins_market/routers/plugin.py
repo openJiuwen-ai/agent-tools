@@ -16,7 +16,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from common.security.security_utils import SecurityUtils
-from plugins_market.core.auth import get_gitcode_user_id, require_auth
+from plugins_market.core.auth import AuthContext, get_gitcode_user_id, require_auth
 from plugins_market.core.config import settings
 from plugins_market.core.database import get_db
 from plugins_market.core.s3_storage_client import get_storage_client
@@ -303,7 +303,7 @@ def get_plugin_version_detail(
 async def delete_plugin_version(
     asset_id: str,
     version: str,
-    auth: tuple = Depends(require_auth),
+    auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
     storage: Any = Depends(get_storage_client),
 ):

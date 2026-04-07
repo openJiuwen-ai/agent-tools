@@ -97,5 +97,22 @@
       "updateTime": "更新时间",
       "tags": "标签"
     }
+  },
+  "auth": {
+    "login": {
+      "title": "登录",
+      "subtitle": "使用 GitCode 账号登录插件市场。若浏览器已在 gitcode.com 登录，授权将自动完成。",
+      "gitcodeButton": "使用 GitCode 登录",
+      "hintGitcodeSession": "登录态与访问令牌由 GitCode 管理，本站不保存密码，也不维护 refresh_token。"
+    },
+    "oauth": {
+      "exchanging": "正在完成登录…",
+      "genericError": "登录失败，请重试"
+    },
+    "toolbar": {
+      "login": "登录",
+      "logout": "退出",
+      "guest": "未登录"
+    }
   }
 }

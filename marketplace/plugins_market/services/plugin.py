@@ -18,6 +18,7 @@ import yaml
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from plugins_market.core.auth import AuthContext
 from plugins_market.core.errors import PublishError
 from plugins_market.core.s3_storage_client import S3StorageClient
 from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB
@@ -991,12 +992,11 @@ def _version_prefix_from_file_path(storage: Any, file_path: str | None) -> str |
 def delete_plugin_version_service(
     asset_id: str,
     version: str,
-    auth: tuple,
+    auth: AuthContext,
     db: Session,
     storage: S3StorageClient,
 ) -> PluginVersionDeleteData:
     logger.info("Delete plugin version request: asset_id=%s version=%s", asset_id, version)
-    is_admin, acting_user_id = auth
     asset_repo = MarketAssetRepository(db)
     version_repo = MarketAssetVersionRepository(db)
 
@@ -1004,11 +1004,11 @@ def delete_plugin_version_service(
     if not asset:
         logger.warning("Delete plugin version failed: asset not found, asset_id=%s", asset_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
-    if not is_admin and acting_user_id and asset.publisher_id != acting_user_id:
+    if not auth.is_admin and auth.acting_user_id and asset.publisher_id != auth.acting_user_id:
         logger.warning(
             "Delete plugin version forbidden: asset_id=%s acting_user_id=%s publisher_id=%s",
             asset_id,
-            acting_user_id,
+            auth.acting_user_id,
             asset.publisher_id,
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")

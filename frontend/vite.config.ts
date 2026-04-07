@@ -2,13 +2,19 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+function devApiProxyTarget(env: Record<string, string>): string {
+  const host = (env.BACKEND_URL || 'localhost').trim() || 'localhost'
+  const port = (env.BACKEND_PORT || '8100').trim() || '8100'
+  return `http://${host}:${port}`
+}
+
 export default defineConfig(({ mode }) => {
   const envDir = path.resolve(__dirname, '..')
   const env = loadEnv(mode, envDir, '')
 
   const apiProxy = {
     '/api': {
-      target: env.VITE_API_PROXY_TARGET || 'http://localhost:8000',
+      target: devApiProxyTarget(env),
       changeOrigin: true,
     },
   }

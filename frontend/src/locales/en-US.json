@@ -97,5 +97,22 @@
       "updateTime": "Updated",
       "tags": "Tags"
     }
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in",
+      "subtitle": "Sign in with your GitCode account. If you are already signed in on gitcode.com, authorization usually completes immediately.",
+      "gitcodeButton": "Continue with GitCode",
+      "hintGitcodeSession": "Session and access tokens are managed by GitCode. We do not store passwords or maintain refresh tokens."
+    },
+    "oauth": {
+      "exchanging": "Completing sign-in…",
+      "genericError": "Sign-in failed. Please try again."
+    },
+    "toolbar": {
+      "login": "Sign in",
+      "logout": "Sign out",
+      "guest": "Not signed in"
+    }
   }
 }

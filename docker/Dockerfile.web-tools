@@ -23,22 +23,25 @@ COPY frontend ./
 RUN npm run build
 
 # -----------------------------------------------------------------------------
-# Stage 2：Nginx 托管静态资源
+# Stage 2：Nginx 托管静态资源；/api/ 反代由环境变量 BACKEND_URL + BACKEND_PORT 配置（与 agent-studio 一致）
+# 官方镜像会对 /etc/nginx/templates/*.template 做 envsubst
 # -----------------------------------------------------------------------------
 FROM nginx:alpine
 
 COPY --from=builder /app/frontend/dist /usr/share/nginx/html
-COPY frontend/nginx.conf /etc/nginx/nginx.conf
 
-COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-# Windows 检出 CRLF 时会导致 shebang 变成 /bin/sh\r，出现 “no such file or directory”
-RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
+COPY frontend/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY frontend/nginx/default.conf.template /etc/nginx/templates/default.conf.template
+
+# 默认值：无后端时仍可启动；访问宿主机上的 API 请改为 host.docker.internal 等
+ENV BACKEND_URL=localhost
+ENV BACKEND_PORT=8100
 
 RUN chown -R nginx:nginx /usr/share/nginx/html
 
-EXPOSE 80
+EXPOSE 9002
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -q -O- http://127.0.0.1/api/health || exit 1
+    CMD wget -q -O- http://127.0.0.1:9002/health || exit 1
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["nginx", "-g", "daemon off;"]
