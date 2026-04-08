@@ -18,6 +18,7 @@ from plugins_market.core.errors import PublishError
 from plugins_market.models.base import Base
 from plugins_market.routers.register import router_register
 from plugins_market.core.s3_storage_client import close_storage_client_if_initialized
+from plugins_market.validation.constants import MAX_FILE_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,32 @@ def create_app() -> FastAPI:
             status_code=500,
             content={"detail": str(exc) or "服务器内部错误，请稍后重试"},
         )
+
+    @fastapi_app.middleware("http")
+    async def reject_oversized_upload(request: Request, call_next):
+        """
+        在 Starlette 解析 multipart 之前，通过 Content-Length 请求头快速拒绝超大文件。
+        仅对 POST /api/*/plugins 上传接口生效，其他请求直接放行。
+        """
+        if request.method == "POST" and request.url.path.rstrip("/").endswith("/plugins"):
+            cl_str = request.headers.get("content-length")
+            if cl_str is not None:
+                try:
+                    if int(cl_str) > MAX_FILE_SIZE:
+                        return JSONResponse(
+                            status_code=413,
+                            content={
+                                "detail": {
+                                    "code": 413,
+                                    "data": None,
+                                    "error": "file_too_large",
+                                    "message": f"文件大小超过限制（最大 {MAX_FILE_SIZE // (1024 * 1024)} MB）",
+                                }
+                            },
+                        )
+                except ValueError:
+                    pass
+        return await call_next(request)
 
     @fastapi_app.get("/api/health")
     async def health():
