@@ -1,4 +1,5 @@
-from typing import List, Optional, Tuple
+from collections import defaultdict
+from typing import Dict, List, Optional, Tuple
 import time
 
 from sqlalchemy import and_, asc, desc, or_
@@ -174,6 +175,26 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
             .order_by(MarketAssetVersionDB.create_time.desc())
             .all()
         )
+
+    def list_version_strings_by_asset_ids(self, asset_ids: List[str]) -> Dict[str, List[str]]:
+        """按 asset_id 聚合版本号字符串；每个资产内按 create_time、version 升序（与发布时间线一致）。"""
+        if not asset_ids:
+            return {}
+        unique_ids = list(dict.fromkeys(asset_ids))
+        rows = (
+            self.query()
+            .filter(MarketAssetVersionDB.asset_id.in_(unique_ids))
+            .order_by(
+                MarketAssetVersionDB.asset_id.asc(),
+                MarketAssetVersionDB.create_time.asc(),
+                MarketAssetVersionDB.version.asc(),
+            )
+            .all()
+        )
+        out: Dict[str, List[str]] = defaultdict(list)
+        for row in rows:
+            out[row.asset_id].append(row.version)
+        return dict(out)
 
     def list_versions_chronological(self, asset_id: str) -> List[MarketAssetVersionDB]:
         """Oldest first — used to build cumulative changelog.log from all version rows."""

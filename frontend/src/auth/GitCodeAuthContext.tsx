@@ -27,8 +27,12 @@ type GitCodeAuthState = {
 const GitCodeAuthContext = createContext<GitCodeAuthState | null>(null)
 
 export function GitCodeAuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null)
-  const [user, setUser] = useState<GitCodeUser | null>(null)
+  /**
+   * 首帧即读 sessionStorage，避免刷新 /profile 等页时先渲染「未登录」、误跳 /login，
+   * 再在登录页被当成已登录却未写入 postLoginRedirect 而落到默认「/」市场首页。
+   */
+  const [token, setToken] = useState<string | null>(() => getStoredGitCodeToken())
+  const [user, setUser] = useState<GitCodeUser | null>(() => getStoredGitCodeUser())
 
   useEffect(() => {
     const t = getStoredGitCodeToken()

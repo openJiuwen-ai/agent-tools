@@ -16,6 +16,8 @@ export interface MarketPlugin {
   certification: string
   runTime: string
   latestVersion: string
+  /** 全部版本号（列表接口 all_versions） */
+  allVersions: string[]
   viewCount: number
   installCount: number
   likeCount: number
@@ -66,6 +68,7 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
     certification: item.certification || '',
     runTime: firstString(item.plugin_type, item.run_time),
     latestVersion: item.latest_version || '',
+    allVersions: Array.isArray(item.all_versions) ? item.all_versions : [],
     viewCount: item.view_count,
     installCount: item.install_count,
     likeCount: item.like_count,

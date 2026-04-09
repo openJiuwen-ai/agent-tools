@@ -14,6 +14,7 @@ import {
   Heart,
   MessageCircle,
   RefreshCw,
+  ScrollText,
   Tag,
   User,
 } from 'lucide-react'
@@ -23,7 +24,12 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  CircularProgress,
+  FormControl,
   IconButton,
+  InputLabel,
+  MenuItem,
+  Select,
   Tooltip,
   Typography,
 } from '@mui/material'
@@ -35,9 +41,16 @@ import type { ViewType } from '@/components/Common/common-page'
 import { ConfigCard, type ConfigCardTag, type EditingState } from '@/components/Common/common-grid'
 import { ConfigTable, type TableColumn } from '@/components/Common/common-table'
 import { Empty } from '@/components/Common/Empty'
-import { getPluginArtifactDownload } from '@/api/plugin'
+import axios from 'axios'
+import { getPluginArtifactDownload, getPluginVersionDetail } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
+
+function isCanceledRequest(err: unknown): boolean {
+  if (axios.isCancel(err)) return true
+  if (!axios.isAxiosError(err)) return false
+  return err.code === 'ERR_CANCELED' || err.name === 'CanceledError'
+}
 
 /**
  * 尽量在同一文档内触发下载，避免 `target="_blank"` 先打开空白新标签造成的「闪白」体感。
@@ -347,6 +360,11 @@ export default function PluginMarketPage() {
   const [detailDialogOpen, setDetailDialogOpen] = useState(false)
   const [downloadingAssetId, setDownloadingAssetId] = useState<string | null>(null)
   const downloadLockRef = useRef(false)
+  /** 详情弹窗内：指定要下载的版本（列表接口 `all_versions`） */
+  const [detailDownloadVersion, setDetailDownloadVersion] = useState('')
+  const [detailChangelog, setDetailChangelog] = useState<string | null>(null)
+  const [detailChangelogLoading, setDetailChangelogLoading] = useState(false)
+  const [detailChangelogError, setDetailChangelogError] = useState<string | null>(null)
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -390,8 +408,49 @@ export default function PluginMarketPage() {
     }
   }
 
+  const defaultDownloadVersion = useCallback((plugin: MarketPlugin) => {
+    const versions = plugin.allVersions
+    const latest = plugin.latestVersion?.trim()
+    if (latest && versions.includes(latest)) return latest
+    if (versions.length) return versions[versions.length - 1]
+    return latest || ''
+  }, [])
+
+  const effectiveDetailVersion = useMemo(() => {
+    if (!selectedPlugin) return ''
+    return (detailDownloadVersion || defaultDownloadVersion(selectedPlugin)).trim()
+  }, [selectedPlugin, detailDownloadVersion, defaultDownloadVersion])
+
+  useEffect(() => {
+    if (!detailDialogOpen || !selectedPlugin || !effectiveDetailVersion) {
+      setDetailChangelog(null)
+      setDetailChangelogLoading(false)
+      setDetailChangelogError(null)
+      return
+    }
+    const ac = new AbortController()
+    setDetailChangelogLoading(true)
+    setDetailChangelogError(null)
+    setDetailChangelog(null)
+    void getPluginVersionDetail(selectedPlugin.assetId, effectiveDetailVersion, { signal: ac.signal })
+      .then(data => {
+        const raw = data.changelog?.trim()
+        setDetailChangelog(raw && raw.length > 0 ? raw : null)
+        setDetailChangelogLoading(false)
+      })
+      .catch((err: unknown) => {
+        if (isCanceledRequest(err)) {
+          return
+        }
+        setDetailChangelogError(err instanceof Error ? err.message : t('plugins.detail.changelogLoadFailed'))
+        setDetailChangelogLoading(false)
+      })
+    return () => ac.abort()
+  }, [detailDialogOpen, selectedPlugin, effectiveDetailVersion, t])
+
   const handleViewPlugin = (plugin: MarketPlugin) => {
     setSelectedPlugin(plugin)
+    setDetailDownloadVersion(defaultDownloadVersion(plugin))
     setDetailDialogOpen(true)
   }
 
@@ -404,12 +463,12 @@ export default function PluginMarketPage() {
   }
 
   const handleDownloadPlugin = useCallback(
-    async (plugin: MarketPlugin) => {
+    async (plugin: MarketPlugin, version?: string) => {
       if (downloadLockRef.current) return
       downloadLockRef.current = true
       setDownloadingAssetId(plugin.assetId)
       try {
-        const meta = await getPluginArtifactDownload(plugin.assetId)
+        const meta = await getPluginArtifactDownload(plugin.assetId, version)
         const baseName = meta.name.trim() || plugin.displayName.trim() || plugin.assetId || 'plugin'
         const safeName = baseName.replace(/\s+/g, '-')
         const filename = `${safeName}_${meta.version}.zip`
@@ -914,6 +973,52 @@ export default function PluginMarketPage() {
                     />
                   </div>
                 )}
+                {effectiveDetailVersion ? (
+                  <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 p-4">
+                    <div className="mb-2 flex items-center gap-1.5">
+                      <ScrollText className="h-4 w-4 shrink-0 text-slate-600" aria-hidden />
+                      <Typography variant="subtitle1" className="font-bold text-gray-900">
+                        {t('plugins.detail.versionChangelog', { version: effectiveDetailVersion })}
+                      </Typography>
+                    </div>
+                    {detailChangelogLoading ? (
+                      <div className="flex items-center gap-2 py-2 text-slate-600">
+                        <CircularProgress size={18} />
+                        <Typography variant="body2">{t('plugins.detail.changelogLoading')}</Typography>
+                      </div>
+                    ) : detailChangelogError ? (
+                      <Typography variant="body2" color="error">
+                        {detailChangelogError}
+                      </Typography>
+                    ) : detailChangelog ? (
+                      <PluginMarkdown
+                        source={detailChangelog}
+                        className="prose prose-sm prose-neutral max-w-none max-h-48 overflow-y-auto text-gray-900 prose-p:my-1 prose-headings:my-2 prose-headings:scroll-mt-2 [&_p]:text-[0.9375rem]"
+                      />
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">
+                        {t('plugins.detail.changelogEmpty')}
+                      </Typography>
+                    )}
+                  </div>
+                ) : null}
+                {selectedPlugin.allVersions.length > 1 ? (
+                  <FormControl fullWidth size="small">
+                    <InputLabel id="plugin-detail-version-label">{t('plugins.detail.downloadVersion')}</InputLabel>
+                    <Select
+                      labelId="plugin-detail-version-label"
+                      label={t('plugins.detail.downloadVersion')}
+                      value={detailDownloadVersion || defaultDownloadVersion(selectedPlugin)}
+                      onChange={e => setDetailDownloadVersion(String(e.target.value))}
+                    >
+                      {[...selectedPlugin.allVersions].reverse().map(v => (
+                        <MenuItem key={v} value={v}>
+                          v{v}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                ) : null}
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <div className="flex items-center gap-1.5">
@@ -966,8 +1071,24 @@ export default function PluginMarketPage() {
                 </div>
               </div>
             </DialogContent>
-            <DialogActions>
+            <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
               <Button onClick={() => setDetailDialogOpen(false)}>{t('common.buttons.close')}</Button>
+              <Button
+                variant="contained"
+                startIcon={<Download className="h-4 w-4" />}
+                disabled={downloadingAssetId === selectedPlugin.assetId}
+                onClick={() =>
+                  void handleDownloadPlugin(
+                    selectedPlugin,
+                    selectedPlugin.allVersions.length > 1
+                      ? detailDownloadVersion || defaultDownloadVersion(selectedPlugin)
+                      : undefined,
+                  )
+                }
+                sx={{ textTransform: 'none' }}
+              >
+                {t('plugins.actions.download')}
+              </Button>
             </DialogActions>
           </>
         )}

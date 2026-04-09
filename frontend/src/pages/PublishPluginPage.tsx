@@ -1,10 +1,24 @@
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Download } from 'lucide-react'
-import { Button, Checkbox, FormControlLabel, TextField, Typography } from '@mui/material'
+import {
+  Button,
+  Checkbox,
+  CircularProgress,
+  FormControl,
+  FormControlLabel,
+  FormHelperText,
+  InputLabel,
+  ListItemText,
+  MenuItem,
+  Select,
+  TextField,
+  Typography,
+} from '@mui/material'
 import { UserAccountMenu } from '@/components/Common/UserAccountMenu'
-import { getPublishTemplatePresigned, publishPlugin } from '@/api/plugin'
+import { useQuery } from 'react-query'
+import { getPlugins, getPublishTemplatePresigned, publishPlugin } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { sha256HexOfFile } from '@/utils/sha256File'
@@ -20,6 +34,7 @@ export default function PublishPluginPage() {
   const [file, setFile] = useState<File | null>(null)
   const [checksum, setChecksum] = useState('')
   const [hashing, setHashing] = useState(false)
+  /** 空字符串 = 按新插件发布（不传 plugin_id）；否则为已有插件的 asset_id */
   const [pluginId, setPluginId] = useState('')
   const [pluginVersion, setPluginVersion] = useState('')
   const [versionDesc, setVersionDesc] = useState('')
@@ -36,6 +51,21 @@ export default function PublishPluginPage() {
     setPostLoginRedirect('/profile/publish')
     navigate('/login', { replace: true })
   }, [isAuthenticated, navigate])
+
+  const { data: myPluginsRes, isLoading: myPluginsLoading } = useQuery(
+    ['publish-my-plugins', user?.id],
+    () => getPlugins({ publisher_id: user!.id, page: 1, page_size: 100 }),
+    { enabled: Boolean(isAuthenticated && user?.id) },
+  )
+
+  const myPlugins = useMemo(() => {
+    const items = myPluginsRes?.data?.items ?? []
+    return [...items].sort((a, b) => {
+      const na = (a.display_name || a.displayName || a.name || '').toLowerCase()
+      const nb = (b.display_name || b.displayName || b.name || '').toLowerCase()
+      return na.localeCompare(nb, undefined, { sensitivity: 'base' })
+    })
+  }, [myPluginsRes])
 
   useEffect(() => {
     if (!file) {
@@ -241,14 +271,48 @@ export default function PublishPluginPage() {
             )}
           </div>
 
-          <TextField
-            label={t('publish.fieldPluginId')}
-            value={pluginId}
-            onChange={e => setPluginId(e.target.value)}
-            fullWidth
-            size="small"
-            helperText={t('publish.fieldPluginIdHelp')}
-          />
+          <FormControl fullWidth size="small" variant="outlined">
+            <InputLabel id="publish-plugin-id-label" shrink>
+              {t('publish.fieldPluginId')}
+            </InputLabel>
+            <Select
+              labelId="publish-plugin-id-label"
+              label={t('publish.fieldPluginId')}
+              value={pluginId}
+              onChange={e => setPluginId(String(e.target.value))}
+              displayEmpty
+              notched
+              inputProps={{ 'aria-label': t('publish.fieldPluginId') }}
+              renderValue={selected => {
+                if (!selected) return t('publish.pluginIdNewOption')
+                const row = myPlugins.find(p => p.asset_id === selected)
+                if (!row) return selected
+                const title = row.display_name || row.displayName || row.name
+                const pkgName = row.name?.trim() || ''
+                if (!pkgName || pkgName === title) return title
+                return `${title} (${pkgName})`
+              }}
+            >
+              <MenuItem value="">{t('publish.pluginIdNewOption')}</MenuItem>
+              {myPlugins.map(p => {
+                const title = p.display_name || p.displayName || p.name
+                const pkgName = p.name?.trim() || '—'
+                return (
+                  <MenuItem key={p.asset_id} value={p.asset_id}>
+                    <ListItemText primary={title} secondary={pkgName} />
+                  </MenuItem>
+                )
+              })}
+            </Select>
+            {myPluginsLoading ? (
+              <FormHelperText sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CircularProgress size={14} />
+                {t('publish.pluginListLoading')}
+              </FormHelperText>
+            ) : (
+              <FormHelperText>{t('publish.fieldPluginIdHelp')}</FormHelperText>
+            )}
+          </FormControl>
           <TextField
             label={t('publish.fieldVersion')}
             value={pluginVersion}

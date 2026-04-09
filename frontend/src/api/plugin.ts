@@ -44,6 +44,8 @@ export interface MarketplacePluginItem {
   /** 旧字段名，仅作兼容 */
   run_time?: string | null
   latest_version?: string | null
+  /** GET /plugins 列表：该插件全部版本号（与后端 market_asset_versions 一致，时间线升序） */
+  all_versions?: string[] | null
   view_count: number
   install_count: number
   like_count: number
@@ -84,7 +86,7 @@ export interface PluginDownloadResponse {
   data: PluginDownloadData
 }
 
-function downloadErrorMessage(err: unknown, fallback: string): string {
+function apiErrorMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
     const payload = err.response?.data as {
       message?: string
@@ -101,16 +103,19 @@ function downloadErrorMessage(err: unknown, fallback: string): string {
 }
 
 /** Request download metadata (public URL); server increments install count. */
-export async function getPluginArtifactDownload(assetId: string): Promise<PluginDownloadData> {
+export async function getPluginArtifactDownload(assetId: string, version?: string): Promise<PluginDownloadData> {
   const client = getApiClient()
+  const v = version?.trim()
   try {
-    const { data } = await client.get<PluginDownloadResponse>(API_ENDPOINTS.ARTIFACTS.download(assetId))
+    const { data } = await client.get<PluginDownloadResponse>(API_ENDPOINTS.ARTIFACTS.download(assetId), {
+      params: v ? { version: v } : undefined,
+    })
     if (data.code !== 200 || !data.data?.download_url) {
       throw new Error(data.message || 'Download failed')
     }
     return data.data
   } catch (e) {
-    throw new Error(downloadErrorMessage(e, 'Download failed'))
+    throw new Error(apiErrorMessage(e, 'Download failed'))
   }
 }
 
@@ -186,10 +191,12 @@ export interface PluginVersionDetailResponse {
 export async function getPluginVersionDetail(
   assetId: string,
   version: string,
+  options?: { signal?: AbortSignal },
 ): Promise<PluginVersionDetailData> {
   const client = getApiClient()
   const { data } = await client.get<PluginVersionDetailResponse>(
     API_ENDPOINTS.PLUGINS.versionDetail(assetId, version),
+    { signal: options?.signal },
   )
   if (data.code !== 200 || !data.data?.asset_id) {
     throw new MarketplaceApiError(data.message || '插件版本详情失败', data.code)
@@ -316,6 +323,27 @@ export async function publishPlugin(params: {
   }
 }
 
+/** DELETE /api/v1/plugins/{asset_id}/versions/{version} — 需 Bearer；删除指定版本（非字面量 `all`） */
+export async function deletePluginVersion(assetId: string, version: string): Promise<PluginVersionDeleteResult> {
+  const v = version.trim()
+  if (!v || v.toLowerCase() === 'all') {
+    throw new Error('Invalid version for single-version delete')
+  }
+  const client = getApiClient()
+  try {
+    const { data } = await client.delete<PluginVersionDeleteResponse>(
+      API_ENDPOINTS.PLUGINS.versionDetail(assetId, v),
+    )
+    if (data.code !== 200 || !data.data?.asset_id) {
+      throw new MarketplaceApiError(data.message || '删除失败', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(apiErrorMessage(e, '删除失败'))
+  }
+}
+
 /** DELETE /api/v1/plugins/{asset_id}/versions/all — 需 Bearer，删除资产及全部版本 */
 export async function deletePluginAllVersions(assetId: string): Promise<PluginVersionDeleteResult> {
   const client = getApiClient()
@@ -329,6 +357,6 @@ export async function deletePluginAllVersions(assetId: string): Promise<PluginVe
     return data.data
   } catch (e) {
     if (e instanceof MarketplaceApiError) throw e
-    throw new Error(downloadErrorMessage(e, '删除失败'))
+    throw new Error(apiErrorMessage(e, '删除失败'))
   }
 }
