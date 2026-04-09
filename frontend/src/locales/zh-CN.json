@@ -98,6 +98,57 @@
       "tags": "标签"
     }
   },
+  "profile": {
+    "title": "个人中心",
+    "subtitle": "我发布的插件",
+    "toolbarLink": "个人中心",
+    "backToMarket": "返回插件市场",
+    "backToList": "返回我的插件",
+    "redirecting": "正在跳转…",
+    "empty": "尚未发布插件，或当前页无数据。",
+    "table": {
+      "name": "插件",
+      "action": "操作"
+    },
+    "viewDetail": "查看详情",
+    "pageIndicator": "第 {{page}} / {{total}} 页",
+    "missingVersion": "未找到该插件或最新版本号，无法打开详情。",
+    "notOwner": "该插件不属于当前登录账号，无法删除。",
+    "changelog": "版本说明",
+    "deleteAll": "删除插件（全部版本）",
+    "deleteConfirmTitle": "确认删除？",
+    "deleteConfirmBody": "将删除该插件及其所有版本，操作不可恢复。",
+    "deleteConfirmAction": "确认删除",
+    "deleteFailed": "删除失败，请稍后重试。",
+    "noDetail": "无法加载插件详情。",
+    "publishEntry": "发布插件"
+  },
+  "publish": {
+    "title": "发布插件",
+    "backToProfile": "返回个人中心",
+    "intro": "按模板填写并打包为 zip 后上传。校验和由浏览器根据所选文件自动计算，无需手填。",
+    "downloadTemplate": "下载插件模板",
+    "templateFetching": "正在获取下载链接…",
+    "templateDownloadFailed": "获取模板下载链接失败，请稍后重试或联系管理员。",
+    "templateHint": "从对象存储安全下载模板 zip；请按需修改后再打包上传。",
+    "zipLabel": "插件包（.zip）",
+    "checksumLabel": "SHA-256 校验和",
+    "checksumHint": "选择文件后自动计算（与请求头 X-Checksum-SHA256 一致）。若修改 zip 请重新选择文件以更新。",
+    "checksumPlaceholder": "选择 zip 后将显示 64 位小写十六进制",
+    "hashing": "正在计算校验和…",
+    "hashFailed": "校验和计算失败，请重选文件或更换浏览器。",
+    "fieldPluginId": "plugin_id（可选）",
+    "fieldPluginIdHelp": "首次发布请留空；为已有插件发新版本时填写系统分配的 plugin_id。",
+    "fieldVersion": "版本号（可选）",
+    "fieldVersionHelp": "例如 1.0.0；不填则使用包内版本。",
+    "fieldVersionDesc": "版本说明（可选）",
+    "fieldForce": "强制覆盖（force）",
+    "submit": "上传发布",
+    "uploading": "正在上传…",
+    "uploadFailed": "发布失败，请检查网络与包内容后重试。",
+    "successDetail": "发布成功：{{name}} v{{version}}（plugin_id: {{pluginId}}）",
+    "redirectHint": "即将自动返回个人中心…"
+  },
   "auth": {
     "login": {
       "title": "登录",

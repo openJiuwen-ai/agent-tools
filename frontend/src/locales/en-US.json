@@ -98,6 +98,57 @@
       "tags": "Tags"
     }
   },
+  "profile": {
+    "title": "My profile",
+    "subtitle": "Plugins you published",
+    "toolbarLink": "My profile",
+    "backToMarket": "Back to marketplace",
+    "backToList": "Back to my plugins",
+    "redirecting": "Redirecting…",
+    "empty": "No published plugins yet, or this page is empty.",
+    "table": {
+      "name": "Plugin",
+      "action": "Actions"
+    },
+    "viewDetail": "View details",
+    "pageIndicator": "Page {{page}} / {{total}}",
+    "missingVersion": "Could not find the plugin or its latest version.",
+    "notOwner": "This plugin does not belong to the signed-in account.",
+    "changelog": "Changelog",
+    "deleteAll": "Delete plugin (all versions)",
+    "deleteConfirmTitle": "Delete this plugin?",
+    "deleteConfirmBody": "This removes all versions permanently.",
+    "deleteConfirmAction": "Delete",
+    "deleteFailed": "Delete failed. Please try again later.",
+    "noDetail": "Could not load plugin details.",
+    "publishEntry": "Publish plugin"
+  },
+  "publish": {
+    "title": "Publish plugin",
+    "backToProfile": "Back to profile",
+    "intro": "Fill in the template, zip it, then upload. The SHA-256 checksum is computed in the browser for the selected file—no manual entry.",
+    "downloadTemplate": "Download template",
+    "templateFetching": "Getting download link…",
+    "templateDownloadFailed": "Could not get the template download link. Try again or contact an admin.",
+    "templateHint": "Secure download from object storage; edit as needed, then zip and upload.",
+    "zipLabel": "Plugin package (.zip)",
+    "checksumLabel": "SHA-256 checksum",
+    "checksumHint": "Computed automatically after you pick a file (sent as X-Checksum-SHA256). Re-select the file if you change the zip.",
+    "checksumPlaceholder": "64-char lowercase hex appears after you choose a zip",
+    "hashing": "Computing checksum…",
+    "hashFailed": "Could not compute checksum. Try another file or browser.",
+    "fieldPluginId": "plugin_id (optional)",
+    "fieldPluginIdHelp": "Leave empty for first publish; set when publishing a new version of an existing plugin.",
+    "fieldVersion": "Version (optional)",
+    "fieldVersionHelp": "e.g. 1.0.0; if empty, the version from the package is used.",
+    "fieldVersionDesc": "Release notes (optional)",
+    "fieldForce": "Force overwrite (force)",
+    "submit": "Upload & publish",
+    "uploading": "Uploading…",
+    "uploadFailed": "Publish failed. Check the package and try again.",
+    "successDetail": "Published: {{name}} v{{version}} (plugin_id: {{pluginId}})",
+    "redirectHint": "Returning to your profile shortly…"
+  },
   "auth": {
     "login": {
       "title": "Sign in",

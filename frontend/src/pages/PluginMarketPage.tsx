@@ -30,6 +30,7 @@ import {
 import { pluginCardTooltipProps, pluginDetailHeaderTooltipProps } from '@/components/Common/pluginCardTooltip'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
 import { CommonPageLayout, LanguageSwitcher, SearchInput } from '@/components/Common/common-page'
+import { UserAccountMenu } from '@/components/Common/UserAccountMenu'
 import type { ViewType } from '@/components/Common/common-page'
 import { ConfigCard, type ConfigCardTag, type EditingState } from '@/components/Common/common-grid'
 import { ConfigTable, type TableColumn } from '@/components/Common/common-table'
@@ -300,6 +301,23 @@ function DetailPluginTags({ tags }: { tags: string[] }) {
   )
 }
 
+function PluginMarketUserMenu() {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const { user, logout } = useGitCodeAuth()
+  if (!user) return null
+  return (
+    <UserAccountMenu
+      primaryLabel={user.name || user.login}
+      title={user.name || user.login}
+      items={[
+        { id: 'profile', label: t('profile.toolbarLink'), onClick: () => navigate('/profile') },
+        { id: 'logout', label: t('auth.toolbar.logout'), onClick: () => logout() },
+      ]}
+    />
+  )
+}
+
 function PluginMarketIcon({
   plugin,
   size,
@@ -317,7 +335,7 @@ function PluginMarketIcon({
 export default function PluginMarketPage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
-  const { user, isAuthenticated, logout } = useGitCodeAuth()
+  const { user, isAuthenticated } = useGitCodeAuth()
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const viewType: ViewType = viewMode === 'grid' ? 'grid' : 'table'
   const [searchInput, setSearchInput] = useState('')
@@ -723,12 +741,7 @@ export default function PluginMarketPage() {
     () => (
       <div className="flex items-center gap-2">
         {isAuthenticated && user ? (
-          <span
-            className="hidden max-w-[160px] truncate text-sm text-[#374151] sm:inline"
-            title={user.name || user.login}
-          >
-            {user.name || user.login}
-          </span>
+          <PluginMarketUserMenu />
         ) : (
           <button
             type="button"
@@ -738,15 +751,6 @@ export default function PluginMarketPage() {
             {t('auth.toolbar.login')}
           </button>
         )}
-        {isAuthenticated ? (
-          <button
-            type="button"
-            onClick={() => logout()}
-            className="h-10 px-3 bg-white/95 border border-[#d7e2f6] text-[#1f2937] rounded-lg text-sm font-medium shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:bg-[#f8fbff] hover:border-[#bfdbfe] transition-colors"
-          >
-            {t('auth.toolbar.logout')}
-          </button>
-        ) : null}
         <LanguageSwitcher />
         <button
           onClick={handleRefresh}
@@ -758,7 +762,7 @@ export default function PluginMarketPage() {
         </button>
       </div>
     ),
-    [loading, t, isAuthenticated, user, logout, navigate]
+    [loading, t, isAuthenticated, user, navigate]
   )
 
   return (

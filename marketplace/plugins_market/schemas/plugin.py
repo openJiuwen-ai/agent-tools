@@ -61,6 +61,14 @@ class PluginVersionDeleteData(BaseModel):
     version: str  # 具体版本号或 "all"
 
 
+class PluginTemplatePresignData(BaseModel):
+    """GET /plugins/publish-template 返回的预签名下载信息。"""
+
+    download_url: str
+    expires_in: int
+    filename: str
+
+
 class PluginVersionDetail(BaseModel):
     asset_id: str
     version: str

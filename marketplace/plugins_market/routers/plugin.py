@@ -32,6 +32,7 @@ from plugins_market.schemas.plugin import (
     PluginListResponse,
     PluginPublishForm,
     PluginPublishResult,
+    PluginTemplatePresignData,
     PluginVersionDeleteData,
     PluginVersionDetail,
 )
@@ -197,6 +198,62 @@ async def publish_plugin(
         code=status.HTTP_200_OK,
         message="Publish plugin successfully",
         data=result,
+    )
+
+
+def _template_filename_from_key(key: str) -> str:
+    base = (key or "").strip().rstrip("/").split("/")[-1]
+    return base or "plugin-template.zip"
+
+
+@plugin_router.get(
+    "/publish-template",
+    response_model=ResponseModel[PluginTemplatePresignData],
+)
+async def get_publish_template_presigned(
+    auth: AuthContext = Depends(require_auth),
+    storage=Depends(get_storage_client),
+):
+    """为发布页「下载模板」生成私有桶对象的预签名 GET URL（需 Bearer 或 X-System-Token）。"""
+    _ = auth
+    key = (settings.plugin_template_object_key or "").strip()
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": 503,
+                "data": None,
+                "error": "template_not_configured",
+                "message": "未配置发布模板对象路径（MARKET_PLUGIN_TEMPLATE_OBJECT_KEY）",
+            },
+        )
+    exp_arg = settings.plugin_template_presigned_expires
+    try:
+        if exp_arg and exp_arg > 0:
+            url = storage.presigned_get_url(key, expires_in=exp_arg)
+            ttl = exp_arg
+        else:
+            url = storage.presigned_get_url(key)
+            ttl = storage.config.presigned_expires_seconds
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": 500,
+                "data": None,
+                "error": "presign_failed",
+                "message": f"生成模板下载链接失败：{e!s}",
+            },
+        ) from e
+
+    return ResponseModel(
+        code=status.HTTP_200_OK,
+        message="ok",
+        data=PluginTemplatePresignData(
+            download_url=url,
+            expires_in=int(ttl),
+            filename=_template_filename_from_key(key),
+        ),
     )
 
 

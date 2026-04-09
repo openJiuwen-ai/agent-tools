@@ -16,6 +16,10 @@ export const setApiBaseUrl = (baseUrl: string) => {
 export const API_ENDPOINTS = {
   PLUGINS: {
     LIST: '/plugins',
+    /** GET /api/v1/plugins/publish-template — 需 Bearer，返回私有桶模板 zip 预签名 URL */
+    PUBLISH_TEMPLATE: '/plugins/publish-template',
+    versionDetail: (assetId: string, version: string) =>
+      `/plugins/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(version)}`,
   },
   ARTIFACTS: {
     /** GET /api/v1/artifacts/{asset_id} */

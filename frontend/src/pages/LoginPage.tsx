@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { LogIn } from 'lucide-react'
 import { Button, Typography } from '@mui/material'
 import {
@@ -9,20 +9,32 @@ import {
   GITCODE_OAUTH_PENDING_KEY,
 } from '@/api/auth'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
+import { POST_LOGIN_REDIRECT_KEY, sanitizePostLoginPath } from '@/auth/postLoginRedirect'
 
 export default function LoginPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const { login, isAuthenticated } = useGitCodeAuth()
   const [commonError, setCommonError] = useState('')
   const [exchanging, setExchanging] = useState(false)
 
   useEffect(() => {
-    if (isAuthenticated) {
-      navigate('/', { replace: true })
+    if (!isAuthenticated) return
+    if (location.pathname !== '/login') return
+    let next = '/'
+    try {
+      const raw = sessionStorage.getItem(POST_LOGIN_REDIRECT_KEY)
+      if (raw) {
+        sessionStorage.removeItem(POST_LOGIN_REDIRECT_KEY)
+        next = sanitizePostLoginPath(raw, '/')
+      }
+    } catch {
+      /* ignore */
     }
-  }, [isAuthenticated, navigate])
+    navigate(next, { replace: true })
+  }, [isAuthenticated, navigate, location.pathname])
 
   useEffect(() => {
     const oauthErr = searchParams.get('oauth_error')
@@ -50,7 +62,6 @@ export default function LoginPage() {
     exchangeGitCodeOAuthSession(sid)
       .then(data => {
         login(data.access_token, data.user)
-        navigate('/', { replace: true })
       })
       .catch(e => {
         const msg = e instanceof Error ? e.message : t('auth.oauth.genericError')

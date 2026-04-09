@@ -1,6 +1,13 @@
 export { API_CONFIG, setApiBaseUrl, API_ENDPOINTS } from './config'
 export { getApiClient } from './client'
-export { getPlugins, getPluginArtifactDownload, MarketplaceApiError } from './plugin'
+export {
+  deletePluginAllVersions,
+  getPluginArtifactDownload,
+  getPluginVersionDetail,
+  getPlugins,
+  MarketplaceApiError,
+  publishPlugin,
+} from './plugin'
 export type {
   MarketplacePluginItem,
   MarketplacePluginListData,
@@ -9,6 +16,9 @@ export type {
   MarketplacePluginOrderBy,
   PluginDownloadData,
   PluginDownloadResponse,
+  PluginVersionDeleteResult,
+  PluginPublishResultData,
+  PluginVersionDetailData,
 } from './plugin'
 export { usePluginListQuery, usePluginGetMarket } from './usePluginGetMarket'
 export {

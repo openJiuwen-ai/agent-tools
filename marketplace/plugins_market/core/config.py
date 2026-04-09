@@ -63,6 +63,25 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MARKET_GITCODE_OAUTH_TOKEN_URL", "GITCODE_OAUTH_TOKEN_URL"),
     )
 
+    # 发布页「下载模板」zip：桶内对象 Key（私有桶）；为空则 GET /plugins/publish-template 返回 503
+    plugin_template_object_key: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "MARKET_PLUGIN_TEMPLATE_OBJECT_KEY",
+            "PLUGIN_TEMPLATE_OBJECT_KEY",
+        ),
+    )
+    # 预签名有效期（秒）；0 表示沿用存储客户端默认 MARKET_S3_PRESIGNED_EXPIRES
+    plugin_template_presigned_expires: int = Field(
+        default=0,
+        ge=0,
+        le=604800,
+        validation_alias=AliasChoices(
+            "MARKET_PLUGIN_TEMPLATE_PRESIGNED_EXPIRES",
+            "PLUGIN_TEMPLATE_PRESIGNED_EXPIRES",
+        ),
+    )
+
     @field_validator("system_admin_user", mode="before")
     @classmethod
     def _normalize_system_admin_user(cls, v: object) -> str:
