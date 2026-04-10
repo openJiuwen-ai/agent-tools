@@ -8,6 +8,7 @@ import logging
 import re
 import uuid
 from urllib.parse import urlparse
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -32,15 +33,13 @@ from plugins_market.schemas.plugin import (
     PluginVersionDetail,
 )
 from plugins_market.validation import extract_plugin_metadata
-from plugins_market.validation.constants import MAX_FILE_SIZE, VERSION_PATTERN
+from plugins_market.validation.constants import (
+    MAX_FILE_SIZE,
+    MARKET_ASSET_SHORT_DESC_MAX_LEN,
+    VERSION_PATTERN,
+)
 
 logger = logging.getLogger(__name__)
-
-
-
-
-
-
 
 
 def _normalize_version(version: str) -> str:
@@ -54,10 +53,7 @@ def _validate_version(version: str) -> None:
         raise PublishError(
             code=422,
             error="manifest_validation_failed",
-            message=(
-                "版本号格式错误，必须为 <主版本号>.<次版本号>.<修订号>，"
-                "例如 1.0.0、1.0.1（不应有 v 前缀）"
-            ),
+            message=("版本号格式错误，必须为 <主版本号>.<次版本号>.<修订号>，" "例如 1.0.0、1.0.1（不应有 v 前缀）"),
         )
 
 
@@ -82,6 +78,38 @@ def _build_storage_path(
 def _compute_checksum(content: bytes) -> str:
     """SHA256 of content (for future client checksum comparison)."""
     return hashlib.sha256(content).hexdigest()
+
+
+def _publish_idempotent_same_artifact(
+    existing_version: MarketAssetVersionDB | None,
+    computed_sha256: str,
+) -> bool:
+    """同一 asset + version 且库内已记录相同子包 SHA-256 时跳过写存储（幂等重试）。"""
+    if existing_version is None:
+        return False
+    if (existing_version.status or "").upper() != "ACTIVE":
+        return False
+    stored = (existing_version.artifact_sha256 or "").strip()
+    if not stored:
+        return False
+    return stored.lower() == computed_sha256.lower()
+
+
+def _make_publish_result(
+    asset: MarketAssetDB,
+    version_row: MarketAssetVersionDB,
+    zip_key: str,
+) -> PluginPublishResult:
+    ts_ms = version_row.create_time or asset.create_time or 0
+    published_at = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).isoformat()
+    return PluginPublishResult(
+        plugin_id=asset.asset_id,
+        name=asset.name,
+        version=version_row.version,
+        status=version_row.status or "ACTIVE",
+        published_at=published_at,
+        storage_url=zip_key,
+    )
 
 
 def _semver_sort_key(version: str | None) -> tuple[int, int, int]:
@@ -119,17 +147,13 @@ def _render_cumulative_changelog_file(versions: list[MarketAssetVersionDB]) -> s
 def _is_uk_publisher_name_error(exc: IntegrityError) -> bool:
     msg = str(getattr(exc, "orig", None) or exc)
     low = msg.lower()
-    return "uk_publisher_name" in low or (
-        "unique" in low and "publisher_id" in low and "name" in low
-    )
+    return "uk_publisher_name" in low or ("unique" in low and "publisher_id" in low and "name" in low)
 
 
 def _is_uk_asset_version_error(exc: IntegrityError) -> bool:
     msg = str(getattr(exc, "orig", None) or exc)
     low = msg.lower()
-    return "uk_asset_version" in low or (
-        "unique" in low and "asset_id" in low and "version" in low
-    )
+    return "uk_asset_version" in low or ("unique" in low and "asset_id" in low and "version" in low)
 
 
 def publish(
@@ -176,6 +200,7 @@ def publish(
         )
 
     meta = extract_plugin_metadata(content)
+    content_size = len(content)
     name = (meta["name"] or "").strip()
     display_name = (meta.get("display_name") or "").strip()
     manifest_version = (meta["version"] or "").strip()
@@ -201,6 +226,8 @@ def publish(
     _validate_version(version)
 
     short_desc = meta.get("short_desc")
+    if isinstance(short_desc, str) and len(short_desc) > MARKET_ASSET_SHORT_DESC_MAX_LEN:
+        short_desc = short_desc[:MARKET_ASSET_SHORT_DESC_MAX_LEN]
     detail_desc = meta.get("detail_desc")
     tags = meta.get("tags") or []
     publisher_name = meta.get("publisher_name") or ""
@@ -251,15 +278,37 @@ def publish(
                 data={"ambiguous_plugin_ids": [m.asset_id for m in matches]},
             )
         if len(matches) == 1:
-            raise PublishError(
-                code=409,
-                error="plugin_name_exists",
-                message=f"您已发布过同名插件 '{name}'，请使用其他名称或为现有插件添加新版本",
-                data={"expected_plugin_id": matches[0].asset_id},
-            )
-        asset_id = uuid.uuid4().hex
-        existing_asset = None
+            # 同发布者 + 包内 name 唯一定位一条插件：不传 plugin_id 也可发新版 / 幂等重试
+            existing_asset = matches[0]
+            asset_id = existing_asset.asset_id
+        else:
+            asset_id = uuid.uuid4().hex
+            existing_asset = None
     existing_version = version_repo.get_version(asset_id=asset_id, version=version)
+
+    version_dir = _version_dir_prefix(user_id, asset_id, version)
+    zip_key = _build_storage_path(
+        publisher_id=user_id,
+        asset_id=asset_id,
+        version=version,
+        asset_name=name,
+    )
+    file_path = version_dir
+
+    if existing_version and _publish_idempotent_same_artifact(existing_version, computed):
+        asset_for_result = existing_asset if existing_asset is not None else asset_repo.get_by_asset_id(asset_id)
+        if asset_for_result is None:
+            raise PublishError(
+                code=500,
+                error="internal_error",
+                message="发布幂等校验失败：缺少插件主记录",
+            )
+        logger.info(
+            "publish idempotent skip (same version + artifact_sha256): asset_id=%s version=%s",
+            asset_id,
+            version,
+        )
+        return _make_publish_result(asset_for_result, existing_version, zip_key)
 
     if existing_version and not force:
         raise PublishError(
@@ -274,21 +323,11 @@ def publish(
             },
         )
 
-    version_dir = _version_dir_prefix(user_id, asset_id, version)
-    zip_key = _build_storage_path(
-        publisher_id=user_id,
-        asset_id=asset_id,
-        version=version,
-        asset_name=name,
-    )
-    file_path = version_dir
-
     # 写入校验和/大小到对象 metadata，避免下载时读全量对象重复计算
-    zip_sha256 = computed
     upload_result = storage.upload_bytes(
         content,
         zip_key,
-        metadata={"sha256": zip_sha256, "size": str(len(content))},
+        metadata={"sha256": computed, "size": str(content_size)},
     )
     if not upload_result.get("success"):
         raise PublishError(
@@ -345,6 +384,7 @@ def publish(
                 status="ACTIVE",
                 create_time=now_ms,
                 file_path=file_path,
+                artifact_sha256=computed,
             )
             db.add(asset_obj)
             db.add(version_obj)
@@ -369,6 +409,7 @@ def publish(
                 existing_version.changelog = version_desc
                 existing_version.status = "ACTIVE"
                 existing_version.file_path = file_path
+                existing_version.artifact_sha256 = computed
                 version_row = existing_version
             else:
                 version_row = MarketAssetVersionDB(
@@ -379,6 +420,7 @@ def publish(
                     status="ACTIVE",
                     create_time=now_ms,
                     file_path=file_path,
+                    artifact_sha256=computed,
                 )
                 db.add(version_row)
             db.add(existing_asset)

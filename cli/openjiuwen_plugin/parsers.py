@@ -75,8 +75,8 @@ def _add_publish_parser(plugin_subparsers) -> None:
     publish_parser.add_argument(
         "--plugin-id",
         help=(
-            "Plugin id (optional for first publish; printed after first publish, "
-            "or get via 'openjiuwen-plugin search')"
+            "Plugin id (optional when your account has at most one plugin with the package name; "
+            "required if multiple share the same name. Shown after publish or via 'openjiuwen-plugin search')"
         ),
     )
     publish_parser.add_argument(
@@ -239,6 +239,36 @@ def _add_install_parser(plugin_subparsers) -> None:
     )
 
 
+def _add_skill_import_parser(plugin_subparsers) -> None:
+    sip = plugin_subparsers.add_parser(
+        "skill-import",
+        help=(
+            "Batch-import skills from bundle zip or directory "
+            "(POST /api/v1/plugins/skill-import; X-System-Token; SHA-256 computed locally)"
+        ),
+    )
+    sip.add_argument(
+        "bundle_path",
+        metavar="BUNDLE",
+        help=(
+            "Bundle .zip path, or directory with the same layout as a collection bundle "
+            "(top-level skill dirs, optional manifest.json); directories are packed locally then uploaded"
+        ),
+    )
+    sip.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
+    sip.add_argument(
+        "--system-token",
+        help="System admin token (X-System-Token). Default: OPENJIUWEN_SYSTEM_TOKEN",
+    )
+    sip.add_argument("--force", action="store_true", help="Pass force=true to each publish")
+    sip.add_argument(
+        "--fail-fast",
+        dest="fail_fast",
+        action="store_true",
+        help="Stop after first entry failure",
+    )
+
+
 def build_plugin_parser(prog_name: str = "openjiuwen-plugin") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=prog_name)
     plugin_subparsers = parser.add_subparsers(dest="plugin_command")
@@ -250,4 +280,5 @@ def build_plugin_parser(prog_name: str = "openjiuwen-plugin") -> argparse.Argume
     _add_search_parser(plugin_subparsers)
     _add_delete_parser(plugin_subparsers)
     _add_install_parser(plugin_subparsers)
+    _add_skill_import_parser(plugin_subparsers)
     return parser

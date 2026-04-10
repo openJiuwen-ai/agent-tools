@@ -6,12 +6,21 @@ import tempfile
 from pathlib import Path
 
 from openjiuwen_plugin.logging_config import get_logger
-from openjiuwen_plugin.market import delete_plugin, download_artifact_zip, get_plugin_version_detail, search_plugins
+from openjiuwen_plugin.market import (
+    delete_plugin,
+    download_artifact_zip,
+    get_plugin_version_detail,
+    search_plugins,
+    skill_import_upload,
+)
+from openjiuwen_plugin.utils import sha256_file_hex
 from openjiuwen_plugin.plugin import (
     PublishError,
+    SKILL_IMPORT_BUNDLE_MAX_BYTES,
     init_plugin,
     install_plugin_from_zip,
     pack_plugin,
+    pack_skill_bundle_directory,
     publish_plugin,
     validate_plugin,
 )
@@ -316,6 +325,82 @@ def handle_install(args) -> int:
     return 0
 
 
+def handle_skill_import(args) -> int:
+    market_url = _resolve_market_url(
+        args.market_url,
+        err_msg="skill-import requires --market-url or OPENJIUWEN_MARKET_URL",
+    )
+    if not market_url:
+        return 1
+    system_token = args.system_token or os.getenv("OPENJIUWEN_SYSTEM_TOKEN")
+    if not system_token or not str(system_token).strip():
+        logger.error("skill-import requires --system-token or OPENJIUWEN_SYSTEM_TOKEN")
+        return 1
+
+    path = Path(args.bundle_path).resolve()
+    pack_tmp: Path | None = None
+    try:
+        if path.is_dir():
+            pack_tmp = Path(tempfile.mkdtemp(prefix="oj_skill_bundle_pack_"))
+            bundle = pack_tmp / "bundle.zip"
+            try:
+                pack_skill_bundle_directory(path, bundle)
+            except ValueError as e:
+                logger.error("skill-import pack directory failed: %s", e)
+                return 1
+        elif path.is_file():
+            bundle = path
+            raw = bundle.stat().st_size
+            if raw > SKILL_IMPORT_BUNDLE_MAX_BYTES:
+                logger.error(
+                    "skill-import bundle file too large: %s bytes (limit %s)",
+                    raw,
+                    SKILL_IMPORT_BUNDLE_MAX_BYTES,
+                )
+                return 1
+        else:
+            logger.error("bundle zip or directory not found: %s", path)
+            return 1
+
+        checksum = sha256_file_hex(bundle)
+        try:
+            result = skill_import_upload(
+                market_url,
+                str(system_token).strip(),
+                zip_path=bundle,
+                checksum_sha256=checksum,
+                force=bool(args.force),
+                fail_fast=bool(args.fail_fast),
+            )
+        except PublishError as e:
+            logger.error("skill-import failed: %s", e.detail)
+            return 1
+
+        s = result.summary
+        logger.info("skill-import summary: total=%s ok=%s failed=%s", s.total, s.ok, s.failed)
+        for item in result.results:
+            if item.status == "ok":
+                logger.info(
+                    "  ok entry=%s plugin_id=%s name=%s version=%s",
+                    item.entry,
+                    item.plugin_id,
+                    item.name,
+                    item.version,
+                )
+            else:
+                logger.error(
+                    "  fail entry=%s error=%s message=%s",
+                    item.entry,
+                    item.error,
+                    item.message,
+                )
+
+        return 1 if s.failed else 0
+    finally:
+        if pack_tmp is not None:
+            shutil.rmtree(pack_tmp, ignore_errors=True)
+
+
 COMMAND_HANDLERS = {
     "init": handle_init,
     "validate": handle_validate,
@@ -325,4 +410,5 @@ COMMAND_HANDLERS = {
     "search": handle_search,
     "delete": handle_delete,
     "install": handle_install,
+    "skill-import": handle_skill_import,
 }

@@ -10,7 +10,6 @@ Two-layer defence:
 
 from __future__ import annotations
 
-import re
 import zipfile
 from typing import Iterator
 
@@ -21,12 +20,14 @@ from plugins_market.validation.constants import (
     MAX_DECOMPRESSED_TOTAL,
     MAX_ZIP_ENTRIES,
     PNG_MAGIC,
+    ZIP_ENTRY_WINDOWS_DRIVE_PATTERN,
+    ZIP_STREAM_READ_CHUNK_BYTES,
 )
 
 # Windows drive-letter prefix, e.g. C: or c:
-_WIN_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+_WIN_DRIVE_RE = ZIP_ENTRY_WINDOWS_DRIVE_PATTERN
 
-_CHUNK = 65_536  # 64 KiB read chunks
+_CHUNK = ZIP_STREAM_READ_CHUNK_BYTES
 
 
 # ---------------------------------------------------------------------------

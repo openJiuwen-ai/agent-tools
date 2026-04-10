@@ -9,9 +9,22 @@ from unittest.mock import patch
 import yaml
 
 from openjiuwen_plugin.main import main
-from openjiuwen_plugin.market import download_artifact_zip, get_plugin_version_detail, search_plugins
+from openjiuwen_plugin.market import (
+    PublishError,
+    download_artifact_zip,
+    get_plugin_version_detail,
+    search_plugins,
+)
 from openjiuwen_plugin.plugin import info_plugin, init_plugin, install_plugin_from_zip, pack_plugin, validate_plugin
-from openjiuwen_plugin.schemas import PluginListQuery, PluginVersionDetail, PublishPluginInput, PublishRequest
+from openjiuwen_plugin.schemas import (
+    PluginListQuery,
+    PluginVersionDetail,
+    PublishPluginInput,
+    PublishRequest,
+    SkillImportItemResult,
+    SkillImportResponse,
+    SkillImportSummary,
+)
 
 
 class PluginCommandsTest(unittest.TestCase):
@@ -639,6 +652,217 @@ def another_tool() -> dict:
             with self.assertRaises(ValueError) as ctx:
                 init_plugin("x", Path(tmp), plugin_type="not-a-supported-type")
             self.assertIn("plugin type", str(ctx.exception).lower())
+
+    def _skill_import_ok_response(self) -> SkillImportResponse:
+        return SkillImportResponse(
+            summary=SkillImportSummary(total=1, ok=1, failed=0),
+            results=[
+                SkillImportItemResult(
+                    entry="skill-a",
+                    status="ok",
+                    plugin_id="pid-1",
+                    name="skill-a",
+                    version="0.0.1",
+                )
+            ],
+        )
+
+    def test_skill_import_cli_zip_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "bundle.zip"
+            with zipfile.ZipFile(zip_path, "w") as zf:
+                zf.writestr("skill-a/SKILL.md", b"# x")
+            with patch(
+                "openjiuwen_plugin.handlers.skill_import_upload",
+                return_value=self._skill_import_ok_response(),
+            ) as m:
+                code = main(
+                    [
+                        "skill-import",
+                        str(zip_path),
+                        "--market-url",
+                        "http://localhost:8000",
+                        "--system-token",
+                        "sys-tok",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            m.assert_called_once()
+            kw = m.call_args.kwargs
+            self.assertEqual(kw["zip_path"].resolve(), zip_path.resolve())
+            self.assertFalse(kw["force"])
+            self.assertFalse(kw["fail_fast"])
+
+    def test_skill_import_cli_passes_force_and_fail_fast(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "bundle.zip"
+            with zipfile.ZipFile(zip_path, "w") as zf:
+                zf.writestr("x.txt", b"y")
+            with patch(
+                "openjiuwen_plugin.handlers.skill_import_upload",
+                return_value=self._skill_import_ok_response(),
+            ) as m:
+                code = main(
+                    [
+                        "skill-import",
+                        str(zip_path),
+                        "--market-url",
+                        "http://localhost:8000",
+                        "--system-token",
+                        "t",
+                        "--force",
+                        "--fail-fast",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            kw = m.call_args.kwargs
+            self.assertTrue(kw["force"])
+            self.assertTrue(kw["fail_fast"])
+
+    def test_skill_import_cli_directory_packs_then_uploads_zip(self) -> None:
+        """目录会先打成临时 zip 再上传；请求里的 zip_path 应为该临时文件。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "my-bundle"
+            bundle_dir.mkdir()
+            (bundle_dir / "a.txt").write_text("hi", encoding="utf-8")
+            seen_zip: list[Path] = []
+
+            def _upload(_market_url: str, _system_token: str, **kwargs):
+                seen_zip.append(Path(kwargs["zip_path"]))
+                return self._skill_import_ok_response()
+
+            with patch("openjiuwen_plugin.handlers.skill_import_upload", side_effect=_upload):
+                code = main(
+                    [
+                        "skill-import",
+                        str(bundle_dir),
+                        "--market-url",
+                        "http://localhost:8000",
+                        "--system-token",
+                        "t",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            self.assertEqual(len(seen_zip), 1)
+            z = seen_zip[0]
+            self.assertTrue(z.name.endswith(".zip"))
+            self.assertNotEqual(z.resolve(), bundle_dir.resolve())
+            # 打包目录在 finally 中删除后，临时 zip 不应仍存在
+            self.assertFalse(z.is_file())
+
+    def test_skill_import_requires_market_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "b.zip"
+            zip_path.write_bytes(b"PK\x03\x04")
+            with patch.dict(os.environ, {"OPENJIUWEN_MARKET_URL": ""}, clear=False):
+                code = main(["skill-import", str(zip_path), "--system-token", "t"])
+            self.assertEqual(code, 1)
+
+    def test_skill_import_requires_system_token(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "b.zip"
+            zip_path.write_bytes(b"PK\x03\x04")
+            with patch.dict(os.environ, {"OPENJIUWEN_SYSTEM_TOKEN": ""}, clear=False):
+                code = main(
+                    ["skill-import", str(zip_path), "--market-url", "http://127.0.0.1:9"],
+                )
+            self.assertEqual(code, 1)
+
+    def test_skill_import_bundle_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "absent.zip"
+            code = main(
+                [
+                    "skill-import",
+                    str(missing),
+                    "--market-url",
+                    "http://127.0.0.1:9",
+                    "--system-token",
+                    "t",
+                ]
+            )
+        self.assertEqual(code, 1)
+
+    def test_skill_import_publish_error_exits_1(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "bundle.zip"
+            with zipfile.ZipFile(zip_path, "w") as zf:
+                zf.writestr("x", b"y")
+            with patch(
+                "openjiuwen_plugin.handlers.skill_import_upload",
+                side_effect=PublishError(403, "forbidden"),
+            ):
+                code = main(
+                    [
+                        "skill-import",
+                        str(zip_path),
+                        "--market-url",
+                        "http://localhost:8000",
+                        "--system-token",
+                        "t",
+                    ]
+                )
+        self.assertEqual(code, 1)
+
+    def test_skill_import_exits_1_when_summary_has_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "bundle.zip"
+            with zipfile.ZipFile(zip_path, "w") as zf:
+                zf.writestr("x", b"y")
+            resp = SkillImportResponse(
+                summary=SkillImportSummary(total=2, ok=1, failed=1),
+                results=[
+                    SkillImportItemResult(entry="a", status="ok"),
+                    SkillImportItemResult(entry="b", status="error", error="x", message="m"),
+                ],
+            )
+            with patch("openjiuwen_plugin.handlers.skill_import_upload", return_value=resp):
+                code = main(
+                    [
+                        "skill-import",
+                        str(zip_path),
+                        "--market-url",
+                        "http://localhost:8000",
+                        "--system-token",
+                        "t",
+                    ]
+                )
+        self.assertEqual(code, 1)
+
+    def test_skill_import_rejects_oversize_zip_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "big.zip"
+            zip_path.write_bytes(b"x" * 20)
+            with patch("openjiuwen_plugin.handlers.SKILL_IMPORT_BUNDLE_MAX_BYTES", 10):
+                code = main(
+                    [
+                        "skill-import",
+                        str(zip_path),
+                        "--market-url",
+                        "http://localhost:8000",
+                        "--system-token",
+                        "t",
+                    ]
+                )
+        self.assertEqual(code, 1)
+
+    def test_skill_import_empty_directory_pack_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = Path(tmp) / "empty-bundle"
+            empty.mkdir()
+            with patch("openjiuwen_plugin.handlers.skill_import_upload") as m:
+                code = main(
+                    [
+                        "skill-import",
+                        str(empty),
+                        "--market-url",
+                        "http://localhost:8000",
+                        "--system-token",
+                        "t",
+                    ]
+                )
+                m.assert_not_called()
+        self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":

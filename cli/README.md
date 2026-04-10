@@ -111,6 +111,18 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 
 ## 6. 子命令与参数
 
+| 子命令 | 简述 |
+|--------|------|
+| `init` | 生成插件脚手架 |
+| `validate` | 校验插件目录 |
+| `pack` | 将**单个**插件目录打成 zip |
+| `publish` | 上传**单个**插件（zip 或先 pack 再传） |
+| `info` | 查询插件版本详情 |
+| `search` | 列表 / 搜索 |
+| `delete` | 删除版本或整包 |
+| `install` | 下载 zip 并安装到本地 |
+| `skill-import` | **系统管理员**：批量导入**技能集合包**（`.zip` 或符合布局的**目录**）|
+
 ### 6.1 `init` — 生成脚手架
 
 | 参数 | 必填 | 说明 |
@@ -203,7 +215,29 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 | `--save-zip` | 否 | 将下载的 zip **额外**保存到该路径 |
 | `--force` | 否 | 目标目录已存在时允许覆盖 |
 
-### 6.9 市场相关命令示例
+### 6.9 `skill-import` — 管理员批量导入技能集合包
+
+调用市场 **`POST /api/v1/plugins/skill-import`**：**仅**系统管理员（**`X-System-Token`**），**不支持**普通用户 Bearer。用于一次上传内含**多个顶层 skill 目录**的集合包（与单条 `publish` 上架的 skill zip **不是**同一格式）。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `BUNDLE` | 是 | **集合包 `.zip` 路径**，或**本地目录**（布局须与 zip 解压后一致：多个顶层 skill 子目录 + 可选根级 `manifest.json`）。为目录时 CLI 先在临时目录内打成 zip 再上传 |
+| `--market-url` | 条件 | 市场根 URL；未设则用 `OPENJIUWEN_MARKET_URL` |
+| `--system-token` | 条件 | **`X-System-Token`**；未设则用 `OPENJIUWEN_SYSTEM_TOKEN`（**必填其一**） |
+| `--force` | 否 | 与表单 `force` 一致；可与 `manifest.json` 条目的 `force` 逻辑或 |
+| `--fail-fast` | 否 | 首条条目失败即停止处理后续目录（默认部分成功） |
+
+**退出码**：任一条目失败（`summary.failed > 0`）、路径无效、本地打包失败、或 zip 超过 **512MB** 预检时，进程以**非 0** 退出。HTTP **200** 仍可能带项内失败，请看日志中的 `summary` / 各 `entry` 状态。
+
+```bash
+export OPENJIUWEN_MARKET_URL=http://127.0.0.1:8100
+export OPENJIUWEN_SYSTEM_TOKEN="<系统管理员 Token>"
+
+openjiuwen-plugin skill-import ./my-skills-bundle-dir
+openjiuwen-plugin skill-import ./bundle.zip --fail-fast
+```
+
+### 6.10 市场相关命令示例
 
 ```bash
 BASE=http://127.0.0.1:8100   # 占位；或已 export OPENJIUWEN_MARKET_URL
@@ -230,7 +264,7 @@ openjiuwen-plugin delete <asset_id> --version all --token <TOKEN> --market-url $
 | `main.py` | 入口：日志初始化、解析参数、分发子命令 |
 | `parsers.py` | 各子命令 `argparse` 定义 |
 | `handlers.py` | 子命令业务编排、日志输出、进程退出码 |
-| `plugin.py` | `init` / `validate` / `pack` / `publish` / `install` 等核心逻辑 |
+| `plugin.py` | `init` / `validate` / `pack` / `publish` / `install` 等|
 | `market.py` | 对市场 HTTP API 的调用与响应解析 |
 | `schemas/` | 与市场对齐的请求/响应模型（Pydantic） |
 | `logging_config.py` | 控制台日志与敏感信息脱敏 |

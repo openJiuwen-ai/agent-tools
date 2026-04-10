@@ -1,3 +1,9 @@
+import asyncio
+import hashlib
+import tempfile
+import time
+from collections import deque
+from pathlib import Path as FsPath
 from typing import Any, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -24,6 +30,8 @@ from plugins_market.repositories import (
     MarketAssetRepository,
     MarketAssetVersionRepository,
 )
+from plugins_market.validation.constants import MAX_FILE_SIZE, ZIP_STREAM_READ_CHUNK_BYTES
+from plugins_market.imports.skill_import_service import skill_import_from_bundle
 from plugins_market.schemas.common import ResponseModel
 from plugins_market.schemas.plugin import (
     PluginDownloadData,
@@ -35,6 +43,8 @@ from plugins_market.schemas.plugin import (
     PluginTemplatePresignData,
     PluginVersionDeleteData,
     PluginVersionDetail,
+    SkillImportBundle,
+    SkillImportResponse,
 )
 from plugins_market.services import (
     PublishError,
@@ -47,6 +57,31 @@ from plugins_market.services import (
 
 plugin_router = APIRouter(prefix="/plugins", tags=["plugins"])
 artifact_router = APIRouter(prefix="/artifacts", tags=["plugins"])
+
+_skill_import_req_times: deque[float] = deque()
+_skill_import_rl_lock = asyncio.Lock()
+
+
+async def _enforce_skill_import_rate_limit() -> None:
+    limit = settings.skill_import_rate_limit_per_minute
+    if limit <= 0:
+        return
+    async with _skill_import_rl_lock:
+        now = time.monotonic()
+        window = 60.0
+        while _skill_import_req_times and _skill_import_req_times[0] < now - window:
+            _skill_import_req_times.popleft()
+        if len(_skill_import_req_times) >= limit:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "code": status.HTTP_429_TOO_MANY_REQUESTS,
+                    "data": None,
+                    "error": "rate_limited",
+                    "message": "skill-import 请求过于频繁，请稍后再试",
+                },
+            ) from None
+        _skill_import_req_times.append(now)
 
 
 def _auth_error(status_code: int, message: str, *, error: str = "permission_denied") -> HTTPException:
@@ -82,6 +117,20 @@ def valid_checksum(
             },
         )
     return value
+
+
+async def build_skill_import_bundle(
+    file: UploadFile = File(..., description="技能集合包（ZIP，顶层为多个 skill 目录）"),
+    checksum: str = Depends(valid_checksum),
+    force: str = Form("false"),
+    fail_fast: str = Form("false"),
+) -> SkillImportBundle:
+    return SkillImportBundle(
+        file=file,
+        checksum=checksum,
+        force=_parse_form_bool(force),
+        fail_fast=_parse_form_bool(fail_fast),
+    )
 
 
 class PublishFormRequired:
@@ -130,9 +179,7 @@ def build_publish_form(
 
 
 def get_publish_auth(
-    authorization: Optional[str] = Header(
-        None, description="Authorization: Bearer <token>"
-    ),
+    authorization: Optional[str] = Header(None, description="Authorization: Bearer <token>"),
     x_system_token: Optional[str] = Header(None, alias="X-System-Token"),
 ) -> Tuple[Optional[str], bool, Optional[str]]:
     """
@@ -148,8 +195,7 @@ def get_publish_auth(
     if auth_count != 1:
         raise _auth_error(
             status.HTTP_401_UNAUTHORIZED,
-            "Missing/invalid authorization: provide exactly one of "
-            "Authorization: Bearer <token>, or X-System-Token",
+            "Missing/invalid authorization: provide exactly one of Authorization: Bearer <token>, or X-System-Token",
         )
 
     if has_system:
@@ -255,6 +301,95 @@ async def get_publish_template_presigned(
             filename=_template_filename_from_key(key),
         ),
     )
+
+
+@plugin_router.post(
+    "/skill-import",
+    response_model=ResponseModel[SkillImportResponse],
+)
+async def skill_import(
+    bundle: SkillImportBundle = Depends(build_skill_import_bundle),
+    db: Session = Depends(get_db),
+    storage=Depends(get_storage_client),
+    auth: Tuple[Optional[str], bool, Optional[str]] = Depends(get_publish_auth),
+):
+    """批量导入 skill：仅 X-System-Token；须 X-Checksum-SHA256。"""
+    await _enforce_skill_import_rate_limit()
+
+    _token, is_system_token, acting_user_id = auth
+    if not is_system_token:
+        raise _auth_error(
+            status.HTTP_403_FORBIDDEN,
+            "批量导入仅支持 X-System-Token（系统管理员）",
+            error="forbidden",
+        )
+
+    tmp_path: FsPath | None = None
+    upload_tmp_name: str | None = None
+    try:
+        # NamedTemporaryFile + with：退出 with 时文件对象关闭（G.FIO.04，无裸 fd）
+        with tempfile.NamedTemporaryFile(
+            prefix="oj_skill_bundle_",
+            suffix=".zip",
+            delete=False,
+            mode="wb",
+        ) as out:
+            upload_tmp_name = out.name
+            tmp_path = FsPath(out.name)
+            hasher = hashlib.sha256()
+            written = 0
+            while True:
+                chunk = await bundle.file.read(ZIP_STREAM_READ_CHUNK_BYTES)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "code": 400,
+                            "data": None,
+                            "error": "payload_too_large",
+                            "message": "技能集合包原始大小超过 512MB 上限",
+                        },
+                    ) from None
+                hasher.update(chunk)
+                out.write(chunk)
+
+        if hasher.hexdigest() != bundle.checksum:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": 400,
+                    "data": None,
+                    "error": "checksum_mismatch",
+                    "message": "技能集合包 X-Checksum-SHA256 与实际上传内容不一致",
+                },
+            ) from None
+
+        try:
+            data = skill_import_from_bundle(
+                bundle_path=tmp_path,
+                user_id=acting_user_id or "",
+                db=db,
+                storage=storage,
+                force=bundle.force,
+                fail_fast=bundle.fail_fast,
+            )
+        except PublishError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+
+        return ResponseModel(
+            code=status.HTTP_200_OK,
+            message="Import skills finished",
+            data=data,
+        )
+    finally:
+        if upload_tmp_name:
+            try:
+                FsPath(upload_tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 @plugin_router.get(

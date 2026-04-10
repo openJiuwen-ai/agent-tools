@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -146,6 +146,35 @@ class PluginPublishResult(BaseModel):
     status: str = ""
     published_at: str = ""
     storage_url: str = ""
+
+
+class SkillImportItemResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    entry: str = ""
+    status: Literal["ok", "error"]
+    plugin_id: str | None = None
+    name: str | None = None
+    version: str | None = None
+    error: str | None = None
+    message: str | None = None
+
+
+class SkillImportSummary(BaseModel):
+    """total 为集合包顶层 skill 目录数；fail_fast 提前结束时 ok+failed 可能小于 total。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    total: int = 0
+    ok: int = 0
+    failed: int = 0
+
+
+class SkillImportResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    summary: SkillImportSummary
+    results: list[SkillImportItemResult] = Field(default_factory=list)
 
 
 class PluginVersionDetail(BaseModel):

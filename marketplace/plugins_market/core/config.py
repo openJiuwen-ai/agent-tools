@@ -82,6 +82,16 @@ class Settings(BaseSettings):
         ),
     )
 
+    # skill-import：单进程滑动窗口限流（每分钟请求数，0 关闭）；多 worker 时各进程独立计数
+    skill_import_rate_limit_per_minute: int = Field(
+        default=30,
+        ge=0,
+        validation_alias=AliasChoices(
+            "MARKET_SKILL_IMPORT_RATE_LIMIT_PER_MINUTE",
+            "SKILL_IMPORT_RATE_LIMIT_PER_MINUTE",
+        ),
+    )
+
     @field_validator("system_admin_user", mode="before")
     @classmethod
     def _normalize_system_admin_user(cls, v: object) -> str:

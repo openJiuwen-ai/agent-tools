@@ -19,6 +19,7 @@ from openjiuwen_plugin.schemas import (
     PublishRequest,
     PluginPublishResult,
     ResponseModel,
+    SkillImportResponse,
     PluginVersionDeleteData,
     PluginVersionDetail,
 )
@@ -47,6 +48,17 @@ def _upload_error_detail(resp: Response) -> str:
                 continue
             if isinstance(val, str) and val.strip():
                 return val
+            if isinstance(val, dict):
+                msg = val.get("message")
+                err = val.get("error")
+                msg_ok = isinstance(msg, str) and msg.strip()
+                err_ok = isinstance(err, str) and err.strip()
+                if msg_ok and err_ok:
+                    return f"{err}: {msg}"
+                if msg_ok:
+                    return msg
+                if err_ok:
+                    return err
             if isinstance(val, list) and val:
                 return "; ".join(str(x) for x in val)
         if j.get("error"):
@@ -211,6 +223,54 @@ def upload_plugin(
     try:
         payload = _parse_json_body(resp)
         return _parse_data_as(payload, PluginPublishResult)
+    except RuntimeError as exc:
+        raise PublishError(resp.status_code, str(exc)) from exc
+
+
+def skill_import_upload(
+    market_url: str,
+    system_token: str,
+    *,
+    zip_path: Path,
+    checksum_sha256: str,
+    force: bool = False,
+    fail_fast: bool = False,
+    timeout_sec: int = 300,
+) -> SkillImportResponse:
+    """POST /api/v1/plugins/skill-import，仅 X-System-Token。"""
+    base = market_url.rstrip("/")
+    url = f"{base}/api/v1/plugins/skill-import"
+    tok = str(system_token).strip()
+    if not tok:
+        raise PublishError(0, "system_token is required for skill-import")
+
+    headers: dict[str, str] = {
+        "X-System-Token": tok,
+        "X-Checksum-SHA256": str(checksum_sha256).strip().lower(),
+    }
+    data: dict[str, str] = {
+        "force": "true" if force else "false",
+        "fail_fast": "true" if fail_fast else "false",
+    }
+
+    bundle = Path(zip_path).resolve()
+    if not bundle.is_file():
+        raise PublishError(0, f"zip file not found: {bundle}")
+
+    with open(bundle, "rb") as f:
+        files = {"file": (bundle.name, f, "application/zip")}
+        try:
+            resp = requests.post(url, data=data, files=files, headers=headers, timeout=timeout_sec)
+        except requests.RequestException as e:
+            raise PublishError(0, f"network error: {e}") from e
+
+    if not resp.ok:
+        detail = _upload_error_detail(resp)
+        raise PublishError(resp.status_code, detail)
+
+    try:
+        payload = _parse_json_body(resp)
+        return _parse_data_as(payload, SkillImportResponse)
     except RuntimeError as exc:
         raise PublishError(resp.status_code, str(exc)) from exc
 

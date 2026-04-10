@@ -65,6 +65,7 @@ class MarketAssetVersionDB(Base):
     status = Column(String(32), nullable=True, default="ACTIVE")
     create_time = Column(BigInteger, nullable=True)
     file_path = Column(String(512), nullable=True)
+    artifact_sha256 = Column(String(64), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("asset_id", "version", name="uk_asset_version"),

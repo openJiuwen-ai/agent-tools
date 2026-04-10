@@ -40,6 +40,7 @@ class AssetVersionCreate(BaseModel):
     changelog: Optional[str] = None
     status: str = "ACTIVE"
     file_path: Optional[str] = None
+    artifact_sha256: Optional[str] = None
 
 
 class PluginPublishResult(BaseModel):
@@ -51,6 +52,41 @@ class PluginPublishResult(BaseModel):
     status: str
     published_at: str
     storage_url: str
+
+
+@dataclass
+class SkillImportBundle:
+    """POST /plugins/skill-import 多部分请求：上传文件、校验和头、表单选项。"""
+
+    file: UploadFile
+    checksum: str
+    force: bool
+    fail_fast: bool
+
+
+class SkillImportItemResult(BaseModel):
+    """单条 skill 导入结果。"""
+
+    entry: str
+    status: Literal["ok", "error"]
+    plugin_id: Optional[str] = None
+    name: Optional[str] = None
+    version: Optional[str] = None
+    error: Optional[str] = None
+    message: Optional[str] = None
+
+
+class SkillImportSummary(BaseModel):
+    """汇总：``total`` 为集合包顶层 skill 目录数；``fail_fast`` 提前结束时 ``ok + failed`` 可能小于 ``total``。"""
+
+    total: int = Field(..., description="集合包内顶层 skill 目录总数")
+    ok: int = Field(..., description="成功导入条数")
+    failed: int = Field(..., description="失败条数（仅含已尝试并记入 results 的条目）")
+
+
+class SkillImportResponse(BaseModel):
+    summary: SkillImportSummary
+    results: list[SkillImportItemResult]
 
 
 # ----- DELETE /api/v1/plugins/{asset_id}/versions/{version} -----
@@ -99,6 +135,7 @@ class PluginDownloadData(BaseModel):
     version: str
     file_size: int
     checksum_sha256: str
+
 
 PLUGIN_ORDER_BY_OPTIONS = ("install_count", "like_count", "create_time", "update_time", "review_count")
 

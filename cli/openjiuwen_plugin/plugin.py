@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import posixpath
 import re
@@ -17,9 +16,9 @@ from typing import Any
 import yaml
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
+from openjiuwen_plugin.utils import sha256_file_hex
 from openjiuwen_plugin.logging_config import get_logger
-from openjiuwen_plugin.market import PublishError
-from openjiuwen_plugin.market import upload_plugin as _market_upload_plugin
+from openjiuwen_plugin.market import PublishError, upload_plugin as _market_upload_plugin
 from openjiuwen_plugin.schemas import (
     MARKETPLACE_VERSION_PATTERN,
     PluginPublishResult,
@@ -28,6 +27,87 @@ from openjiuwen_plugin.schemas import (
 )
 
 logger = get_logger(__name__)
+
+# 与市场 ``plugins_market.validation.constants.MINIMAL_PNG_BYTES`` 同源；1×1 透明 PNG。
+_PLACEHOLDER_ICON_PNG_BYTES = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
+)
+
+# Directory → zip (mcp/restful pack + skill-import bundle CLI); same as server MAX_FILE_SIZE.
+PACK_IGNORE_DIR_NAMES = frozenset(
+    {
+        ".git",
+        "__pycache__",
+        ".venv",
+        "venv",
+        ".eggs",
+        "dist",
+        "out",
+        "__MACOSX",
+    }
+)
+PACK_IGNORE_SUFFIXES = (".pyc", ".pyo", ".egg-info")
+SKILL_IMPORT_BUNDLE_MAX_BYTES = 512 * 1024 * 1024
+
+
+def write_directory_tree_to_zip(
+    zf: zipfile.ZipFile,
+    root: Path,
+    *,
+    arcname_prefix: str = "",
+) -> int:
+    """Append files under ``root`` to ``zf``; return number of files written."""
+    base = root.resolve()
+    prefix = arcname_prefix.strip().replace("\\", "/").strip("/")
+    n = 0
+    for path in sorted(base.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(base)
+        parts = rel.parts
+        if any(p in PACK_IGNORE_DIR_NAMES or p.endswith(".egg-info") for p in parts):
+            continue
+        if path.suffix in PACK_IGNORE_SUFFIXES:
+            continue
+        if path.name == ".DS_Store":
+            continue
+        rel_posix = rel.as_posix()
+        arcname = f"{prefix}/{rel_posix}" if prefix else rel_posix
+        zf.write(path, arcname)
+        n += 1
+    return n
+
+
+def pack_skill_bundle_directory(src_dir: Path, dest_zip: Path) -> None:
+    """Build collection-bundle zip (zip root = ``src_dir``) for ``skill-import`` CLI upload."""
+    src = src_dir.resolve()
+    if not src.is_dir():
+        raise ValueError(f"not a directory: {src}")
+    dest_zip = dest_zip.resolve()
+    dest_zip.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(dest_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+            files_written = write_directory_tree_to_zip(zf, src, arcname_prefix="")
+    except OSError as e:
+        dest_zip.unlink(missing_ok=True)
+        raise ValueError(f"failed to build bundle zip: {e}") from e
+
+    if files_written == 0:
+        dest_zip.unlink(missing_ok=True)
+        raise ValueError(
+            "no files packed (directory empty or only ignored paths such as .git / __pycache__)"
+        )
+
+    raw_size = dest_zip.stat().st_size
+    if raw_size > SKILL_IMPORT_BUNDLE_MAX_BYTES:
+        dest_zip.unlink(missing_ok=True)
+        raise ValueError(
+            f"packed bundle size {raw_size} bytes exceeds limit {SKILL_IMPORT_BUNDLE_MAX_BYTES} "
+            "(same as server MAX_FILE_SIZE / 512MB)"
+        )
+
 
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 # Agent Skills：≤64；小写/数字；不以连字符开头或结尾；无连续 --
@@ -130,7 +210,7 @@ def _init_plugin_skill(plugin_name: str, plugin_root: Path) -> Path:
     for sub in ("scripts", "references", "assets"):
         (skill_dir / sub).mkdir(parents=True, exist_ok=True)
 
-    (plugin_root / "icon.png").write_bytes(b"")
+    (plugin_root / "icon.png").write_bytes(_PLACEHOLDER_ICON_PNG_BYTES)
 
     skill_fm = (
         "---\n"
@@ -184,7 +264,7 @@ def init_plugin(plugin_name: str, base_path: Path, force: bool = False, plugin_t
         _render_readme(plugin_name, plugin_type),
         encoding="utf-8",
     )
-    (plugin_root / "icon.png").write_bytes(b"")
+    (plugin_root / "icon.png").write_bytes(_PLACEHOLDER_ICON_PNG_BYTES)
     (package_dir / "__init__.py").write_text(
         '"""Plugin package."""\n',
         encoding="utf-8",
@@ -289,10 +369,6 @@ def validate_plugin(plugin_path: Path) -> ValidationResult:
     return ValidationResult(ok=not errors, errors=errors, warnings=warnings)
 
 
-_PACK_IGNORE_DIRS = {".git", "__pycache__", ".venv", "venv", ".eggs", "dist", "out"}
-_PACK_IGNORE_SUFFIXES = (".pyc", ".pyo", ".egg-info")
-
-
 def pack_plugin(plugin_path: Path, output_dir: Path | None = None) -> Path:
     """将插件目录打成 zip；打包前会先执行 validate，校验不通过则抛错不生成 zip。"""
     root = plugin_path.resolve()
@@ -332,7 +408,7 @@ def pack_plugin(plugin_path: Path, output_dir: Path | None = None) -> Path:
     else:
         _pack_plugin_directory(root, prefix, zip_path)
 
-    digest = _file_sha256_hex(zip_path)
+    digest = sha256_file_hex(zip_path)
     sha256_path = zip_path.with_suffix(zip_path.suffix + ".sha256")
     sha256_path.write_text(f"{digest}  {zip_name}\n", encoding="utf-8")
     return zip_path
@@ -410,26 +486,7 @@ def _pack_plugin_skill(root: Path, name: str, version: str, prefix: str, zip_pat
 def _pack_plugin_directory(root: Path, prefix: str, zip_path: Path) -> None:
     """mcp-stdio / restful-api: full directory pack with ignore rules."""
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for fpath in root.rglob("*"):
-            if not fpath.is_file():
-                continue
-            rel = fpath.relative_to(root)
-            parts = rel.parts
-            if any(p in _PACK_IGNORE_DIRS or p.endswith(".egg-info") for p in parts):
-                continue
-            if fpath.suffix in _PACK_IGNORE_SUFFIXES:
-                continue
-            arcname = str(Path(prefix) / rel).replace("\\", "/")
-            zf.write(fpath, arcname)
-
-
-def _file_sha256_hex(path: Path) -> str:
-    """Calculate file SHA256, return hex string."""
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+        write_directory_tree_to_zip(zf, root, arcname_prefix=prefix)
 
 
 def publish_plugin(
@@ -443,7 +500,7 @@ def publish_plugin(
         z = publish_input.zip_path
         if not z.is_file():
             raise PublishError(400, f"zip file not found: {z}")
-        checksum_sha256 = _file_sha256_hex(z)
+        checksum_sha256 = sha256_file_hex(z)
         req = PublishRequest(
             zip_path=z,
             checksum_sha256=checksum_sha256,
@@ -464,7 +521,7 @@ def publish_plugin(
     with tempfile.TemporaryDirectory(prefix="openjiuwen_publish_") as tmp:
         out_dir = Path(tmp)
         z = pack_plugin(root, out_dir)
-        checksum_sha256 = _file_sha256_hex(z)
+        checksum_sha256 = sha256_file_hex(z)
         req = PublishRequest(
             zip_path=z,
             checksum_sha256=checksum_sha256,
