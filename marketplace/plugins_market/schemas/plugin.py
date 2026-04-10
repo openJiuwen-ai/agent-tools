@@ -155,6 +155,10 @@ class PluginListItem(BaseModel):
     certification: Optional[str] = None
     plugin_type: Optional[str] = None
     latest_version: Optional[str] = None
+    all_versions: List[str] = Field(
+        default_factory=list,
+        description="联表 market_asset_versions 得到的全部版本号，按 create_time、version 升序，如 [\"0.1.0\",\"0.2.0\"]",
+    )
     view_count: int = 0
     install_count: int = 0
     like_count: int = 0

@@ -463,12 +463,16 @@ def list_plugins_service(
         query.desc,
     )
     repo = MarketAssetRepository(db)
+    version_repo = MarketAssetVersionRepository(db)
     rows, total = repo.list_plugins(query)
     logger.info("List plugins query done: total=%s rows=%s", total, len(rows))
+    asset_ids = [a.asset_id for a, _ in rows]
+    versions_by_asset = version_repo.list_version_strings_by_asset_ids(asset_ids)
     items = []
     for asset, latest_file_path in rows:
         item = PluginListItem.model_validate(asset)
         item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path)
+        item.all_versions = versions_by_asset.get(asset.asset_id, [])
         items.append(item)
     return PluginListResponse(
         page=query.page,

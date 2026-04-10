@@ -2,6 +2,7 @@ export { API_CONFIG, setApiBaseUrl, API_ENDPOINTS } from './config'
 export { getApiClient } from './client'
 export {
   deletePluginAllVersions,
+  deletePluginVersion,
   getPluginArtifactDownload,
   getPluginVersionDetail,
   getPlugins,
