@@ -75,15 +75,20 @@ def _add_publish_parser(plugin_subparsers) -> None:
     publish_parser.add_argument(
         "--plugin-id",
         help=(
-            "Plugin id (optional when your account has at most one plugin with the package name; "
-            "required if multiple share the same name. Shown after publish or via 'openjiuwen-plugin search')"
+            "Asset/plugin id: omit on first publish (system assigns); required on later publishes "
+            "when targeting an existing plugin (use id from first publish or search)"
         ),
     )
     publish_parser.add_argument(
         "--plugin-version",
         help="Override version (marketplace: x.y.z e.g. 1.0.0; v1.0.0 accepted and stripped; optional)",
     )
-    publish_parser.add_argument("--version-desc", help="Version description")
+    publish_parser.add_argument(
+        "--version-desc",
+        dest="version_desc",
+        default=None,
+        help="This version's release notes (stored/shown as changelog on the market)",
+    )
     publish_parser.add_argument("--force", action="store_true", help="Overwrite existing version")
 
 
@@ -118,7 +123,10 @@ def _add_search_parser(plugin_subparsers) -> None:
         "--author",
         metavar="NAME",
         default=None,
-        help="publisher name (fuzzy match)",
+        help=(
+            "publisher display name (substring fuzzy match via ILIKE, case-insensitive; "
+            "quote in shell if special chars)"
+        ),
     )
     search_parser.add_argument(
         "--asset-id",
@@ -132,7 +140,7 @@ def _add_search_parser(plugin_subparsers) -> None:
         dest="search_asset_type",
         default=None,
         metavar="TYPE",
-        help="asset type",
+        help="asset type filter (e.g. plugin; exact match; more types may be added server-side)",
     )
     search_parser.add_argument(
         "--publisher-id",
@@ -202,7 +210,11 @@ def _add_delete_parser(plugin_subparsers) -> None:
 def _add_install_parser(plugin_subparsers) -> None:
     install_parser = plugin_subparsers.add_parser(
         "install",
-        help="Download artifact zip from market and pip install (GET /api/v1/artifacts/{asset_id})",
+        help=(
+            "Download artifact zip: copy bundle (default parent cwd); tools run pip on dist/*.whl "
+            "into the current Python env; -o/--output only sets bundle parent dir "
+            "(GET /api/v1/artifacts/{asset_id})"
+        ),
     )
     install_parser.add_argument(
         "asset_id",
@@ -211,26 +223,24 @@ def _add_install_parser(plugin_subparsers) -> None:
     install_parser.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
     install_parser.add_argument(
         "--version",
+        "-v",
         dest="plugin_version",
-        help="Preserved parameter (current artifacts download API gets by asset_id)",
-    )
-    install_parser.add_argument(
-        "--prefix",
-        dest="pip_prefix",
-        help="Pass to pip install --prefix (optional; ignored for skill type)",
+        metavar="VER",
+        help=(
+            "Semantic version to download (e.g. 1.0.0); passed as ?version= to GET "
+            "/api/v1/artifacts/{id}; omit for latest"
+        ),
     )
     install_parser.add_argument(
         "--output",
         "-o",
         default=None,
-        help="Extract/install target root directory (default current working directory)",
-    )
-    install_parser.add_argument(
-        "--save-zip",
-        dest="save_zip",
-        default=None,
-        metavar="PATH",
-        help="Save downloaded zip to this path additionally (optional)",
+        metavar="DIR",
+        help=(
+            "Parent directory for the plugin bundle folder (zip archive root name as subdir). "
+            "Default: cwd. For tools, pip always installs wheels into the current Python env; "
+            "this option only changes where the bundle is saved."
+        ),
     )
     install_parser.add_argument(
         "--force",

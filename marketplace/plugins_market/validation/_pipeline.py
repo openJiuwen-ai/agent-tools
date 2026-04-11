@@ -35,7 +35,6 @@ from plugins_market.validation.types.skill import (
 from plugins_market.validation.types.tools import (
     validate_tools_json,
     validate_tools_layout,
-    validate_tools_schema_consistency,
 )
 from plugins_market.validation.types.mcp_stdio import validate_mcp_stdio_layout
 from plugins_market.validation.types.restful_api import validate_restful_api_layout
@@ -162,12 +161,7 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
 
             # Read and validate tools.json
             tools_json_raw = safe_read_zip_member(zf, layout["tools_json_path"], counter)
-            tools_list = validate_tools_json(tools_json_raw)
-
-            # tool names consistency
-            validate_tools_schema_consistency(
-                zf, prefix, public.name, tools_list, counter
-            )
+            validate_tools_json(tools_json_raw)
 
             readme_raw = safe_read_zip_member(zf, layout["readme_path"], counter)
             detail_desc = readme_raw.decode("utf-8", errors="replace")

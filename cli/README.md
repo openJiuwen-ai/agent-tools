@@ -66,18 +66,16 @@ openjiuwen-plugin pack ./demo-weather -o ./dist-zips
 
 ---
 
-## 4. 环境变量（仅系统 / 进程环境）
+## 4. 环境变量
 
-CLI **只**读取当前进程可见的环境变量（操作系统用户环境、系统环境、shell 中 `export` / `$env:`、CI 注入等），实现上为 Python **`os.environ`**。**不会**解析、加载仓库或任意路径下的 `.env` 文件；与 marketplace / Docker Compose 使用的 `.env` **无联动**。
-
-若你在本机用 `.env` 启动市场服务，仍需在运行 CLI 的同一终端里**单独**设置下表变量（或写入用户级环境变量），例如从 `.env` 复制值后手动 `export`，或使用你习惯的 shell 插件在启动 CLI 前注入。
+仅指**当前进程**可见的环境变量（`os.environ`；不含仓库内 `.env` 自动加载）。CLI **不**读取任意路径下的 `.env`；与 Compose / 市场仓库里的 `.env` **无自动联动**。若用 `.env` 启了市场，运行 CLI 的终端仍需**自行** `export` / `$env:` 下表变量（或写入用户级环境变量）。
 
 | 变量 | 作用 |
 |------|------|
 | `OPENJIUWEN_MARKET_URL` | 市场服务**根地址**（不含 `/api/v1/...`），例如 `http://127.0.0.1:8100` |
 | `OPENJIUWEN_USER_TOKEN` | 用户 Bearer Token；用于 `publish` / `delete`（与 `--token` 二选一优先级：命令行优先） |
 | `OPENJIUWEN_SYSTEM_TOKEN` | 系统管理员 Token（请求头 `X-System-Token`）；与 `--system-token` 同理 |
-| `LOG_LEVEL` | 日志级别，默认 `INFO`；调试可设为 `DEBUG` |
+| `LOG_LEVEL` | 根日志级别，默认 `INFO` |
 
 **安全提示**：勿将 Token 写入仓库。`search`、`info`、`install`（下载 zip）对市场侧为**公开接口**，CLI **不会**附带用户鉴权头。
 
@@ -138,6 +136,10 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 |------|------|------|
 | `path` | 是 | 插件**根目录**（内含 `plugin.yaml` 等） |
 
+- **`tools`** 类型下 **`validate` 默认**要求根目录 **`pyproject.toml`**、**`src/`**、`schemas/tools.json` 等，并在存在 **`src/.../plugin.py`** 时校验其与 **`schemas/tools.json`** 中工具名一致。
+
+- **`mcp-stdio` / `restful-api` / `skill`** 不把根目录 **`pyproject.toml`** 作为通过结构校验的硬性条件。
+
 ### 6.3 `pack` — 打包为 zip
 
 | 参数 | 必填 | 说明 |
@@ -145,7 +147,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 | `path` | 是 | 插件根目录 |
 | `-o` / `--output` | 否 | zip 输出目录，默认 `out`。若为**相对路径**，则相对于**插件根目录** `path` 解析；**绝对路径**则直接使用 |
 
-打包前会先执行与 `validate` 相同的校验。`tools` 会执行 `pip wheel`（需网络或本地构建环境）。
+打包前会先执行与 `validate` 相同的校验。`tools` 会执行 `pip wheel`（需网络或本地构建环境），产物 zip **不写** `src/`，只带 **`dist/*.whl`** 与上述元数据文件。
 
 ### 6.4 `publish` — 上传市场
 
@@ -156,12 +158,14 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 | `--token` | 条件 | 普通用户：`Authorization: Bearer …`。与 `--system-token` **互斥**；可省略并从 `OPENJIUWEN_USER_TOKEN` 读取（命令行优先） |
 | `--system-token` | 条件 | 系统管理员：`X-System-Token`。与 `--token` **互斥**；可省略并从 `OPENJIUWEN_SYSTEM_TOKEN` 读取 |
 | `--market-url` | 条件 | 市场根 URL；未设则用 `OPENJIUWEN_MARKET_URL` |
-| `--plugin-id` | 否 | 插件 ID；首发可省略，后续发版建议带上 |
+| `--plugin-id` | 条件 | **首发勿传**（由市场分配）；**同一插件再次发版必须传**（与包内 `name` 对应的那条资产的 `plugin_id`） |
 | `--plugin-version` | 否 | 覆盖版本号（`x.y.z`，可选 `v` 前缀） |
-| `--version-desc` | 否 | 版本说明 |
+| `--version-desc` | 否 | **本版本的 release notes**（语义上）；市场侧落库/展示为**该版本的 changelog** 字段（与 `plugin.yaml` 的 `description`、插件卡片/详情里的**插件总描述**不是同一字段） |
 | `--force` | 否 | 允许覆盖市场侧已存在的同版本（以服务端策略为准） |
 
 `publish`、`delete` 的用户或系统鉴权须通过 `--token` 或 `OPENJIUWEN_USER_TOKEN`（或 `--system-token` / `OPENJIUWEN_SYSTEM_TOKEN`）；未提供则报错退出。
+
+**日志**：`LOG_LEVEL` 含 `INFO` 时，开始上传 multipart 前会打印「正在上传插件包，请稍候…」；大包耗时可更长。
 
 ### 6.5 `info` — 查询版本详情
 
@@ -184,7 +188,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 | `--type` | 否 | `plugin_type` 精确匹配：`tools` / `mcp-stdio` / `restful-api` / `skill` |
 | `--author` | 否 | 发布者展示名（模糊） |
 | `--asset-id` | 否 | 资产 ID |
-| `--asset-type` | 否 | 资产类型 |
+| `--asset-type` | 否 | 资产类型（**精确匹配**；当前列表以 **`plugin`** 为主，其它取值以后端为准，如后续扩展 `workflow` 等） |
 | `--publisher-id` | 否 | 发布者 ID |
 | `--page` | 否 | 页码，默认 `1` |
 | `--page-size` | 否 | 每页条数，默认 `20`，最大 `100` |
@@ -203,17 +207,26 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 
 ### 6.8 `install` — 下载并安装
 
-不携带用户鉴权。按 zip 内 `runtime.type`：`skill` 仅复制技能目录，**不**执行 `pip`；其余类型会 `pip install`（`tools` 装 `dist/*.whl`，`mcp-stdio` / `restful-api` 为 `pip install .`）。**不会**自动启动 MCP/REST 服务。
+不携带用户鉴权。具体行为取决于制品 zip 内 **`plugin.yaml` 的 `runtime.type`**，详见下表之后说明。
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | `asset_id` | 是 | 市场 `asset_id` |
 | `--market-url` | 条件 | 市场根 URL |
-| `--version` | 否 | 保留参数；当前按 `asset_id` 拉取制品，**可能被忽略**（以命令行提示为准） |
-| `--prefix` | 否 | 传给 `pip install --prefix`；**`skill` 类型忽略** |
-| `-o` / `--output` | 否 | 解压与安装根目录，默认**当前工作目录** |
-| `--save-zip` | 否 | 将下载的 zip **额外**保存到该路径 |
+| `--version` / `-v` | 否 | 语义化版本（如 `1.0.0`）；传给 **`GET /api/v1/artifacts/{asset_id}?version=`**；**省略**则由服务端决定（一般为最新版） |
+| `-o` / `--output` | 否 | 插件包**父目录**（默认当前工作目录） |
 | `--force` | 否 | 目标目录已存在时允许覆盖 |
+
+**说明**
+
+- **父目录**：`-o` 指向的目录；省略则为当前工作目录。
+- **包目录**：`<父目录>/<zip 顶层目录>/`（即内含 `plugin.yaml` 的那一层；`tools` / `mcp-stdio` / `restful-api` 同此约定）。
+
+- **`tools`**：解压后按 **`dist/*.whl`** 用当前解释器执行 **`pip install`**；wheel 一般仍留在包内 `dist/`。`-o` 只影响包目录的父路径；**建议 venv**；系统 Python 易权限失败。
+
+- **`mcp-stdio` / `restful-api`**：只解压到包目录，**不**跑 `pip`；依赖在包目录内自行 **`pip install .`**；不自动起服务。
+
+- **`skill`**：解压到 **`<父目录>/<name>/`**，**不**跑 `pip`；`name` 须与目录、`plugin.yaml`、`SKILL.md` frontmatter 一致。
 
 ### 6.9 `skill-import` — 管理员批量导入技能集合包
 
@@ -228,6 +241,8 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 | `--fail-fast` | 否 | 首条条目失败即停止处理后续目录（默认部分成功） |
 
 **退出码**：任一条目失败（`summary.failed > 0`）、路径无效、本地打包失败、或 zip 超过 **512MB** 预检时，进程以**非 0** 退出。HTTP **200** 仍可能带项内失败，请看日志中的 `summary` / 各 `entry` 状态。
+
+**日志**：`LOG_LEVEL` 含 `INFO` 时，开始上传前会打印「正在上传 skills 包，请稍候…」；大包耗时可更长。
 
 ```bash
 export OPENJIUWEN_MARKET_URL=http://127.0.0.1:8100
@@ -247,7 +262,8 @@ openjiuwen-plugin publish -f ./out/demo-weather-0.0.1.zip --token <TOKEN> --mark
 openjiuwen-plugin info <asset_id> -v 1.0.0 --market-url $BASE
 openjiuwen-plugin search weather --type tools --page-size 20 --order-by create_time --market-url $BASE
 openjiuwen-plugin install <asset_id> --market-url $BASE
-openjiuwen-plugin install <asset_id> -o ./plugins --save-zip ./cache/p.zip --market-url $BASE
+openjiuwen-plugin install <asset_id> -v 1.0.0 --market-url $BASE
+openjiuwen-plugin install <asset_id> -o ./plugins --market-url $BASE
 openjiuwen-plugin delete <asset_id> --version all --token <TOKEN> --market-url $BASE
 ```
 
@@ -264,7 +280,7 @@ openjiuwen-plugin delete <asset_id> --version all --token <TOKEN> --market-url $
 | `main.py` | 入口：日志初始化、解析参数、分发子命令 |
 | `parsers.py` | 各子命令 `argparse` 定义 |
 | `handlers.py` | 子命令业务编排、日志输出、进程退出码 |
-| `plugin.py` | `init` / `validate` / `pack` / `publish` / `install` 等|
+| `plugin.py` | `init` / `validate` / `pack` / `publish` / `install` 落盘与 pip 等 |
 | `market.py` | 对市场 HTTP API 的调用与响应解析 |
 | `schemas/` | 与市场对齐的请求/响应模型（Pydantic） |
 | `logging_config.py` | 控制台日志与敏感信息脱敏 |
@@ -339,10 +355,6 @@ my-skill/
     assets/
 ```
 
-### 关于 `schemas/tools.json`
-
-**`tools`、`mcp-stdio`、`restful-api`** 脚手架都会生成 **`schemas/tools.json`**（模板内容）。**`validate` 仅对 `runtime.type: tools` 校验该文件**（结构、与 `src/.../plugin.py` 中 `@tool(name=...)` 名称一致等）。**`mcp-stdio` 与 `restful-api`** 类型下该文件**不参与**上述校验；其中 **`restful-api` 仍建议在 `tools.json` 中维护各 API 能力的输入/输出说明**（结构可与 `tools` 类型对齐），只是 CLI 当前不强制校验。
-
 ---
 
 ## 9. `plugin.yaml` 与校验摘要（MVP）
@@ -375,12 +387,6 @@ my-skill/
 | `timeout_seconds` | 否 | 建议超时秒数（数字），供宿主参考 |
 
 **`rest_api.py`**：脚手架中的占位文件，**可保留**；需要本地封装调用逻辑时再实现，**不是**「仅远程服务」场景的必需项。
-
-### `schemas/tools.json`（校验范围）
-
-当 **`runtime.type` 为 `tools`** 时：`tools` 数组非空；每项含 `name`、`description`、`input_schema`、`output_schema`，且 schema 根类型为 `object`；`src/.../plugin.py` 中 `@tool(name="...")` 与 JSON 中工具名须一一对应。
-
-**`mcp-stdio` / `restful-api`** 虽可带同名文件，**不进行**上述校验（见第 8 节）。**`restful-api`** 仍**建议**用该文件描述 REST 能力的参数形态，与运行时实现保持一致。
 
 ---
 
@@ -421,5 +427,8 @@ A：在 shell 中为路径加引号，例如 `openjiuwen-plugin validate "D:\My 
 **Q：只执行 `openjiuwen-plugin` 不带子命令会怎样？**  
 A：会打印总帮助并退出（退出码非 0）；查看子命令请用 `openjiuwen-plugin -h` 或 `openjiuwen-plugin <子命令> -h`。
 
-**Q：`LOG_LEVEL=DEBUG` 有什么用？**  
-A：日志更详细；部分底层步骤（如释放 HTTP 连接失败）仅在 DEBUG 下可见。
+**Q：`search` 里关键词含 `*`、`#`、`(` 等异常？**  
+A：多数由 **Shell 先解释** 导致：`*` 会展开为文件名、`#` 起注释、`(` 在 bash 中有语法含义。请对关键词**加引号**，例如 `openjiuwen-plugin search '*'`、`openjiuwen-plugin search '#'`（PowerShell 同理用引号包裹）。
+
+**Q：`publish` 失败时打印一大段 JSON？**  
+A：已改为尽量解析服务端 `message` 并输出**单行可读文案**（如 `Invalid X-System-Token`、版本冲突说明等）。若仍为长文本，请直接查看市场接口返回或本地复现请求排查。

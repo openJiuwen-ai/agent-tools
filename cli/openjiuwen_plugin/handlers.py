@@ -7,22 +7,22 @@ from pathlib import Path
 
 from openjiuwen_plugin.logging_config import get_logger
 from openjiuwen_plugin.market import (
-    delete_plugin,
-    download_artifact_zip,
-    get_plugin_version_detail,
-    search_plugins,
-    skill_import_upload,
+    plugin_delete,
+    plugin_info,
+    plugin_install_download,
+    plugin_search,
+    skill_import,
 )
 from openjiuwen_plugin.utils import sha256_file_hex
 from openjiuwen_plugin.plugin import (
     PublishError,
     SKILL_IMPORT_BUNDLE_MAX_BYTES,
-    init_plugin,
-    install_plugin_from_zip,
-    pack_plugin,
-    pack_skill_bundle_directory,
-    publish_plugin,
-    validate_plugin,
+    plugin_init,
+    plugin_install,
+    plugin_pack,
+    plugin_pack_skill_bundle,
+    plugin_publish,
+    plugin_validate,
 )
 from openjiuwen_plugin.schemas import PluginListQuery
 from openjiuwen_plugin.schemas import PublishPluginInput
@@ -30,7 +30,12 @@ from openjiuwen_plugin.schemas import PublishPluginInput
 logger = get_logger(__name__)
 
 
-def _resolve_market_url(args_market_url: str | None, *, err_msg: str) -> str | None:
+def _cli_log_command_failed(command: str, detail: object) -> None:
+    """子命令失败时的统一日志前缀。"""
+    logger.error("openjiuwen-plugin %s failed: %s", command, detail)
+
+
+def _cli_resolve_market_url(args_market_url: str | None, *, err_msg: str) -> str | None:
     market_url = args_market_url or os.getenv("OPENJIUWEN_MARKET_URL")
     if not market_url:
         logger.error(err_msg)
@@ -38,7 +43,7 @@ def _resolve_market_url(args_market_url: str | None, *, err_msg: str) -> str | N
     return market_url
 
 
-def _resolve_publish_auth(args) -> tuple[str | None, str | None, int]:
+def _cli_resolve_publish_auth(args) -> tuple[str | None, str | None, int]:
     user_token = args.user_token or os.getenv("OPENJIUWEN_USER_TOKEN")
     system_token = args.system_token or os.getenv("OPENJIUWEN_SYSTEM_TOKEN")
     has_user = bool(user_token and str(user_token).strip())
@@ -61,7 +66,7 @@ def _resolve_publish_auth(args) -> tuple[str | None, str | None, int]:
     return user_token, None, 0
 
 
-def _resolve_delete_auth(args) -> tuple[str | None, str | None, int]:
+def _cli_resolve_delete_auth(args) -> tuple[str | None, str | None, int]:
     user_token = args.user_token or os.getenv("OPENJIUWEN_USER_TOKEN")
     system_token = args.system_token or os.getenv("OPENJIUWEN_SYSTEM_TOKEN")
 
@@ -85,22 +90,22 @@ def _resolve_delete_auth(args) -> tuple[str | None, str | None, int]:
 
 def handle_init(args) -> int:
     try:
-        plugin_root = init_plugin(args.name, Path(args.path), force=args.force, plugin_type=args.plugin_type)
+        plugin_root = plugin_init(args.name, Path(args.path), force=args.force, plugin_type=args.plugin_type)
     except Exception as exc:
-        logger.error("init failed: %s", exc)
+        _cli_log_command_failed("init", exc)
         return 1
     logger.info("plugin initialized at: %s", plugin_root)
     return 0
 
 
 def handle_validate(args) -> int:
-    result = validate_plugin(Path(args.path).resolve())
+    result = plugin_validate(Path(args.path).resolve())
     if result.warnings:
         for warning in result.warnings:
             logger.warning("%s", warning)
     if result.errors:
         for err in result.errors:
-            logger.error("%s", err)
+            _cli_log_command_failed("validate", err)
         return 1
     logger.info("plugin validation passed")
     return 0
@@ -112,20 +117,20 @@ def handle_pack(args) -> int:
         out_dir = (
             Path(args.output).resolve() if Path(args.output).is_absolute() else (plugin_root / args.output).resolve()
         )
-        zip_path = pack_plugin(plugin_root, out_dir)
+        zip_path = plugin_pack(plugin_root, out_dir)
     except Exception as exc:
-        logger.error("pack failed: %s", exc)
+        _cli_log_command_failed("pack", exc)
         return 1
     logger.info("packed: %s", zip_path)
     return 0
 
 
 def handle_publish(args) -> int:
-    user_token, system_token, exit_code = _resolve_publish_auth(args)
+    user_token, system_token, exit_code = _cli_resolve_publish_auth(args)
     if exit_code != 0:
         return exit_code
 
-    market_url = _resolve_market_url(
+    market_url = _cli_resolve_market_url(
         args.market_url,
         err_msg="publish requires --market-url or OPENJIUWEN_MARKET_URL",
     )
@@ -144,17 +149,17 @@ def handle_publish(args) -> int:
             version_desc=args.version_desc or None,
             force=args.force,
         )
-        result = publish_plugin(
+        result = plugin_publish(
             market_url=market_url,
             user_token=user_token,
             system_token=system_token,
             publish_input=publish_input,
         )
     except PublishError as e:
-        logger.error("publish failed: %s", e.detail)
+        _cli_log_command_failed("publish", e.detail)
         return 1
     except ValueError as e:
-        logger.error("publish failed: %s", e)
+        _cli_log_command_failed("publish", e)
         return 1
 
     logger.info(
@@ -176,15 +181,11 @@ def handle_info(args) -> int:
         logger.error("info requires --market-url or OPENJIUWEN_MARKET_URL")
         return 1
     try:
-        detail = get_plugin_version_detail(market_url, args.asset_id, args.version)
-    except FileNotFoundError as e:
-        logger.error("%s", e)
-        return 1
+        detail = plugin_info(market_url, args.asset_id, args.version)
     except Exception as exc:
-        logger.error("info failed: %s", exc, exc_info=True)
+        _cli_log_command_failed("info", exc)
         return 1
 
-    # 直接按 PluginVersionDetail 字段输出（按 schema 定义顺序）
     logger.info("asset_id: %s", detail.asset_id or args.asset_id)
     for key in detail.__class__.model_fields:
         if key == "asset_id":
@@ -225,7 +226,7 @@ def handle_search(args) -> int:
             order_by=args.order_by or "install_count",
             desc=args.desc,
         )
-        result = search_plugins(market_url, query)
+        result = plugin_search(market_url, query)
         if not result.items:
             logger.info("no results.")
             return 0
@@ -236,24 +237,24 @@ def handle_search(args) -> int:
             ver = item.latest_version
             logger.info("  %s  %s  %s", aid, name, ver)
     except Exception as exc:
-        logger.error("search failed: %s", exc, exc_info=True)
+        _cli_log_command_failed("search", exc)
         return 1
     return 0
 
 
 def handle_delete(args) -> int:
-    market_url = _resolve_market_url(
+    market_url = _cli_resolve_market_url(
         args.market_url,
         err_msg="delete requires --market-url or OPENJIUWEN_MARKET_URL",
     )
     if not market_url:
         return 1
     try:
-        user_token, system_token, exit_code = _resolve_delete_auth(args)
+        user_token, system_token, exit_code = _cli_resolve_delete_auth(args)
         if exit_code != 0:
             return exit_code
         if system_token:
-            delete_plugin(
+            plugin_delete(
                 market_url,
                 args.plugin_id,
                 logger,
@@ -261,7 +262,7 @@ def handle_delete(args) -> int:
                 system_token=system_token,
             )
         else:
-            delete_plugin(
+            plugin_delete(
                 market_url,
                 args.plugin_id,
                 logger,
@@ -269,13 +270,13 @@ def handle_delete(args) -> int:
                 user_token=user_token,
             )
     except Exception as exc:
-        logger.error("delete failed: %s", exc, exc_info=True)
+        _cli_log_command_failed("delete", exc)
         return 1
     return 0
 
 
 def handle_install(args) -> int:
-    market_url = _resolve_market_url(
+    market_url = _cli_resolve_market_url(
         args.market_url,
         err_msg="install requires --market-url or OPENJIUWEN_MARKET_URL",
     )
@@ -283,8 +284,7 @@ def handle_install(args) -> int:
         return 1
 
     asset_id = str(args.asset_id).strip()
-    if args.plugin_version:
-        logger.warning("install --version is ignored for artifacts endpoint")
+    plugin_version = (args.plugin_version or "").strip() or None
 
     fd, tmp_name = tempfile.mkstemp(suffix=".zip", prefix="openjiuwen_dl_")
     os.close(fd)
@@ -292,30 +292,25 @@ def handle_install(args) -> int:
     zip_path = own_tmp
 
     extract_root = Path(args.output).resolve() if args.output else Path.cwd().resolve()
-    pip_prefix = Path(args.pip_prefix).resolve() if args.pip_prefix else None
     try:
-        dl_info = download_artifact_zip(market_url, asset_id, zip_path)
+        dl_info = plugin_install_download(
+            market_url,
+            asset_id,
+            zip_path,
+            version=plugin_version,
+        )
         if dl_info.verified:
-            logger.info(
-                "download checksum verified: %s",
-                dl_info.actual_checksum_sha256,
-            )
+            logger.info("download checksum verified: %s", dl_info.actual_checksum_sha256)
         else:
-            logger.warning("download checksum not provided by server; skip verification")
-        if args.save_zip:
-            save_path = Path(args.save_zip).resolve()
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(zip_path, save_path)
-            logger.info("saved zip to: %s", save_path)
-        installed_root = install_plugin_from_zip(
+            logger.warning("server did not provide a checksum; skipped verification")
+        installed = plugin_install(
             zip_path,
             extract_dir=extract_root,
-            pip_prefix=pip_prefix,
             force=args.force,
         )
-        logger.info("plugin installed under: %s", installed_root)
+        logger.info("install finished, saved to: %s", installed.resolve())
     except Exception as exc:
-        logger.error("install failed: %s", exc, exc_info=True)
+        _cli_log_command_failed("install", exc)
         return 1
     finally:
         try:
@@ -326,7 +321,7 @@ def handle_install(args) -> int:
 
 
 def handle_skill_import(args) -> int:
-    market_url = _resolve_market_url(
+    market_url = _cli_resolve_market_url(
         args.market_url,
         err_msg="skill-import requires --market-url or OPENJIUWEN_MARKET_URL",
     )
@@ -344,27 +339,26 @@ def handle_skill_import(args) -> int:
             pack_tmp = Path(tempfile.mkdtemp(prefix="oj_skill_bundle_pack_"))
             bundle = pack_tmp / "bundle.zip"
             try:
-                pack_skill_bundle_directory(path, bundle)
+                plugin_pack_skill_bundle(path, bundle)
             except ValueError as e:
-                logger.error("skill-import pack directory failed: %s", e)
+                _cli_log_command_failed("skill-import", f"pack directory: {e}")
                 return 1
         elif path.is_file():
             bundle = path
             raw = bundle.stat().st_size
             if raw > SKILL_IMPORT_BUNDLE_MAX_BYTES:
-                logger.error(
-                    "skill-import bundle file too large: %s bytes (limit %s)",
-                    raw,
-                    SKILL_IMPORT_BUNDLE_MAX_BYTES,
+                _cli_log_command_failed(
+                    "skill-import",
+                    f"bundle file too large: {raw} bytes (limit {SKILL_IMPORT_BUNDLE_MAX_BYTES})",
                 )
                 return 1
         else:
-            logger.error("bundle zip or directory not found: %s", path)
+            _cli_log_command_failed("skill-import", f"bundle zip or directory not found: {path}")
             return 1
 
         checksum = sha256_file_hex(bundle)
         try:
-            result = skill_import_upload(
+            result = skill_import(
                 market_url,
                 str(system_token).strip(),
                 zip_path=bundle,
@@ -373,7 +367,7 @@ def handle_skill_import(args) -> int:
                 fail_fast=bool(args.fail_fast),
             )
         except PublishError as e:
-            logger.error("skill-import failed: %s", e.detail)
+            _cli_log_command_failed("skill-import", e.detail)
             return 1
 
         s = result.summary

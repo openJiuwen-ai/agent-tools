@@ -18,7 +18,7 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
 from openjiuwen_plugin.utils import sha256_file_hex
 from openjiuwen_plugin.logging_config import get_logger
-from openjiuwen_plugin.market import PublishError, upload_plugin as _market_upload_plugin
+from openjiuwen_plugin.market import PublishError, plugin_upload
 from openjiuwen_plugin.schemas import (
     MARKETPLACE_VERSION_PATTERN,
     PluginPublishResult,
@@ -28,13 +28,11 @@ from openjiuwen_plugin.schemas import (
 
 logger = get_logger(__name__)
 
-# 与市场 ``plugins_market.validation.constants.MINIMAL_PNG_BYTES`` 同源；1×1 透明 PNG。
 _PLACEHOLDER_ICON_PNG_BYTES = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
     "0000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
 )
 
-# Directory → zip (mcp/restful pack + skill-import bundle CLI); same as server MAX_FILE_SIZE.
 PACK_IGNORE_DIR_NAMES = frozenset(
     {
         ".git",
@@ -51,7 +49,7 @@ PACK_IGNORE_SUFFIXES = (".pyc", ".pyo", ".egg-info")
 SKILL_IMPORT_BUNDLE_MAX_BYTES = 512 * 1024 * 1024
 
 
-def write_directory_tree_to_zip(
+def plugin_zip_write_directory_tree(
     zf: zipfile.ZipFile,
     root: Path,
     *,
@@ -79,7 +77,7 @@ def write_directory_tree_to_zip(
     return n
 
 
-def pack_skill_bundle_directory(src_dir: Path, dest_zip: Path) -> None:
+def plugin_pack_skill_bundle(src_dir: Path, dest_zip: Path) -> None:
     """Build collection-bundle zip (zip root = ``src_dir``) for ``skill-import`` CLI upload."""
     src = src_dir.resolve()
     if not src.is_dir():
@@ -89,7 +87,7 @@ def pack_skill_bundle_directory(src_dir: Path, dest_zip: Path) -> None:
 
     try:
         with zipfile.ZipFile(dest_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-            files_written = write_directory_tree_to_zip(zf, src, arcname_prefix="")
+            files_written = plugin_zip_write_directory_tree(zf, src, arcname_prefix="")
     except OSError as e:
         dest_zip.unlink(missing_ok=True)
         raise ValueError(f"failed to build bundle zip: {e}") from e
@@ -110,13 +108,11 @@ def pack_skill_bundle_directory(src_dir: Path, dest_zip: Path) -> None:
 
 
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
-# Agent Skills：≤64；小写/数字；不以连字符开头或结尾；无连续 --
 SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SKILL_NAME_MAX_LEN = 64
 SKILL_DESC_MAX_LEN = 1024
 TOOL_NAME_PATTERN = re.compile(r'@tool\([^)]*name\s*=\s*["\']([a-z][a-z0-9-]*)["\']', re.DOTALL)
 SUPPORTED_PLUGIN_TYPES = {"tools", "mcp-stdio", "restful-api", "skill"}
-# tools 类型下 plugin.yaml 的 tools_schema 约定路径
 TOOLS_SCHEMA_PATH = "schemas/tools.json"
 
 
@@ -234,7 +230,7 @@ def _init_plugin_skill(plugin_name: str, plugin_root: Path) -> Path:
     return plugin_root
 
 
-def init_plugin(plugin_name: str, base_path: Path, force: bool = False, plugin_type: str = "tools") -> Path:
+def plugin_init(plugin_name: str, base_path: Path, force: bool = False, plugin_type: str = "tools") -> Path:
     if not NAME_PATTERN.match(plugin_name):
         raise ValueError("plugin name must match ^[a-z][a-z0-9-]*$")
     if plugin_type not in SUPPORTED_PLUGIN_TYPES:
@@ -297,7 +293,6 @@ def init_plugin(plugin_name: str, base_path: Path, force: bool = False, plugin_t
         ),
         encoding="utf-8",
     )
-    # install_plugin_from_zip 对所有非 tools 类型也需要 pyproject.toml 来执行 `pip install .`
     (plugin_root / "pyproject.toml").write_text(
         _default_pyproject_toml(plugin_name, package_name, plugin_type),
         encoding="utf-8",
@@ -305,7 +300,19 @@ def init_plugin(plugin_name: str, base_path: Path, force: bool = False, plugin_t
     return plugin_root
 
 
-def validate_plugin(plugin_path: Path) -> ValidationResult:
+def plugin_validate(
+    plugin_path: Path,
+    *,
+    require_pyproject_for_tools: bool = True,
+) -> ValidationResult:
+    """Validate a plugin directory layout.
+
+    ``require_pyproject_for_tools``:
+      When True (default), ``runtime.type=tools`` requires ``pyproject.toml`` at the
+      plugin root (local dev / ``validate`` / ``pack``).
+      When False, tools may omit ``pyproject.toml`` and ``src/``; layout must include
+      ``dist/*.whl`` (e.g. extracted pack / marketplace wheel-only bundle).
+    """
     errors: list[str] = []
     warnings: list[str] = []
     root = plugin_path.resolve()
@@ -321,11 +328,18 @@ def validate_plugin(plugin_path: Path) -> ValidationResult:
     required_entries = ["plugin.yaml", "icon.png"]
     if runtime_type is None or runtime_type != "skill":
         required_entries.append("README.md")
-    if runtime_type is not None and runtime_type != "skill":
-        required_entries.append("src")
 
     if runtime_type == "tools":
         required_entries.append("schemas/tools.json")
+        if require_pyproject_for_tools:
+            required_entries.append("pyproject.toml")
+            required_entries.append("src")
+        else:
+            dist_dir = root / "dist"
+            if not dist_dir.is_dir() or not any(dist_dir.glob("*.whl")):
+                errors.append("missing required: dist/*.whl (tools wheel bundle)")
+    elif runtime_type is not None and runtime_type != "skill":
+        required_entries.append("src")
 
     for rel in required_entries:
         if not (root / rel).exists():
@@ -369,13 +383,13 @@ def validate_plugin(plugin_path: Path) -> ValidationResult:
     return ValidationResult(ok=not errors, errors=errors, warnings=warnings)
 
 
-def pack_plugin(plugin_path: Path, output_dir: Path | None = None) -> Path:
+def plugin_pack(plugin_path: Path, output_dir: Path | None = None) -> Path:
     """将插件目录打成 zip；打包前会先执行 validate，校验不通过则抛错不生成 zip。"""
     root = plugin_path.resolve()
     if not root.exists() or not root.is_dir():
         raise ValueError(f"plugin path not found or not a directory: {root}")
 
-    result = validate_plugin(root)
+    result = plugin_validate(root)
     for w in result.warnings:
         logger.warning("%s", w)
     if result.errors:
@@ -415,7 +429,7 @@ def pack_plugin(plugin_path: Path, output_dir: Path | None = None) -> Path:
 
 
 def _pack_plugin_tools(root: Path, name: str, version: str, prefix: str, zip_path: Path) -> None:
-    """Pack tools type: build wheel first, then pack basic metadata, src and dist/*.whl."""
+    """Pack tools type: build wheel first, then pack metadata and ``dist/*.whl`` (no ``src/`` tree)."""
     pyproject = root / "pyproject.toml"
     if not pyproject.exists():
         raise ValueError("tools type requires pyproject.toml in plugin root")
@@ -440,12 +454,6 @@ def _pack_plugin_tools(root: Path, name: str, version: str, prefix: str, zip_pat
             p = root / rel
             if p.is_file():
                 zf.write(p, f"{prefix}/{rel}".replace("\\", "/"))
-        src_dir = root / "src"
-        if src_dir.is_dir():
-            for fpath in src_dir.rglob("*"):
-                if fpath.is_file():
-                    rel = fpath.relative_to(root)
-                    zf.write(fpath, f"{prefix}/{rel}".replace("\\", "/"))
         for whl in whls:
             zf.write(whl, f"{prefix}/dist/{whl.name}".replace("\\", "/"))
 
@@ -486,16 +494,16 @@ def _pack_plugin_skill(root: Path, name: str, version: str, prefix: str, zip_pat
 def _pack_plugin_directory(root: Path, prefix: str, zip_path: Path) -> None:
     """mcp-stdio / restful-api: full directory pack with ignore rules."""
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        write_directory_tree_to_zip(zf, root, arcname_prefix=prefix)
+        plugin_zip_write_directory_tree(zf, root, arcname_prefix=prefix)
 
 
-def publish_plugin(
+def plugin_publish(
     market_url: str,
     user_token: str | None,
     system_token: str | None,
     publish_input: PublishPluginInput,
 ) -> PluginPublishResult:
-    """上传插件到市场。指定 zip_path 时直接上传该 zip；否则从 plugin_path 先 pack 再上传。"""
+    """发布：可选先 ``plugin_pack``，再 ``market.plugin_upload``；也可直接传 zip。"""
     if publish_input.zip_path is not None:
         z = publish_input.zip_path
         if not z.is_file():
@@ -509,7 +517,7 @@ def publish_plugin(
             version_desc=publish_input.version_desc,
             force=publish_input.force,
         )
-        return _market_upload_plugin(market_url, user_token, system_token, req)
+        return plugin_upload(market_url, user_token, system_token, req)
     root = publish_input.plugin_path
     if root is None:
         raise PublishError(400, "either plugin_path or zip_path must be provided")
@@ -520,7 +528,7 @@ def publish_plugin(
 
     with tempfile.TemporaryDirectory(prefix="openjiuwen_publish_") as tmp:
         out_dir = Path(tmp)
-        z = pack_plugin(root, out_dir)
+        z = plugin_pack(root, out_dir)
         checksum_sha256 = sha256_file_hex(z)
         req = PublishRequest(
             zip_path=z,
@@ -530,7 +538,7 @@ def publish_plugin(
             version_desc=publish_input.version_desc,
             force=publish_input.force,
         )
-        return _market_upload_plugin(market_url, user_token, system_token, req)
+        return plugin_upload(market_url, user_token, system_token, req)
 
 
 def _safe_extractall(zf: zipfile.ZipFile, dest: Path) -> None:
@@ -578,24 +586,77 @@ def _find_plugin_root_in_extracted(extract_root: Path) -> Path:
     return found[0].parent
 
 
-def install_plugin_from_zip(
+def _parse_plugin_yaml_for_install(plugin_root: Path) -> tuple[str, str]:
+    """读取并校验 ``plugin.yaml``，返回 ``(runtime_type, yaml_name)``。"""
+    plugin_yaml = plugin_root / "plugin.yaml"
+    data = yaml.safe_load(plugin_yaml.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("plugin.yaml must be an object")
+    runtime_type = _runtime_type(data)
+    if runtime_type is None:
+        raise ValueError("plugin.yaml runtime.type is missing or not supported")
+    yaml_name = data.get("name")
+    if not isinstance(yaml_name, str):
+        raise ValueError("plugin.yaml name must be a string")
+    return runtime_type, yaml_name
+
+
+def _install_skill_from_staging(
+    plugin_root: Path,
+    yaml_name: str,
+    dest_parent: Path,
+    *,
+    force: bool,
+) -> Path:
+    skill_src = plugin_root / yaml_name
+    if not skill_src.is_dir() or not (skill_src / "SKILL.md").is_file():
+        raise ValueError(f"skill plugin requires directory {yaml_name}/ containing SKILL.md")
+    dest = dest_parent / yaml_name
+    if dest.exists():
+        if not force:
+            raise FileExistsError(
+                f"destination already exists: {dest} (use force=True or --force to overwrite)"
+            )
+        shutil.rmtree(dest)
+    shutil.copytree(skill_src, dest)
+    return dest
+
+
+def _copy_bundle_to_output(plugin_root: Path, dest_parent: Path, *, force: bool) -> Path:
+    """将插件根目录拷到 ``dest_parent / <staging_root_name>``。"""
+    bundle_dest = dest_parent / plugin_root.name
+    if bundle_dest.exists():
+        if not force:
+            raise FileExistsError(
+                f"destination already exists: {bundle_dest} (use force=True or --force to overwrite)"
+            )
+        shutil.rmtree(bundle_dest)
+    shutil.copytree(plugin_root, bundle_dest)
+    return bundle_dest
+
+
+def _pip_install_tools_wheels(bundle_dest: Path) -> None:
+    """``pip install`` on ``bundle_dest/dist/*.whl`` into the current Python environment."""
+    bd = bundle_dest.resolve()
+    whls = sorted((bd / "dist").glob("*.whl"))
+    if not whls:
+        raise ValueError("tools plugin zip has no dist/*.whl")
+    for w in whls:
+        if w.name.startswith("-"):
+            raise ValueError(f"unsafe wheel filename (starts with '-'): {w.name!r}")
+    wheel_paths = [str(w) for w in whls]
+    cmd: list[str] = [sys.executable, "-m", "pip", "install", "--"]
+    cmd.extend(wheel_paths)
+    subprocess.run(cmd, check=True)
+
+
+def plugin_install(
     zip_path: Path,
     *,
     extract_dir: Path | None = None,
-    pip_prefix: Path | None = None,
     force: bool = False,
 ) -> Path:
-    """
-    Extract zip, validate, and for non-skill types copy plugin directory to ``extract_dir`` and execute pip.
-
-    - ``extract_dir``: extraction/installation root directory; defaults to current working directory if omitted.
-    - **skill**: only copies ``<plugin.yaml.name>/`` skill directory to ``extract_dir``, does not execute pip;
-      ``pip_prefix`` is ignored.
-    - **tools**: copy entire package to ``extract_dir /<archive_plugin_root_name>/`` then install ``dist/*.whl``.
-    - **mcp-stdio** / **restful-api**: execute ``pip install .`` in the above directory.
-
-    Returns installation path: skill as ``extract_dir/<name>``, others as ``extract_dir/<archive_plugin_root_name>``.
-    """
+    """解压 zip、校验后按 runtime 落盘；skill 只拷 slug 目录，tools 可 pip 装 wheels，mcp/api 仅拷贝。返回安装根路径。"""
     zpath = zip_path.resolve()
     if not zpath.is_file():
         raise ValueError(f"zip not found: {zpath}")
@@ -609,81 +670,33 @@ def install_plugin_from_zip(
             _safe_extractall(zf, extract_root)
         plugin_root = _find_plugin_root_in_extracted(extract_root)
 
-        result = validate_plugin(plugin_root)
+        result = plugin_validate(plugin_root, require_pyproject_for_tools=False)
         for w in result.warnings:
             logger.warning("%s", w)
         if result.errors:
             raise ValueError("plugin validation failed: " + "; ".join(result.errors))
 
-        plugin_yaml = plugin_root / "plugin.yaml"
-        data = yaml.safe_load(plugin_yaml.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("plugin.yaml must be an object")
-        runtime_type = _runtime_type(data)
-        if runtime_type is None:
-            raise ValueError("plugin.yaml runtime.type is missing or not supported")
-        yaml_name = data.get("name")
-        if not isinstance(yaml_name, str):
-            raise ValueError("plugin.yaml name must be a string")
+        runtime_type, yaml_name = _parse_plugin_yaml_for_install(plugin_root)
 
         if runtime_type == "skill":
-            skill_src = plugin_root / yaml_name
-            if not skill_src.is_dir() or not (skill_src / "SKILL.md").is_file():
-                raise ValueError(
-                    f"skill plugin requires directory {yaml_name}/ containing SKILL.md"
-                )
-            dest = dest_parent / yaml_name
-            if dest.exists():
-                if not force:
-                    raise FileExistsError(
-                        f"destination already exists: {dest} (use force=True or --force to overwrite)"
-                    )
-                shutil.rmtree(dest)
-            shutil.copytree(skill_src, dest)
-            logger.info("installed skill at %s (runtime.type=skill)", dest)
-            return dest
+            return _install_skill_from_staging(plugin_root, yaml_name, dest_parent, force=force)
 
-        bundle_dest = dest_parent / plugin_root.name
-        if bundle_dest.exists():
-            if not force:
-                raise FileExistsError(
-                    f"destination already exists: {bundle_dest} (use force=True or --force to overwrite)"
-                )
-            shutil.rmtree(bundle_dest)
-        shutil.copytree(plugin_root, bundle_dest)
-
-        pip_base = [sys.executable, "-m", "pip", "install"]
-        if pip_prefix is not None:
-            pip_base.extend(["--prefix", str(pip_prefix.resolve())])
+        bundle_dest = _copy_bundle_to_output(plugin_root, dest_parent, force=force)
 
         try:
             if runtime_type == "tools":
-                whls = sorted((bundle_dest / "dist").glob("*.whl"))
-                if whls:
-                    # Defend against option-injection via filenames like `-r.whl`.
-                    for w in whls:
-                        if w.name.startswith("-"):
-                            raise ValueError(f"unsafe wheel filename (starts with '-'): {w.name!r}")
-                    subprocess.run(
-                        pip_base + ["--"] + [str(w) for w in whls],
-                        check=True,
-                    )
-                else:
-                    raise ValueError("tools plugin zip has no dist/*.whl")
-            else:
-                if not (bundle_dest / "pyproject.toml").is_file():
-                    raise ValueError(
-                        f"{runtime_type} plugin requires pyproject.toml in plugin root"
-                    )
-                subprocess.run(
-                    pip_base + ["--", "."],
-                    cwd=bundle_dest,
-                    check=True,
+                _pip_install_tools_wheels(bundle_dest)
+                logger.info("tools: installed wheels into the current Python environment")
+            elif runtime_type in ("mcp-stdio", "restful-api"):
+                logger.info(
+                    "%s: pip not run; install dependencies manually if required",
+                    runtime_type,
                 )
+            else:
+                raise ValueError(f"unexpected runtime type after bundle copy: {runtime_type}")
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"pip install failed (exit {e.returncode})") from e
 
-        logger.info("installed plugin at %s (runtime.type=%s)", bundle_dest, runtime_type)
         return bundle_dest
 
 
@@ -733,11 +746,6 @@ def _runtime_type(plugin_data: dict[str, Any] | None) -> str | None:
         "skill": "skill",
     }
     return canonical_map.get(rt)
-
-
-def _find_package_dir(root: Path, plugin_name: str) -> Path | None:
-    pkg_candidates = [root / "src" / plugin_name, root / "src" / plugin_name.replace("-", "_")]
-    return next((p for p in pkg_candidates if p.exists()), None)
 
 
 def _is_valid_requires_python(value: str) -> bool:
@@ -826,7 +834,6 @@ def _validate_plugin_yaml(
                         "(e.g. '>=3.11' or '>=3.11, <3.14'), same idea as pyproject requires-python"
                     )
     else:
-        # skill: compatibility.python is not required and not validated
         pass
 
     if runtime_type == "tools":
@@ -837,8 +844,6 @@ def _validate_plugin_yaml(
             errors.append("plugin.yaml tools_schema must be string path")
         elif tools_schema != expected_tools_path:
             errors.append(f"plugin.yaml tools_schema must be '{expected_tools_path}'")
-        elif not (root / tools_schema).exists():
-            errors.append(f"tools schema file not found: {tools_schema}")
     elif runtime_type == "mcp-stdio":
         mcp_data = plugin_data.get("mcp")
         if not isinstance(mcp_data, dict):
@@ -861,9 +866,6 @@ def _validate_plugin_yaml(
             errors.append("api.base_url must be non-empty string")
     elif runtime_type == "skill":
         pass
-
-    # No longer enforce specific source file names based on plugin.yaml runtime/name;
-    # Directory structure only requires src directory to avoid implementation entry filenames from being hardcoded.
 
 
 def _validate_tools_json(tools_data: dict[str, Any], errors: list[str]) -> None:
@@ -1033,8 +1035,7 @@ if __name__ == "__main__":
 def _render_rest_api_impl(plugin_name: str) -> str:
     return f'''"""REST API entry for {plugin_name} (optional placeholder)."""
 
-# If the HTTP service is already deployed, hosts typically use plugin.yaml api.base_url
-# and schemas/tools.json only; implement this module when you need an in-repo client/helper.
+
 '''
 
 
@@ -1087,7 +1088,7 @@ openjiuwen plugin scaffold.
 {type_notes}"""
 
 
-def info_plugin(plugin_path: Path) -> dict[str, Any]:
+def plugin_describe_local(plugin_path: Path) -> dict[str, Any]:
     """读取本地插件目录的 README、CHANGELOG 及 plugin.yaml 的 name/version，供展示。"""
     root = plugin_path.resolve()
     result: dict[str, Any] = {"name": None, "version": None, "readme": None, "changelog": None}

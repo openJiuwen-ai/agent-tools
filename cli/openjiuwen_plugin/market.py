@@ -1,6 +1,7 @@
 """Market API client: search, delete, upload. Depends on market providing corresponding APIs."""
 from __future__ import annotations
 
+import json
 import logging
 import hashlib
 import time
@@ -26,49 +27,112 @@ from openjiuwen_plugin.schemas import (
 
 ModelT = TypeVar("ModelT")
 
+logger = logging.getLogger(__name__)
+
+MARKET_HTTP_DEFAULT_TIMEOUT_SEC = 60
+MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC = 600
+
 
 class PublishError(Exception):
     """Publish/upload failed: network or market returns error."""
 
     def __init__(self, status_code: int, detail: str) -> None:
-        self.status_code = status_code  # 0 for local/network error
+        self.status_code = status_code
         self.detail = detail
         super().__init__(f"{detail} (status={status_code})")
 
 
-def _upload_error_detail(resp: Response) -> str:
-    """Extract readable information from market error response."""
+def _market_humanize_error_body(j: Any) -> str | None:
+    """Turn market JSON error body into one line for CLI (handles nested ``detail`` dict)."""
+    if isinstance(j, str) and j.strip():
+        s = j.strip()
+        if s.startswith("{") and '"message"' in s:
+            try:
+                return _market_humanize_error_body(json.loads(s))
+            except Exception:
+                return s
+        return s
+    if not isinstance(j, dict):
+        return None
+    m = j.get("message")
+    if isinstance(m, str) and m.strip():
+        return m.strip()
+    d = j.get("detail")
+    if isinstance(d, str) and d.strip():
+        return _market_humanize_error_body(d.strip())
+    if isinstance(d, list) and d:
+        parts: list[str] = []
+        for item in d:
+            if isinstance(item, dict) and isinstance(item.get("msg"), str):
+                parts.append(str(item["msg"]).strip())
+        if parts:
+            return "; ".join(parts)
+    if isinstance(d, dict):
+        msg = d.get("message")
+        err = d.get("error")
+        if isinstance(msg, str) and msg.strip():
+            return msg.strip()
+        if isinstance(err, str) and err.strip():
+            return err.strip()
+    e = j.get("error")
+    if isinstance(e, str) and e.strip():
+        return e.strip()
+    return None
+
+
+def _market_request_error_message(market_base: str, exc: BaseException) -> str:
+    """Wording for ``requests.RequestException`` (DNS/connect/timeout/TLS, etc.)."""
+    return (
+        f"Cannot reach marketplace {market_base!r}: {exc}. "
+        f"Check URL and network; base URL is from --market-url or OPENJIUWEN_MARKET_URL."
+    )
+
+
+def _redact_url_for_cli_error(url: str) -> str:
+    """Strip query and fragment so presigned tokens are not echoed in CLI errors/logs."""
+    raw = (url or "").strip()
+    if not raw:
+        return "<empty download url>"
+    try:
+        parts = urllib.parse.urlsplit(raw)
+    except ValueError:
+        return "<invalid download url>"
+    path = parts.path or "/"
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+
+def _market_format_http_error(resp: Response) -> str:
+    """Build a user-facing error line from a failed HTTP response (shared by market client calls)."""
+    status = resp.status_code
+    ct = (resp.headers.get("content-type") or "").lower()
+    if status == 404 and "application/json" not in ct:
+        prev = (resp.text or "")[:240].replace("\n", " ").strip()
+        return (
+            f"HTTP 404 from market URL (wrong host/port/path or not the marketplace API). "
+            f"Check URL and path; base URL is from --market-url or OPENJIUWEN_MARKET_URL. Preview: {prev!r}"
+        )
     try:
         j = resp.json()
-        if not isinstance(j, dict):
-            return resp.text or f"HTTP {resp.status_code}"
-        for key in ("message", "detail"):
-            val = j.get(key)
-            if val is None:
-                continue
-            if isinstance(val, str) and val.strip():
-                return val
-            if isinstance(val, dict):
-                msg = val.get("message")
-                err = val.get("error")
-                msg_ok = isinstance(msg, str) and msg.strip()
-                err_ok = isinstance(err, str) and err.strip()
-                if msg_ok and err_ok:
-                    return f"{err}: {msg}"
-                if msg_ok:
-                    return msg
-                if err_ok:
-                    return err
-            if isinstance(val, list) and val:
-                return "; ".join(str(x) for x in val)
-        if j.get("error"):
-            return str(j["error"])
     except Exception as exc:
-        return resp.text or f"HTTP {resp.status_code} (failed to parse error body: {exc})"
-    return resp.text or f"HTTP {resp.status_code}"
+        body = (resp.text or "").strip()
+        if body:
+            msg = body if len(body) < 800 else f"HTTP {status} (long non-JSON body)"
+        else:
+            msg = f"HTTP {status} (failed to parse error body: {exc})"
+        return msg
+
+    if isinstance(j, dict):
+        human = _market_humanize_error_body(j)
+        if human:
+            return human
+    if not isinstance(j, dict):
+        msg = (resp.text or "").strip() or f"HTTP {status}"
+        return msg
+    msg = (resp.text or "").strip() or f"HTTP {status}"
+    return msg
 
 
-def _parse_json_body(resp: Response, *, err_prefix: str = "response") -> dict[str, Any]:
+def _market_read_json_response(resp: Response, *, err_prefix: str = "response") -> dict[str, Any]:
     content_type = str(resp.headers.get("content-type") or "")
     if not content_type.startswith("application/json"):
         raise RuntimeError(f"{err_prefix} is not a valid JSON object")
@@ -81,30 +145,51 @@ def _parse_json_body(resp: Response, *, err_prefix: str = "response") -> dict[st
     return payload
 
 
-def _extract_data_dict(payload: dict[str, Any], *, err_prefix: str = "response") -> dict[str, Any]:
+def _market_coerce_envelope_model(
+    payload: dict[str, Any],
+    model_type: type[ModelT],
+    *,
+    err_prefix: str = "response",
+) -> ModelT:
     data = ResponseModel[dict].model_validate(payload).data
     if not isinstance(data, dict):
         raise RuntimeError(f"invalid {err_prefix}: missing object field 'data'")
-    return data
-
-
-def _parse_data_as(payload: dict[str, Any], model_type: type[ModelT], *, err_prefix: str = "response") -> ModelT:
-    data = _extract_data_dict(payload, err_prefix=err_prefix)
     try:
         return TypeAdapter(model_type).validate_python(data)
     except ValidationError as exc:
         raise RuntimeError(f"invalid {err_prefix}: {exc}") from exc
 
 
-def _should_retry_response(resp: Response) -> bool:
-    # Retry typical transient / overload responses. Omit 409 (conflict): usually not safe to blindly retry.
+def _market_get_json_envelope(
+    market_base: str,
+    url: str,
+    model_type: type[ModelT],
+    *,
+    params: dict[str, Any] | None = None,
+    timeout: int = MARKET_HTTP_DEFAULT_TIMEOUT_SEC,
+    err_prefix: str = "response",
+) -> ModelT:
+    req_kw: dict[str, Any] = {"timeout": timeout}
+    if params is not None:
+        req_kw["params"] = params
+    try:
+        resp = _market_http_request_with_retry(requests.get, url, **req_kw)
+    except requests.RequestException as e:
+        raise RuntimeError(_market_request_error_message(market_base, e)) from e
+    if not resp.ok:
+        raise RuntimeError(_market_format_http_error(resp))
+    payload = _market_read_json_response(resp, err_prefix=err_prefix)
+    return _market_coerce_envelope_model(payload, model_type, err_prefix=err_prefix)
+
+
+def _market_should_retry_status(resp: Response) -> bool:
     return resp.status_code in {408, 425, 429, 500, 502, 503, 504}
 
 
-def _brief_http_error_message(resp: Response) -> str:
+def _market_http_error_brief(resp: Response) -> str:
     """Best-effort message for logging / final error; safe before resp.close()."""
     try:
-        return _upload_error_detail(resp)
+        return _market_format_http_error(resp)
     except Exception:
         try:
             text = (resp.text or "")[:800]
@@ -113,31 +198,19 @@ def _brief_http_error_message(resp: Response) -> str:
             return f"HTTP {resp.status_code}"
 
 
-def _release_response(resp: Response) -> None:
+def _market_release_response(resp: Response) -> None:
     try:
         resp.close()
-    except Exception as exc:
-        logging.getLogger(__name__).debug("response.close() failed: %s", exc, exc_info=True)
+    except Exception:
+        logger.debug("failed to close HTTP response", exc_info=True)
 
 
-def _request_with_retry(
+def _market_http_request_with_retry(
     method: Callable[..., Response],
     *args: Any,
-    logger: logging.Logger | None = None,
     **kwargs: Any,
 ) -> Response:
-    """
-    Wrapper around requests.* with retries on network errors and selected transient HTTP statuses.
-
-    - Retries: RequestException, and HTTP 408/425/429/5xx (not 409)
-    - Before retrying on HTTP: response body summarized, connection released via close()
-    - Backoff: exponential, capped
-
-    Do not use for mutating market calls without idempotency (e.g. ``upload_plugin`` POST, ``delete_plugin`` DELETE);
-    those use a single ``requests.*`` call.
-    """
-    log = logger or logging.getLogger(__name__)
-
+    """Idempotent GET-style calls: retry with backoff on network errors and some HTTP statuses. Not for writes."""
     max_attempts = 3
     delay = 0.5
     last_exc: Exception | None = None
@@ -145,13 +218,13 @@ def _request_with_retry(
     for attempt in range(1, max_attempts + 1):
         try:
             resp = method(*args, **kwargs)
-            if _should_retry_response(resp):
-                detail = _brief_http_error_message(resp)
-                _release_response(resp)
+            if _market_should_retry_status(resp):
+                detail = _market_http_error_brief(resp)
+                _market_release_response(resp)
                 msg = f"HTTP {resp.status_code}: {detail}"
                 if attempt >= max_attempts:
                     raise requests.RequestException(msg)
-                log.warning(
+                logger.warning(
                     "transient HTTP (attempt %s/%s): %s; retrying in %.1fs",
                     attempt,
                     max_attempts,
@@ -166,29 +239,22 @@ def _request_with_retry(
             last_exc = exc
             if attempt >= max_attempts:
                 raise
-            log.warning("request failed (attempt %s/%s): %s; retrying in %.1fs", attempt, max_attempts, exc, delay)
+            logger.warning("request failed (attempt %s/%s): %s; retrying in %.1fs", attempt, max_attempts, exc, delay)
             time.sleep(delay)
             delay = min(delay * 2, 6.0)
 
     if last_exc is None:
-        raise RuntimeError("_request_with_retry: loop exited without result or exception")
+        raise RuntimeError("_market_http_request_with_retry: loop exited without result or exception")
     raise last_exc
 
 
-def upload_plugin(
+def plugin_upload(
     market_url: str,
     user_token: str | None,
     system_token: str | None,
     req: PublishRequest,
 ) -> PluginPublishResult:
-    """
-    Upload plugin zip to market.
-
-    Auth: provide exactly one of Bearer user_token or X-System-Token system_token.
-
-    Single HTTP attempt (no automatic retry): multipart POST is not safely idempotent if the server
-    accepted the first request but the client did not receive the response.
-    """
+    """Publish: multipart zip upload; exactly one of Bearer or X-System-Token; no retries."""
     base = market_url.rstrip("/")
     url = f"{base}/api/v1/plugins"
     has_user = bool(user_token and user_token.strip())
@@ -201,33 +267,41 @@ def upload_plugin(
         headers["X-System-Token"] = system_token.strip()
     else:
         headers["Authorization"] = f"Bearer {user_token.strip()}"
-    data = {"force": "true" if req.force else "false"}
+    data: dict[str, str] = {
+        "force": "true" if req.force else "false",
+        "version_desc": req.version_desc if req.version_desc is not None else "",
+    }
     if req.plugin_id is not None:
-        data["plugin_id"] = req.plugin_id
+        data["plugin_id"] = str(req.plugin_id)
     if req.plugin_version is not None:
-        data["plugin_version"] = req.plugin_version
-    if req.version_desc is not None:
-        data["version_desc"] = req.version_desc
+        data["plugin_version"] = str(req.plugin_version)
 
+    logger.info("正在上传插件包，请稍候；包体较大时耗时更长。")
     with open(req.zip_path, "rb") as f:
         files = {"file": (req.zip_path.name, f, "application/zip")}
         try:
-            resp = requests.post(url, data=data, files=files, headers=headers, timeout=60)
+            resp = requests.post(
+                url,
+                data=data,
+                files=files,
+                headers=headers,
+                timeout=MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC,
+            )
         except requests.RequestException as e:
-            raise PublishError(0, f"network error: {e}") from e
+            raise PublishError(0, _market_request_error_message(base, e)) from e
 
     if not resp.ok:
-        detail = _upload_error_detail(resp)
+        detail = _market_format_http_error(resp)
         raise PublishError(resp.status_code, detail)
 
     try:
-        payload = _parse_json_body(resp)
-        return _parse_data_as(payload, PluginPublishResult)
+        payload = _market_read_json_response(resp)
+        return _market_coerce_envelope_model(payload, PluginPublishResult)
     except RuntimeError as exc:
         raise PublishError(resp.status_code, str(exc)) from exc
 
 
-def skill_import_upload(
+def skill_import(
     market_url: str,
     system_token: str,
     *,
@@ -235,9 +309,9 @@ def skill_import_upload(
     checksum_sha256: str,
     force: bool = False,
     fail_fast: bool = False,
-    timeout_sec: int = 300,
+    timeout_sec: int = MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC,
 ) -> SkillImportResponse:
-    """POST /api/v1/plugins/skill-import，仅 X-System-Token。"""
+    """skill-import: POST /skill-import; X-System-Token only."""
     base = market_url.rstrip("/")
     url = f"{base}/api/v1/plugins/skill-import"
     tok = str(system_token).strip()
@@ -257,70 +331,45 @@ def skill_import_upload(
     if not bundle.is_file():
         raise PublishError(0, f"zip file not found: {bundle}")
 
+    logger.info("正在上传 skills 包，请稍候；包体较大时耗时更长。")
     with open(bundle, "rb") as f:
         files = {"file": (bundle.name, f, "application/zip")}
         try:
             resp = requests.post(url, data=data, files=files, headers=headers, timeout=timeout_sec)
         except requests.RequestException as e:
-            raise PublishError(0, f"network error: {e}") from e
+            raise PublishError(0, _market_request_error_message(base, e)) from e
 
     if not resp.ok:
-        detail = _upload_error_detail(resp)
+        detail = _market_format_http_error(resp)
         raise PublishError(resp.status_code, detail)
 
     try:
-        payload = _parse_json_body(resp)
-        return _parse_data_as(payload, SkillImportResponse)
+        payload = _market_read_json_response(resp)
+        return _market_coerce_envelope_model(payload, SkillImportResponse)
     except RuntimeError as exc:
         raise PublishError(resp.status_code, str(exc)) from exc
 
 
-def get_plugin_version_detail(
+def plugin_info(
     market_url: str,
     asset_id: str,
     version: str,
 ) -> PluginVersionDetail:
-    """Get plugin version details from market: GET /api/v1/plugins/{asset_id}/versions/{version}."""
+    """plugin info: GET one plugin version detail."""
     base = market_url.rstrip("/")
     aid_seg = urllib.parse.quote(asset_id.strip(), safe="")
     ver_seg = urllib.parse.quote(version.strip(), safe="")
     url = f"{base}/api/v1/plugins/{aid_seg}/versions/{ver_seg}"
-    try:
-        resp = _request_with_retry(requests.get, url, timeout=30)
-    except requests.RequestException as e:
-        raise RuntimeError(f"request failed: {e}") from e
-    if resp.status_code == 404:
-        raise FileNotFoundError(f"plugin version not found: asset_id={asset_id!r} version={version!r}")
-    resp.raise_for_status()
-    payload = _parse_json_body(resp)
-    return _parse_data_as(payload, PluginVersionDetail)
+    return _market_get_json_envelope(base, url, PluginVersionDetail)
 
 
-PLUGIN_LIST_ORDER_BY = ("install_count", "like_count", "create_time", "update_time", "review_count")
-
-
-def _plugin_list_order_by_desc(order_by: str | None, desc: bool) -> tuple[str, bool]:
-    """Consistent with PluginListQuery.order_by/desc; CLI directly uses desc semantics."""
-    key = (order_by or "install_count").strip()
-    if key not in PLUGIN_LIST_ORDER_BY:
-        key = "install_count"
-    return key, bool(desc)
-
-
-def search_plugins(
+def plugin_search(
     market_url: str,
     query: PluginListQuery,
 ) -> PluginListResponse:
-    """
-    Call GET /api/v1/plugins, query parameters correspond one-to-one with PluginListQuery fields.
-
-    Public interface: does not send Authorization.
-
-    Query should be PluginListQuery.
-    """
+    """plugin search: GET list; params match ``PluginListQuery``; no Authorization header."""
     base = market_url.rstrip("/")
     url = f"{base}/api/v1/plugins"
-    ob, desc_value = _plugin_list_order_by_desc(query.order_by, query.desc)
     q = PluginListQuery(
         search_keyword=query.search_keyword or "",
         plugin_type=query.plugin_type,
@@ -330,8 +379,8 @@ def search_plugins(
         publisher_id=query.publisher_id,
         page=max(1, int(query.page)),
         page_size=max(1, min(int(query.page_size), 100)),
-        order_by=ob,
-        desc=desc_value,
+        order_by=query.order_by,
+        desc=bool(query.desc),
     )
     params: dict[str, str | int | bool] = {
         "page": q.page,
@@ -352,37 +401,19 @@ def search_plugins(
     if q.publisher_id:
         params["publisher_id"] = q.publisher_id
 
-    try:
-        resp = _request_with_retry(requests.get, url, params=params, timeout=30)
-    except requests.RequestException as e:
-        raise RuntimeError(f"request failed: {e}") from e
-    if resp.status_code == 404:
-        return PluginListResponse(page=q.page, page_size=q.page_size, total=0, items=[])
-    resp.raise_for_status()
-    payload = _parse_json_body(resp)
-    return _parse_data_as(payload, PluginListResponse)
+    return _market_get_json_envelope(base, url, PluginListResponse, params=params)
 
 
-def delete_plugin(
+def plugin_delete(
     market_url: str,
     asset_id: str,
-    logger: logging.Logger,
+    log: logging.Logger,
     *,
     version: str | None = None,
     user_token: str | None = None,
     system_token: str | None = None,
 ) -> PluginVersionDeleteData:
-    """
-    DELETE /api/v1/plugins/{asset_id}/versions/{version}
-
-    version defaults to ``all`` (delete all versions and the asset).
-
-    Auth: provide exactly one of Bearer user_token or X-System-Token system_token.
-
-    Single HTTP attempt (no automatic retry): same rationale as ``upload_plugin`` — the server may
-    have applied the delete while the client sees a timeout or connection error; retries add
-    ambiguity without an idempotency contract.
-    """
+    """plugin delete: DELETE version (default version=all); exactly one auth method; no retries."""
     has_user = bool(user_token and user_token.strip())
     has_sys = bool(system_token and system_token.strip())
     if has_user == has_sys:
@@ -400,52 +431,42 @@ def delete_plugin(
         headers["Authorization"] = f"Bearer {user_token.strip()}"
 
     try:
-        resp = requests.delete(url, headers=headers, timeout=60)
+        resp = requests.delete(url, headers=headers, timeout=MARKET_HTTP_DEFAULT_TIMEOUT_SEC)
     except requests.RequestException as e:
-        raise RuntimeError(f"request failed: {e}") from e
+        raise RuntimeError(_market_request_error_message(base, e)) from e
     if not resp.ok:
-        raise RuntimeError(_upload_error_detail(resp))
-    logger.info("deleted: asset_id=%s version=%s", asset_id, ver_seg)
+        raise RuntimeError(_market_format_http_error(resp))
+    log.info("deleted: asset_id=%s version=%s", asset_id, ver_seg)
     if str(resp.headers.get("content-type") or "").startswith("application/json"):
-        payload = _parse_json_body(resp)
+        payload = _market_read_json_response(resp)
         try:
-            return _parse_data_as(payload, PluginVersionDeleteData)
+            return _market_coerce_envelope_model(payload, PluginVersionDeleteData)
         except RuntimeError:
             pass
     return PluginVersionDeleteData(asset_id=asset_id, version=ver_seg)
 
 
-def download_artifact_zip(
+def plugin_install_download(
     market_url: str,
     asset_id: str,
     dest_path: Path,
+    *,
+    version: str | None = None,
 ) -> DownloadArtifactResult:
-    """
-    First call GET /api/v1/artifacts/{asset_id} to get download information (download_url/checksum),
-    then download zip to ``dest_path``, and perform integrity check when the server provides checksum_sha256.
-
-    Return value example:
-    {
-      "download_url": "...",
-      "expected_checksum_sha256": "...",  # May be empty
-      "actual_checksum_sha256": "...",
-      "verified": True/False,
-    }
-    """
+    """Install phase 1: fetch artifact metadata, download zip to ``dest_path``, verify checksum if present."""
     base = market_url.rstrip("/")
     aid_seg = urllib.parse.quote(asset_id.strip(), safe="")
     metadata_url = f"{base}/api/v1/artifacts/{aid_seg}"
+    ver = (version or "").strip()
+    if ver:
+        metadata_url = f"{metadata_url}?{urllib.parse.urlencode({'version': ver})}"
 
-    try:
-        meta_resp = _request_with_retry(requests.get, metadata_url, timeout=30)
-    except requests.RequestException as e:
-        raise RuntimeError(f"request failed: {e}") from e
-
-    if not meta_resp.ok:
-        raise RuntimeError(_upload_error_detail(meta_resp))
-
-    payload = _parse_json_body(meta_resp, err_prefix="artifact metadata response")
-    data = _parse_data_as(payload, PluginDownloadData, err_prefix="artifact metadata response")
+    data = _market_get_json_envelope(
+        base,
+        metadata_url,
+        PluginDownloadData,
+        err_prefix="artifact metadata response",
+    )
 
     download_url = data.download_url.strip()
     expected_checksum = data.checksum_sha256.strip().lower()
@@ -457,12 +478,21 @@ def download_artifact_zip(
     ):
         raise RuntimeError("artifact metadata checksum_sha256 is invalid")
 
+    dl_loc = _redact_url_for_cli_error(download_url)
     try:
-        dl_resp = _request_with_retry(requests.get, download_url, stream=True, timeout=300)
+        dl_resp = _market_http_request_with_retry(
+            requests.get, download_url, stream=True, timeout=MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC
+        )
     except requests.RequestException as e:
-        raise RuntimeError(f"request failed: {e}") from e
+        raise RuntimeError(
+            f"{_market_request_error_message(base, e)} "
+            f"(artifact zip GET; location={dl_loc!r})"
+        ) from e
     if not dl_resp.ok:
-        raise RuntimeError(_upload_error_detail(dl_resp))
+        raise RuntimeError(
+            f"{_market_format_http_error(dl_resp)} "
+            f"(artifact zip GET; location={dl_loc!r})"
+        )
 
     dest_path = dest_path.resolve()
     dest_path.parent.mkdir(parents=True, exist_ok=True)

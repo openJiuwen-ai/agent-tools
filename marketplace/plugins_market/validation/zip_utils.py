@@ -198,8 +198,21 @@ def iter_zip_members(
         yield info.filename, data
 
 
+def has_dist_wheels(names: set[str], prefix: str) -> bool:
+    """Return True if at least one ``.whl`` file exists under ``<prefix>dist/``."""
+    dist_prefix = f"{prefix}dist/" if prefix else "dist/"
+    for n in names:
+        norm = n.replace("\\", "/")
+        if not norm.startswith(dist_prefix):
+            continue
+        rest = norm[len(dist_prefix):]
+        if rest and "/" not in rest.rstrip("/") and rest.lower().endswith(".whl"):
+            return True
+    return False
+
+
 def has_src_tree(names: set[str], prefix: str) -> bool:
-    """Return True if at least one file exists under <prefix>src/."""
+    """Return True if at least one file exists under ``<prefix>src/`` (mcp-stdio / restful-api)."""
     src_prefix = prefix + "src/"
     return any(
         n.replace("\\", "/").startswith(src_prefix) and len(n) > len(src_prefix)

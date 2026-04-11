@@ -8,18 +8,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 T = TypeVar("T")
 
-# 与 marketplace.plugins_market.services.plugin.VERSION_PATTERN 一致
 MARKETPLACE_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 
 def normalize_marketplace_version_optional(value: str | None) -> str | None:
-    """
-    规范化可选的 plugin_version（与市场上传一致）。
-
-    - 去首尾空白；空 -> None
-    - 允许去掉单个前导 v/V
-    - 结果须为三位数字 x.y.z，不接受预发布/构建后缀
-    """
+    """规范化可选版本号：trim、可去单个 v/V，须为 x.y.z。"""
     if value is None:
         return None
     s = str(value).strip()
