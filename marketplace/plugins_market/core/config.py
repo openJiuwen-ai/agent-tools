@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     # 用户信息接口（默认 GitCode https://gitcode.com/api/v5/user，使用 query access_token）
     auth_user_api_url: str = Field(default="https://gitcode.com/api/v5/user", validation_alias="AUTH_USER_API_URL")
 
-    # OAuth 回调后浏览器重定向到此前缀下的 /login?oauth_session=...
+    # OAuth 回调后浏览器重定向到此前缀下的 /login?oauth_session=...（须与前端挂载路径一致，默认含 /hub）
     oauth_frontend_origin: str = Field(
-        default="http://localhost:9002",
+        default="http://localhost:9002/hub",
         validation_alias=AliasChoices("MARKET_OAUTH_FRONTEND_ORIGIN", "OAUTH_FRONTEND_ORIGIN"),
     )
 
@@ -64,23 +64,12 @@ class Settings(BaseSettings):
     )
 
     # 发布页「下载模板」zip：桶内对象 Key（私有桶）；为空则 GET /plugins/publish-template 返回 503
-    plugin_template_object_key: str = Field(
-        default="",
-        validation_alias=AliasChoices(
-            "MARKET_PLUGIN_TEMPLATE_OBJECT_KEY",
-            "PLUGIN_TEMPLATE_OBJECT_KEY",
-        ),
-    )
-    # 预签名有效期（秒）；0 表示沿用存储客户端默认 MARKET_S3_PRESIGNED_EXPIRES
-    plugin_template_presigned_expires: int = Field(
-        default=0,
-        ge=0,
-        le=604800,
-        validation_alias=AliasChoices(
-            "MARKET_PLUGIN_TEMPLATE_PRESIGNED_EXPIRES",
-            "PLUGIN_TEMPLATE_PRESIGNED_EXPIRES",
-        ),
-    )
+    # 仅读取环境变量 MARKET_PLUGIN_TEMPLATE_OBJECT_KEY（与类上 env_prefix 拼接字段名）
+    plugin_template_object_key: str = Field(default="")
+
+    # 发布页「下载 Skill 模板」zip：桶内对象 Key；为空则 kind=skill 时 GET /plugins/publish-template 返回 503
+    # 仅读取 MARKET_SKILL_TEMPLATE_OBJECT_KEY
+    skill_template_object_key: str = Field(default="")
 
     # skill-import：单进程滑动窗口限流（每分钟请求数，0 关闭）；多 worker 时各进程独立计数
     skill_import_rate_limit_per_minute: int = Field(

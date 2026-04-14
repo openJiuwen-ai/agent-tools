@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { Button, Typography } from '@mui/material'
+import { SegmentedTabs } from '@/components/Common/common-page'
 import { UserAccountMenu } from '@/components/Common/UserAccountMenu'
 import { Pagination } from '@/components/Common/common-table'
 import { useQuery } from 'react-query'
@@ -16,6 +17,7 @@ export default function MyProfilePage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user, isAuthenticated, logout } = useGitCodeAuth()
+  const [publishedTab, setPublishedTab] = useState<'plugin' | 'skill'>('skill')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
 
@@ -28,7 +30,7 @@ export default function MyProfilePage() {
   const publisherId = user?.id
 
   const { data, isLoading, error, refetch } = useQuery(
-    ['my-published-plugins', publisherId, page, pageSize],
+    ['my-published-plugins', publisherId, publishedTab, page, pageSize],
     () =>
       getPlugins({
         page,
@@ -36,12 +38,19 @@ export default function MyProfilePage() {
         publisher_id: publisherId,
         order_by: 'update_time',
         desc: true,
+        ...(publishedTab === 'skill'
+          ? { plugin_type: 'skill' }
+          : { plugin_type_exclude: 'skill' }),
       }),
     {
       enabled: Boolean(publisherId),
       keepPreviousData: true,
     },
   )
+
+  useEffect(() => {
+    setPage(1)
+  }, [publishedTab])
 
   const items = data?.data.items ?? []
   const total = data?.data.total ?? 0
@@ -125,22 +134,37 @@ export default function MyProfilePage() {
           <div className="mb-4 shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{errMsg}</div>
         ) : null}
 
-        <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2">
-          <Typography variant="body2" className="text-slate-600">
-            {t('profile.subtitle')}
-          </Typography>
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="mb-4 flex shrink-0 flex-col gap-3">
+          <SegmentedTabs
+            align="start"
+            size="sm"
+            value={publishedTab}
+            onChange={v => setPublishedTab(v === 'skill' ? 'skill' : 'plugin')}
+            options={[
+              { value: 'skill', label: t('profile.tabSkills') },
+              { value: 'plugin', label: t('profile.tabPlugins') },
+            ]}
+            aria-label={t('profile.segmentedTabsAria')}
+          />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Typography variant="body2" className="text-slate-600">
+              {publishedTab === 'skill' ? t('profile.subtitleSkills') : t('profile.subtitlePlugins')}
+            </Typography>
+            <div className="flex flex-wrap items-center gap-2">
             <Button
               size="small"
               variant="contained"
-              onClick={() => navigate('/profile/publish')}
+              onClick={() =>
+                navigate(publishedTab === 'skill' ? '/profile/publish?kind=skill' : '/profile/publish')
+              }
               sx={{ textTransform: 'none', bgcolor: '#0891b2', '&:hover': { bgcolor: '#0e7490' } }}
             >
-              {t('profile.publishEntry')}
+              {publishedTab === 'skill' ? t('profile.publishSkill') : t('profile.publishPlugin')}
             </Button>
             <Button size="small" variant="text" onClick={() => void refetch()} disabled={isLoading} sx={{ textTransform: 'none' }}>
               {t('plugins.actions.refresh')}
             </Button>
+            </div>
           </div>
         </div>
 
@@ -151,7 +175,7 @@ export default function MyProfilePage() {
             </Typography>
           ) : items.length === 0 ? (
             <Typography variant="body2" className="text-slate-500">
-              {t('profile.empty')}
+              {publishedTab === 'skill' ? t('profile.emptySkills') : t('profile.emptyPlugins')}
             </Typography>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200/80 bg-white/95 shadow-sm">

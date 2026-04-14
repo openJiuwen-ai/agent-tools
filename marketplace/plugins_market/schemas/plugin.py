@@ -153,6 +153,10 @@ class PluginListQuery(BaseModel):
     publisher_id: Optional[str] = Field(None, description="发布者 ID")
     publisher_name: Optional[str] = Field(None, description="发布者名称（模糊）")
     plugin_type: Optional[str] = Field(None, description="插件类型（精确匹配）")
+    plugin_type_exclude: Optional[str] = Field(
+        None,
+        description='排除某 plugin_type（如 "skill"）：结果包含 plugin_type 为空或与该值不等的记录',
+    )
     search_keyword: Optional[str] = Field(
         None, description="关键词（对 name/display_name/short_desc/detail_desc 模糊）"
     )

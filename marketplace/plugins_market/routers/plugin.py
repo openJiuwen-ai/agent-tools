@@ -22,7 +22,12 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from common.security.security_utils import SecurityUtils
-from plugins_market.core.auth import AuthContext, get_gitcode_user_id, require_auth
+from plugins_market.core.auth import (
+    AuthContext,
+    get_gitcode_user_id,
+    get_gitcode_user_id_and_login,
+    require_auth,
+)
 from plugins_market.core.config import settings
 from plugins_market.core.database import get_db
 from plugins_market.core.s3_storage_client import get_storage_client
@@ -220,8 +225,11 @@ async def publish_plugin(
 ):
     # Upload 到 S3 之前先校验 token
     token, is_system_token, acting_user_id = auth
+    publisher_name_override: str | None = None
     if not is_system_token:
-        acting_user_id = await get_gitcode_user_id(token or "")
+        acting_user_id, publisher_name_override = await get_gitcode_user_id_and_login(
+            token or ""
+        )
 
     content = await form.file.read()
     try:
@@ -236,6 +244,7 @@ async def publish_plugin(
             force=form.force,
             db=db,
             storage=storage,
+            publisher_name_override=publisher_name_override,
         )
     except PublishError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
@@ -259,10 +268,20 @@ def _template_filename_from_key(key: str) -> str:
 async def get_publish_template_presigned(
     auth: AuthContext = Depends(require_auth),
     storage=Depends(get_storage_client),
+    kind: Optional[str] = Query(
+        None,
+        description='模板种类：不传或 "plugin" 为插件模板；传 "skill" 为 Skill 模板',
+    ),
 ):
     """为发布页「下载模板」生成私有桶对象的预签名 GET URL（需 Bearer 或 X-System-Token）。"""
     _ = auth
-    key = (settings.plugin_template_object_key or "").strip()
+    use_skill = (kind or "").strip().lower() == "skill"
+    if use_skill:
+        key = (settings.skill_template_object_key or "").strip()
+        unset_msg = "未配置 Skill 发布模板对象路径（MARKET_SKILL_TEMPLATE_OBJECT_KEY）"
+    else:
+        key = (settings.plugin_template_object_key or "").strip()
+        unset_msg = "未配置发布模板对象路径（MARKET_PLUGIN_TEMPLATE_OBJECT_KEY）"
     if not key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -270,17 +289,12 @@ async def get_publish_template_presigned(
                 "code": 503,
                 "data": None,
                 "error": "template_not_configured",
-                "message": "未配置发布模板对象路径（MARKET_PLUGIN_TEMPLATE_OBJECT_KEY）",
+                "message": unset_msg,
             },
         )
-    exp_arg = settings.plugin_template_presigned_expires
     try:
-        if exp_arg and exp_arg > 0:
-            url = storage.presigned_get_url(key, expires_in=exp_arg)
-            ttl = exp_arg
-        else:
-            url = storage.presigned_get_url(key)
-            ttl = storage.config.presigned_expires_seconds
+        url = storage.presigned_get_url(key)
+        ttl = storage.config.presigned_expires_seconds
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -22,8 +22,29 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
 
-    location / {
-        try_files $uri $uri/ /index.html;
+    # 浏览器同源请求 /hub/api/...，剥掉 /hub 后转发到后端 /api/...（与镜像内 VITE_API_BASE_URL=/hub/api/v1 一致）
+    location /hub/api {
+        rewrite ^/hub(/api.*)$ $1 break;
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 前端 SPA 挂载在 /hub（无尾斜杠主页）；静态产物位于 root/hub/（见 docker/Dockerfile.web-tools）
+    location = / {
+        return 302 /hub;
+    }
+
+    location = /hub {
+        root /usr/share/nginx/html;
+        try_files /hub/index.html =404;
+    }
+
+    location /hub/ {
+        root /usr/share/nginx/html;
+        try_files $uri $uri/ /hub/index.html;
     }
 
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf)$ {

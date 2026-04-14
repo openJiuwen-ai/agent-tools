@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react'
 import { AlertCircle } from 'lucide-react'
-import { CircularProgress, Tab, Tabs } from '@mui/material'
+import { CircularProgress } from '@mui/material'
+import SegmentedTabs from './SegmentedTabs'
 import { Pagination } from '../common-table'
 import { ViewToggle } from './ViewToggle'
 import type { PagerState, PagerChangeHandler } from '../common-table/Pagination'
@@ -21,6 +22,7 @@ const LoadingState: React.FC = () => (
 interface PageHeaderProps {
   title: string
   tabs?: TabConfig[]
+  tabsAriaLabel?: string
   activeTab?: string
   onTabChange?: (key: string) => void
   viewType?: ViewType
@@ -35,6 +37,7 @@ interface PageHeaderProps {
 const PageHeader: React.FC<PageHeaderProps> = ({
   title,
   tabs,
+  tabsAriaLabel,
   activeTab,
   onTabChange,
   viewType = 'grid',
@@ -52,28 +55,15 @@ const PageHeader: React.FC<PageHeaderProps> = ({
       </span>
     </div>
     {tabs != null && tabs.length > 0 && (
-      <div className="mb-4">
-        <Tabs
-          value={activeTab}
-          onChange={(_e, newValue) => onTabChange?.(newValue)}
-          sx={{
-            height: '32px !important',
-            minHeight: '32px !important',
-            '& .MuiTab-root': {
-              px: 0,
-              height: '28px !important',
-              minHeight: '28px !important',
-              pb: 2,
-              mr: 2,
-              minWidth: 'auto',
-              fontSize: '0.875rem',
-            },
-          }}
-        >
-          {tabs.map(tab => (
-            <Tab key={tab.key} value={tab.key} label={tab.label} disableRipple />
-          ))}
-        </Tabs>
+      <div className="mb-5">
+        <SegmentedTabs
+          align="center"
+          size="md"
+          value={activeTab || tabs[0]!.key}
+          options={tabs.map(t => ({ value: t.key, label: t.label }))}
+          onChange={key => onTabChange?.(key)}
+          aria-label={tabsAriaLabel}
+        />
       </div>
     )}
     <div className="mt-2">
@@ -98,6 +88,13 @@ const PageHeader: React.FC<PageHeaderProps> = ({
 export interface CommonPageLayoutProps {
   title: string
   tabs?: TabConfig[]
+  /** 顶部分段页签的无障碍标签（建议走 i18n） */
+  tabsAriaLabel?: string
+  /**
+   * 受控模式：传入后与父组件单一数据源同步（深链、路由、父级改 catalog 时与列表一致）。
+   * 未传入时沿用内部 state + `defaultTabKey`。
+   */
+  tabKey?: string
   defaultTabKey?: string
   onTabChange?: (key: string) => void
   defaultViewType?: ViewType
@@ -124,6 +121,8 @@ function CommonPageLayoutInner(props: CommonPageLayoutProps) {
   const {
     title,
     tabs,
+    tabsAriaLabel,
+    tabKey: controlledTabKey,
     defaultTabKey,
     onTabChange,
     defaultViewType = 'grid',
@@ -147,7 +146,11 @@ function CommonPageLayoutInner(props: CommonPageLayoutProps) {
   } = props
 
   const [internalViewType, setInternalViewType] = useState<ViewType>(defaultViewType)
-  const [activeTab, setActiveTab] = useState<string>(defaultTabKey ?? tabs?.[0]?.key ?? '')
+  const [internalActiveTab, setInternalActiveTab] = useState<string>(
+    defaultTabKey ?? tabs?.[0]?.key ?? ''
+  )
+  /** 受控时以 `tabKey` 为准；未传 `tabKey` 时用内部 state */
+  const activeTab = controlledTabKey ?? internalActiveTab
   const [isViewSwitching, setIsViewSwitching] = useState(false)
 
   const viewType = controlledViewType !== undefined ? controlledViewType : internalViewType
@@ -159,10 +162,10 @@ function CommonPageLayoutInner(props: CommonPageLayoutProps) {
 
   const handleTabChange = useCallback(
     (key: string) => {
-      setActiveTab(key)
+      if (controlledTabKey === undefined) setInternalActiveTab(key)
       onTabChange?.(key)
     },
-    [onTabChange]
+    [onTabChange, controlledTabKey]
   )
 
   const handleViewTypeChange = useCallback(
@@ -186,6 +189,7 @@ function CommonPageLayoutInner(props: CommonPageLayoutProps) {
       <PageHeader
         title={title}
         tabs={tabs}
+        tabsAriaLabel={tabsAriaLabel}
         activeTab={activeTab}
         onTabChange={handleTabChange}
         viewType={viewType}

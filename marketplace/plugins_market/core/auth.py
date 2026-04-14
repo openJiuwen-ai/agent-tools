@@ -49,15 +49,32 @@ def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
     return authorization[7:].strip()
 
 
-async def get_gitcode_user_id(token: str) -> str:
-    """返回 GitCode 用户 id（字符串）。token 无效则抛 401。"""
+async def get_gitcode_user_id_and_login(token: str) -> tuple[str, str]:
+    """返回 (GitCode 用户 id, 展示用发布者名)。
+
+    发布者名与前端 Skill 打包逻辑一致：优先 ``login``，其次 ``username``，否则回退为 id。
+    token 无效则抛 401。
+    """
     profile = await fetch_gitcode_profile(token)
     if not profile:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired access token",
         )
-    return str(profile["id"]).strip()
+    gid = str(profile["id"]).strip()
+    if not gid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired access token",
+        )
+    login = (profile.get("login") or profile.get("username") or "").strip() or gid
+    return gid, login
+
+
+async def get_gitcode_user_id(token: str) -> str:
+    """返回 GitCode 用户 id（字符串）。token 无效则抛 401。"""
+    uid, _ = await get_gitcode_user_id_and_login(token)
+    return uid
 
 
 async def require_auth(

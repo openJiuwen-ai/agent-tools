@@ -15,6 +15,7 @@
     "@mui/icons-material": "^6.5.0",
     "@mui/material": "^6.5.0",
     "@mui/x-date-pickers": "^8.27.2",
+    "@noble/hashes": "^1.8.0",
     "@tailwindcss/typography": "^0.5.19",
     "axios": "^1.6.0",
     "classnames": "^2.5.1",
@@ -22,6 +23,8 @@
     "dayjs": "^1.11.20",
     "i18next": "^25.6.0",
     "i18next-browser-languagedetector": "^8.2.0",
+    "js-yaml": "^4.1.1",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.505.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -33,6 +36,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",

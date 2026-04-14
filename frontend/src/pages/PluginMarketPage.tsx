@@ -44,6 +44,7 @@ import { Empty } from '@/components/Common/Empty'
 import axios from 'axios'
 import { getPluginArtifactDownload, getPluginVersionDetail } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
+import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
 
 function isCanceledRequest(err: unknown): boolean {
@@ -354,6 +355,7 @@ export default function PluginMarketPage() {
   const [searchInput, setSearchInput] = useState('')
   const [searchKeyword, setSearchKeyword] = useState('')
   const [runtimeFilter, setRuntimeFilter] = useState<string>('all')
+  const [marketCatalogTab, setMarketCatalogTab] = useState<'plugin' | 'skill'>('skill')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selectedPlugin, setSelectedPlugin] = useState<MarketPlugin | null>(null)
@@ -378,12 +380,17 @@ export default function PluginMarketPage() {
     setCurrentPage(1)
   }, [runtimeFilter])
 
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [marketCatalogTab])
+
   const { marketPlugins, total, page, pageSize: serverPageSize, loading, error, refreshMarketPlugins } =
     usePluginMarketConfigs({
       page: currentPage,
       pageSize,
       searchKeyword,
       runTime: runtimeFilter === 'all' ? undefined : runtimeFilter,
+      catalogKind: marketCatalogTab,
     })
 
   const runtimeOptions = useMemo(
@@ -403,6 +410,8 @@ export default function PluginMarketPage() {
         return t('plugins.runtime.mcpStdio')
       case 'restful-api':
         return t('plugins.runtime.restfulApi')
+      case 'skill':
+        return t('plugins.runtime.skill')
       default:
         return t('plugins.runtime.unknown', { type: runTime || '-' })
     }
@@ -458,6 +467,16 @@ export default function PluginMarketPage() {
     await refreshMarketPlugins()
   }
 
+  const handlePublishClick = useCallback(() => {
+    const path = marketCatalogTab === 'skill' ? '/profile/publish?kind=skill' : '/profile/publish'
+    if (isAuthenticated) {
+      navigate(path)
+      return
+    }
+    setPostLoginRedirect(path)
+    navigate('/login')
+  }, [isAuthenticated, marketCatalogTab, navigate])
+
   const handleFavoriteComingSoon = () => {
     window.alert(t('plugins.actions.favoritePending'))
   }
@@ -490,7 +509,15 @@ export default function PluginMarketPage() {
   )
 
   const gridView = useMemo(() => {
-    if (marketPlugins.length === 0) return <Empty searchTerm={searchKeyword} type="plugins" />
+    if (marketPlugins.length === 0)
+      return (
+        <Empty
+          searchTerm={searchKeyword}
+          type="plugins"
+          customTitle={marketCatalogTab === 'skill' ? t('plugins.noMatchingSkill') : undefined}
+          customDescription={marketCatalogTab === 'skill' ? t('plugins.noMatchingSkillDescription') : undefined}
+        />
+      )
 
     return (
       <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
@@ -587,7 +614,7 @@ export default function PluginMarketPage() {
         })}
       </div>
     )
-  }, [marketPlugins, searchKeyword, t, handleDownloadPlugin, downloadingAssetId])
+  }, [marketPlugins, searchKeyword, marketCatalogTab, t, handleDownloadPlugin, downloadingAssetId])
 
   const tableColumns: TableColumn<MarketPlugin>[] = useMemo(
     () => [
@@ -769,36 +796,60 @@ export default function PluginMarketPage() {
         loading={loading}
         size="small"
         stickyHeader
-        emptyState={<Empty searchTerm={searchKeyword} type="plugins" />}
+        emptyState={
+          <Empty
+            searchTerm={searchKeyword}
+            type="plugins"
+            customTitle={marketCatalogTab === 'skill' ? t('plugins.noMatchingSkill') : undefined}
+            customDescription={marketCatalogTab === 'skill' ? t('plugins.noMatchingSkillDescription') : undefined}
+          />
+        }
       />
     ),
-    [tableColumns, marketPlugins, loading, searchKeyword]
+    [tableColumns, marketPlugins, loading, searchKeyword, marketCatalogTab, t]
   )
 
   const toolbarLeft = useMemo(
     () => (
       <>
         <SearchInput searchTerm={searchInput} placeholder={t('plugins.searchPlaceholder')} onChange={setSearchInput} />
-        <select
-          value={runtimeFilter}
-          onChange={e => setRuntimeFilter(e.target.value)}
-          className="h-10 px-3 bg-white/95 border border-[#d7e2f6] text-[#1f2937] rounded-lg text-sm shadow-[0_1px_3px_rgba(15,23,42,0.06)] focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#bfdbfe] transition-colors"
-        >
-          <option value="all">{t('plugins.filters.allCategories')}</option>
-          {runtimeOptions.map(option => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        {marketCatalogTab === 'plugin' ? (
+          <select
+            value={runtimeFilter}
+            onChange={e => setRuntimeFilter(e.target.value)}
+            className="h-10 px-3 bg-white/95 border border-[#d7e2f6] text-[#1f2937] rounded-lg text-sm shadow-[0_1px_3px_rgba(15,23,42,0.06)] focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#bfdbfe] transition-colors"
+          >
+            <option value="all">{t('plugins.filters.allCategories')}</option>
+            {runtimeOptions.map(option => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
       </>
     ),
-    [runtimeFilter, runtimeOptions, searchInput, t]
+    [marketCatalogTab, runtimeFilter, runtimeOptions, searchInput, t]
+  )
+
+  const marketTabs = useMemo(
+    () => [
+      { key: 'skill', label: t('plugins.marketTab.skill') },
+      { key: 'plugin', label: t('plugins.marketTab.plugin') },
+    ],
+    [t],
   )
 
   const toolbarRight = useMemo(
     () => (
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handlePublishClick}
+          className="h-10 shrink-0 px-3 rounded-lg text-sm font-medium text-white bg-[#0891b2] hover:bg-[#0e7490] shadow-[0_1px_3px_rgba(15,23,42,0.08)] transition-colors"
+        >
+          {marketCatalogTab === 'skill' ? t('profile.publishSkill') : t('profile.publishPlugin')}
+        </button>
         {isAuthenticated && user ? (
           <PluginMarketUserMenu />
         ) : (
@@ -821,7 +872,7 @@ export default function PluginMarketPage() {
         </button>
       </div>
     ),
-    [loading, t, isAuthenticated, user, navigate]
+    [loading, t, isAuthenticated, user, navigate, handlePublishClick, marketCatalogTab]
   )
 
   return (
@@ -831,6 +882,10 @@ export default function PluginMarketPage() {
       <CommonPageLayout
         className="min-h-0 flex-1"
         title={t('plugins.marketTitle')}
+        tabs={marketTabs}
+        tabsAriaLabel={t('plugins.segmentedTabsAria')}
+        tabKey={marketCatalogTab}
+        onTabChange={key => setMarketCatalogTab(key === 'skill' ? 'skill' : 'plugin')}
         viewType={viewType}
         onViewTypeChange={type => setViewMode(type === 'grid' ? 'grid' : 'list')}
         pager={{

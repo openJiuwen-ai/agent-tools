@@ -33,6 +33,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     envDir,
+    base: '/hub',
     plugins: [react()],
     resolve: {
       alias: {

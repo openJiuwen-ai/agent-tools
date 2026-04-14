@@ -27,11 +27,15 @@ export interface MarketPlugin {
   updateTime?: number | null
 }
 
+export type MarketCatalogKind = 'plugin' | 'skill'
+
 export interface UsePluginMarketConfigsParams {
   page: number
   pageSize: number
   searchKeyword?: string
   runTime?: string
+  /** 市场大类：插件（排除 skill）或仅 skill */
+  catalogKind?: MarketCatalogKind
   orderBy?: MarketplacePluginListRequest['order_by']
   desc?: boolean
 }
@@ -80,11 +84,13 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
 }
 
 export function usePluginMarketConfigs(params: UsePluginMarketConfigsParams): UsePluginMarketConfigsReturn {
+  const catalog = params.catalogKind ?? 'plugin'
   const query = usePluginListQuery({
     page: params.page,
     page_size: params.pageSize,
     search_keyword: params.searchKeyword || undefined,
-    plugin_type: params.runTime || undefined,
+    plugin_type: catalog === 'skill' ? 'skill' : params.runTime || undefined,
+    plugin_type_exclude: catalog === 'skill' ? undefined : 'skill',
     order_by: params.orderBy ?? 'install_count',
     desc: params.desc ?? true,
   })

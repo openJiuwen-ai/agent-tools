@@ -3,10 +3,12 @@
 
 # -----------------------------------------------------------------------------
 # Stage 1: 构建 Vite 前端（envDir 为 frontend 上级目录，需在 /app 写入 .env）
+# 默认 API 基路径为 /hub/api/v1：浏览器走同源 /hub/api/...，Nginx 剥 /hub 后反代到后端 /api/...
+# 覆盖示例：--build-arg VITE_API_BASE_URL=/api/v1
 # -----------------------------------------------------------------------------
 FROM node:20-alpine AS builder
 
-ARG VITE_API_BASE_URL=
+ARG VITE_API_BASE_URL=/hub/api/v1
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
 WORKDIR /app
@@ -28,7 +30,7 @@ RUN npm run build
 # -----------------------------------------------------------------------------
 FROM nginx:alpine
 
-COPY --from=builder /app/frontend/dist /usr/share/nginx/html
+COPY --from=builder /app/frontend/dist /usr/share/nginx/html/hub
 
 COPY frontend/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY frontend/nginx/default.conf.template /etc/nginx/templates/default.conf.template

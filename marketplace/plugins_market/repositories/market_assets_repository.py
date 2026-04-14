@@ -102,6 +102,14 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             )
         if params.plugin_type and params.plugin_type.strip():
             q_assets = q_assets.filter(MarketAssetDB.plugin_type == params.plugin_type.strip())
+        if params.plugin_type_exclude and params.plugin_type_exclude.strip():
+            ex = params.plugin_type_exclude.strip()
+            q_assets = q_assets.filter(
+                or_(
+                    MarketAssetDB.plugin_type.is_(None),
+                    MarketAssetDB.plugin_type != ex,
+                )
+            )
         if params.search_keyword and params.search_keyword.strip():
             kw = f"%{params.search_keyword.strip()}%"
             q_assets = q_assets.filter(

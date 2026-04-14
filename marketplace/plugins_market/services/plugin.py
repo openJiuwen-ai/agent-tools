@@ -36,6 +36,7 @@ from plugins_market.validation import extract_plugin_metadata
 from plugins_market.validation.constants import (
     MAX_FILE_SIZE,
     MARKET_ASSET_SHORT_DESC_MAX_LEN,
+    RUNTIME_SKILL,
     VERSION_PATTERN,
 )
 
@@ -168,6 +169,7 @@ def publish(
     force: bool,
     db: Session,
     storage: S3StorageClient,
+    publisher_name_override: str | None = None,
 ) -> PluginPublishResult:
     """Validate, resolve conflicts, upload to S3, write asset/version, return result. Raises PublishError on failure."""
     if not filename or not filename.lower().endswith(".zip"):
@@ -230,8 +232,14 @@ def publish(
         short_desc = short_desc[:MARKET_ASSET_SHORT_DESC_MAX_LEN]
     detail_desc = meta.get("detail_desc")
     tags = meta.get("tags") or []
-    publisher_name = meta.get("publisher_name") or ""
+    raw_publisher_name = meta.get("publisher_name") or ""
     plugin_type = meta.get("plugin_type")
+    rt = (plugin_type or "").strip().lower() if isinstance(plugin_type, str) else ""
+    # Bearer 发布：非 skill 的展示发布者与网页发 Skill 一致（GitCode login），不依赖包内 metadata.author
+    if publisher_name_override is not None and rt != RUNTIME_SKILL:
+        publisher_name = publisher_name_override.strip() or raw_publisher_name
+    else:
+        publisher_name = raw_publisher_name
     icon_bytes = meta.get("icon_bytes")
 
     asset_repo = MarketAssetRepository(db)

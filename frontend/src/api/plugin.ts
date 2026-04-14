@@ -18,8 +18,10 @@ export interface MarketplacePluginListRequest {
   publisher_id?: string
   /** 与后端 `asset_id` 一致 */
   asset_id?: string
-  /** 与后端 Query 一致：`plugin_type`（如 tools / mcp-stdio / restful-api） */
+  /** 与后端 Query 一致：`plugin_type`（如 tools / mcp-stdio / restful-api / skill） */
   plugin_type?: string
+  /** 与后端 `plugin_type_exclude`：排除某类型（如与插件列表中排除 skill） */
+  plugin_type_exclude?: string
   order_by?: MarketplacePluginOrderBy
   desc?: boolean
 }
@@ -141,6 +143,7 @@ export async function getPlugins(
       publisher_id: request.publisher_id || undefined,
       asset_id: request.asset_id || undefined,
       plugin_type: request.plugin_type || undefined,
+      plugin_type_exclude: request.plugin_type_exclude || undefined,
       order_by: request.order_by ?? 'install_count',
       desc: request.desc ?? true,
     },
@@ -231,14 +234,17 @@ export interface PluginTemplatePresignResponse {
 /**
  * 获取发布页模板 zip 的预签名下载 URL（私有桶对象，需登录 Bearer）。
  */
-export async function getPublishTemplatePresigned(): Promise<PluginTemplatePresignData> {
+export async function getPublishTemplatePresigned(options?: { kind?: 'plugin' | 'skill' }): Promise<PluginTemplatePresignData> {
   const token = getStoredGitCodeToken()
   if (!token) {
     throw new Error('请先登录后再下载模板')
   }
   const client = getApiClient()
+  const kind = options?.kind === 'skill' ? 'skill' : undefined
   try {
-    const { data } = await client.get<PluginTemplatePresignResponse>(API_ENDPOINTS.PLUGINS.PUBLISH_TEMPLATE)
+    const { data } = await client.get<PluginTemplatePresignResponse>(API_ENDPOINTS.PLUGINS.PUBLISH_TEMPLATE, {
+      params: kind ? { kind } : undefined,
+    })
     if (data.code !== 200 || !data.data?.download_url) {
       throw new MarketplaceApiError(data.message || '获取模板链接失败', data.code)
     }
