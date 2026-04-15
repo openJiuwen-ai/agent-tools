@@ -57,9 +57,15 @@ def _validate_version(version: str) -> None:
         )
 
 
-def _version_dir_prefix(publisher_id: str, asset_id: str, version: str) -> str:
-    """Version directory key prefix: plugins/{publisher_id}/{asset_id}/{version}/"""
-    return f"plugins/{publisher_id}/{asset_id}/{version}/"
+def _storage_root(plugin_type: str | None) -> str:
+    """Top-level OBS prefix: skills for skill type, plugins for everything else."""
+    return "skills" if (plugin_type or "").lower() == "skill" else "plugins"
+
+
+def _version_dir_prefix(publisher_id: str, asset_id: str, version: str, plugin_type: str | None = None) -> str:
+    """Version directory key prefix: {root}/{publisher_id}/{asset_id}/{version}/"""
+    root = _storage_root(plugin_type)
+    return f"{root}/{publisher_id}/{asset_id}/{version}/"
 
 
 def _build_storage_path(
@@ -68,9 +74,10 @@ def _build_storage_path(
     asset_id: str,
     version: str,
     asset_name: str,
+    plugin_type: str | None = None,
 ) -> str:
-    """Build object-key for zip: plugins/{publisher_id}/{asset_id}/{version}/{name}_{version}.zip"""
-    prefix = _version_dir_prefix(publisher_id, asset_id, version)
+    """Build object-key for zip: {root}/{publisher_id}/{asset_id}/{version}/{name}_{version}.zip"""
+    prefix = _version_dir_prefix(publisher_id, asset_id, version, plugin_type)
     safe_name = asset_name.strip().replace(" ", "-")
     return f"{prefix}{safe_name}_{version}.zip"
 
@@ -286,12 +293,13 @@ def publish(
             existing_asset = None
     existing_version = version_repo.get_version(asset_id=asset_id, version=version)
 
-    version_dir = _version_dir_prefix(user_id, asset_id, version)
+    version_dir = _version_dir_prefix(user_id, asset_id, version, plugin_type)
     zip_key = _build_storage_path(
         publisher_id=user_id,
         asset_id=asset_id,
         version=version,
         asset_name=name,
+        plugin_type=plugin_type,
     )
     file_path = version_dir
 
@@ -691,9 +699,16 @@ def delete_plugin_version_service(
     return PluginVersionDeleteData(asset_id=asset_id, version=version)
 
 
-def _build_artifact_key(publisher_id: str, asset_id: str, version: str, name: str) -> str:
+def _build_artifact_key(
+    publisher_id: str,
+    asset_id: str,
+    version: str,
+    name: str,
+    plugin_type: str | None = None,
+) -> str:
     safe_name = name.strip().replace(" ", "-")
-    return f"plugins/{publisher_id}/{asset_id}/{version}/{safe_name}_{version}.zip"
+    root = _storage_root(plugin_type)
+    return f"{root}/{publisher_id}/{asset_id}/{version}/{safe_name}_{version}.zip"
 
 
 def _resolve_latest_version_for_download(
@@ -765,6 +780,7 @@ def get_download_info(
         asset_id=asset.asset_id,
         version=version_row.version,
         name=asset.name,
+        plugin_type=asset.plugin_type,
     )
 
     head = storage.head_object(key)
