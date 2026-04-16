@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { Button, Typography } from '@mui/material'
 import { SegmentedTabs } from '@/components/Common/common-page'
@@ -16,8 +16,21 @@ const PROFILE_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
 export default function MyProfilePage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user, isAuthenticated, logout } = useGitCodeAuth()
-  const [publishedTab, setPublishedTab] = useState<'plugin' | 'skill'>('skill')
+  /** 默认「插件」；仅 `?tab=skill` 时展示 Skill（发布 Skill 页返回会带上） */
+  const publishedTab: 'plugin' | 'skill' = searchParams.get('tab') === 'skill' ? 'skill' : 'plugin'
+  const setPublishedTab = (next: 'plugin' | 'skill') => {
+    setSearchParams(
+      prev => {
+        const p = new URLSearchParams(prev)
+        if (next === 'skill') p.set('tab', 'skill')
+        else p.delete('tab')
+        return p
+      },
+      { replace: true },
+    )
+  }
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
 

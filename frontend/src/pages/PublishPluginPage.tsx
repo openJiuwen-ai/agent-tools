@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useId, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Download } from 'lucide-react'
@@ -76,6 +76,9 @@ export default function PublishPluginPage() {
   const [skillFolderInputKey, setSkillFolderInputKey] = useState(0)
   const [skillIconInputKey, setSkillIconInputKey] = useState(0)
   const [packing, setPacking] = useState(false)
+  const prevSkillPluginIdRef = useRef('')
+
+  const skillMetadataLocked = Boolean(isSkillPublish && pluginId.trim())
 
   useEffect(() => {
     if (isSkillPublish) {
@@ -121,6 +124,29 @@ export default function PublishPluginPage() {
       return na.localeCompare(nb, undefined, { sensitivity: 'base' })
     })
   }, [myPluginsRes])
+
+  useEffect(() => {
+    if (!isSkillPublish) return
+    const prev = prevSkillPluginIdRef.current
+    const pid = pluginId.trim()
+    if (pid) {
+      const row = myPlugins.find(p => p.asset_id === pid)
+      if (row) {
+        setSkillPkgName(row.name ?? '')
+        setSkillDisplayName(row.display_name || row.displayName || row.name || '')
+        setSkillDescription(
+          String(row.detail_desc || row.detailDesc || row.short_desc || row.shortDesc || '').trim(),
+        )
+        setSkillTagsInput((row.tags ?? []).filter(Boolean).join(', '))
+      }
+    } else if (prev) {
+      setSkillPkgName('')
+      setSkillDisplayName('')
+      setSkillDescription('')
+      setSkillTagsInput('')
+    }
+    prevSkillPluginIdRef.current = pluginId
+  }, [isSkillPublish, pluginId, myPlugins])
 
   const skillFolderRootName = useMemo(() => {
     const first = skillFolderFiles?.[0] as (File & { webkitRelativePath?: string }) | undefined
@@ -233,10 +259,10 @@ export default function PublishPluginPage() {
   useEffect(() => {
     if (!successMsg) return
     const id = window.setTimeout(() => {
-      navigate('/profile', { replace: true })
+      navigate(isSkillPublish ? '/profile?tab=skill' : '/profile', { replace: true })
     }, SUCCESS_REDIRECT_MS)
     return () => clearTimeout(id)
-  }, [successMsg, navigate])
+  }, [successMsg, navigate, isSkillPublish])
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -311,14 +337,94 @@ export default function PublishPluginPage() {
     }
   }
 
+  const pluginLinkSelect = (
+    <FormControl fullWidth size="small" variant="outlined">
+      <InputLabel id="publish-plugin-id-label" shrink>
+        {isSkillPublish ? t('publish.fieldPluginIdSkill') : t('publish.fieldPluginId')}
+      </InputLabel>
+      <Select
+        labelId="publish-plugin-id-label"
+        label={isSkillPublish ? t('publish.fieldPluginIdSkill') : t('publish.fieldPluginId')}
+        value={pluginId}
+        onChange={e => setPluginId(String(e.target.value))}
+        displayEmpty
+        notched
+        inputProps={{
+          'aria-label': isSkillPublish ? t('publish.fieldPluginIdSkill') : t('publish.fieldPluginId'),
+        }}
+        renderValue={selected => {
+          if (!selected) {
+            return isSkillPublish ? t('publish.pluginIdNewOptionSkill') : t('publish.pluginIdNewOption')
+          }
+          const row = myPlugins.find(p => p.asset_id === selected)
+          if (!row) return selected
+          const title = row.display_name || row.displayName || row.name
+          const pkgName = row.name?.trim() || ''
+          if (!pkgName || pkgName === title) return title
+          return `${title} (${pkgName})`
+        }}
+      >
+        <MenuItem value="">
+          {isSkillPublish ? t('publish.pluginIdNewOptionSkill') : t('publish.pluginIdNewOption')}
+        </MenuItem>
+        {myPlugins.map(p => {
+          const title = p.display_name || p.displayName || p.name
+          const pkgName = p.name?.trim() || '—'
+          return (
+            <MenuItem key={p.asset_id} value={p.asset_id}>
+              <ListItemText primary={title} secondary={pkgName} />
+            </MenuItem>
+          )
+        })}
+      </Select>
+      {myPluginsLoading ? (
+        <FormHelperText sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <CircularProgress size={14} />
+          {t('publish.pluginListLoading')}
+        </FormHelperText>
+      ) : (
+        <FormHelperText>
+          {isSkillPublish ? t('publish.fieldPluginIdHelpSkill') : t('publish.fieldPluginIdHelp')}
+        </FormHelperText>
+      )}
+    </FormControl>
+  )
+
+  const checksumSection = (
+    <div>
+      <Typography variant="subtitle2" className="mb-1 font-semibold text-slate-900">
+        {t('publish.checksumLabel')}
+      </Typography>
+      <Typography variant="caption" className="mb-2 block text-slate-500">
+        {isSkillPublish ? t('publish.checksumHintSkill') : t('publish.checksumHint')}
+      </Typography>
+      {packing || hashing ? (
+        <Typography variant="body2" className="text-slate-500">
+          {packing ? t('publish.skillPacking') : t('publish.hashing')}
+        </Typography>
+      ) : (
+        <TextField
+          value={checksum}
+          fullWidth
+          size="small"
+          InputProps={{ readOnly: true }}
+          placeholder={
+            file ? '' : isSkillPublish ? t('publish.checksumPlaceholderSkill') : t('publish.checksumPlaceholder')
+          }
+          sx={{ '& .MuiInputBase-input': { fontFamily: 'ui-monospace, monospace', fontSize: 13 } }}
+        />
+      )}
+    </div>
+  )
+
   return (
-    <div className="relative flex min-h-dvh flex-col bg-gradient-to-br from-[#f8fbff] via-[#f6faff] to-[#eef4ff]">
+    <div className="relative flex h-dvh max-h-dvh flex-col overflow-hidden bg-gradient-to-br from-[#f8fbff] via-[#f6faff] to-[#eef4ff]">
       <div className="pointer-events-none absolute -top-20 -right-20 h-72 w-72 rounded-full bg-blue-100/50 blur-3xl" />
       <header className="relative z-10 border-b border-slate-200/80 bg-white/90 px-4 py-3 shadow-sm shadow-slate-200/40">
         <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <Link
-              to="/profile"
+              to={isSkillPublish ? '/profile?tab=skill' : '/profile'}
               className="inline-flex items-center gap-1 text-sm font-medium text-[#0369a1] hover:text-[#0c4a6e]"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -345,7 +451,7 @@ export default function PublishPluginPage() {
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto w-full max-w-3xl flex-1 px-4 py-6">
+      <main className="relative z-10 mx-auto w-full max-w-3xl min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 py-6">
         <Typography variant="body2" className="mb-4 text-slate-600">
           {isSkillPublish ? t('publish.introSkill') : t('publish.intro')}
         </Typography>
@@ -385,6 +491,12 @@ export default function PublishPluginPage() {
         <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-slate-200/80 bg-white/95 p-6 shadow-sm">
           {isSkillPublish ? (
             <>
+              {pluginLinkSelect}
+              {skillMetadataLocked ? (
+                <Typography variant="caption" className="-mt-1 block text-slate-500">
+                  {t('publish.fieldSkillMetadataLockedHint')}
+                </Typography>
+              ) : null}
               <TextField
                 label={t('publish.fieldSkillName')}
                 value={skillPkgName}
@@ -392,6 +504,7 @@ export default function PublishPluginPage() {
                 fullWidth
                 size="small"
                 required
+                disabled={skillMetadataLocked}
                 helperText={t('publish.fieldSkillNameHelp')}
               />
               <TextField
@@ -410,6 +523,7 @@ export default function PublishPluginPage() {
                 fullWidth
                 size="small"
                 required
+                disabled={skillMetadataLocked}
                 helperText={t('publish.fieldSkillDisplayNameHelp')}
               />
               <TextField
@@ -421,6 +535,7 @@ export default function PublishPluginPage() {
                 required
                 multiline
                 minRows={3}
+                disabled={skillMetadataLocked}
               />
               <TextField
                 label={t('publish.fieldSkillTags')}
@@ -428,6 +543,7 @@ export default function PublishPluginPage() {
                 onChange={e => setSkillTagsInput(e.target.value)}
                 fullWidth
                 size="small"
+                disabled={skillMetadataLocked}
                 helperText={t('publish.fieldSkillTagsHelp')}
               />
               <div>
@@ -484,100 +600,29 @@ export default function PublishPluginPage() {
                   </Typography>
                 </div>
               </div>
+              {checksumSection}
             </>
           ) : (
-            <div>
-              <Typography variant="subtitle2" className="mb-1 font-semibold text-slate-900">
-                {t('publish.zipLabel')}
-              </Typography>
-              <input
-                key={fileInputKey}
-                type="file"
-                accept=".zip,application/zip"
-                className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-sky-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-sky-800 hover:file:bg-sky-100"
-                onChange={e => {
-                  const f = e.target.files?.[0] ?? null
-                  setFile(f)
-                }}
-              />
-            </div>
+            <>
+              <div>
+                <Typography variant="subtitle2" className="mb-1 font-semibold text-slate-900">
+                  {t('publish.zipLabel')}
+                </Typography>
+                <input
+                  key={fileInputKey}
+                  type="file"
+                  accept=".zip,application/zip"
+                  className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-sky-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-sky-800 hover:file:bg-sky-100"
+                  onChange={e => {
+                    const f = e.target.files?.[0] ?? null
+                    setFile(f)
+                  }}
+                />
+              </div>
+              {checksumSection}
+              {pluginLinkSelect}
+            </>
           )}
-
-          <div>
-            <Typography variant="subtitle2" className="mb-1 font-semibold text-slate-900">
-              {t('publish.checksumLabel')}
-            </Typography>
-            <Typography variant="caption" className="mb-2 block text-slate-500">
-              {isSkillPublish ? t('publish.checksumHintSkill') : t('publish.checksumHint')}
-            </Typography>
-            {packing || hashing ? (
-              <Typography variant="body2" className="text-slate-500">
-                {packing ? t('publish.skillPacking') : t('publish.hashing')}
-              </Typography>
-            ) : (
-              <TextField
-                value={checksum}
-                fullWidth
-                size="small"
-                InputProps={{ readOnly: true }}
-                placeholder={
-                  file ? '' : isSkillPublish ? t('publish.checksumPlaceholderSkill') : t('publish.checksumPlaceholder')
-                }
-                sx={{ '& .MuiInputBase-input': { fontFamily: 'ui-monospace, monospace', fontSize: 13 } }}
-              />
-            )}
-          </div>
-
-          <FormControl fullWidth size="small" variant="outlined">
-            <InputLabel id="publish-plugin-id-label" shrink>
-              {isSkillPublish ? t('publish.fieldPluginIdSkill') : t('publish.fieldPluginId')}
-            </InputLabel>
-            <Select
-              labelId="publish-plugin-id-label"
-              label={isSkillPublish ? t('publish.fieldPluginIdSkill') : t('publish.fieldPluginId')}
-              value={pluginId}
-              onChange={e => setPluginId(String(e.target.value))}
-              displayEmpty
-              notched
-              inputProps={{
-                'aria-label': isSkillPublish ? t('publish.fieldPluginIdSkill') : t('publish.fieldPluginId'),
-              }}
-              renderValue={selected => {
-                if (!selected) {
-                  return isSkillPublish ? t('publish.pluginIdNewOptionSkill') : t('publish.pluginIdNewOption')
-                }
-                const row = myPlugins.find(p => p.asset_id === selected)
-                if (!row) return selected
-                const title = row.display_name || row.displayName || row.name
-                const pkgName = row.name?.trim() || ''
-                if (!pkgName || pkgName === title) return title
-                return `${title} (${pkgName})`
-              }}
-            >
-              <MenuItem value="">
-                {isSkillPublish ? t('publish.pluginIdNewOptionSkill') : t('publish.pluginIdNewOption')}
-              </MenuItem>
-              {myPlugins.map(p => {
-                const title = p.display_name || p.displayName || p.name
-                const pkgName = p.name?.trim() || '—'
-                return (
-                  <MenuItem key={p.asset_id} value={p.asset_id}>
-                    <ListItemText primary={title} secondary={pkgName} />
-                  </MenuItem>
-                )
-              })}
-            </Select>
-            {myPluginsLoading ? (
-              <FormHelperText sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <CircularProgress size={14} />
-                {t('publish.pluginListLoading')}
-              </FormHelperText>
-            ) : (
-              <FormHelperText>
-                {isSkillPublish ? t('publish.fieldPluginIdHelpSkill') : t('publish.fieldPluginIdHelp')}
-              </FormHelperText>
-            )}
-          </FormControl>
 
           {!isSkillPublish ? (
             <TextField
