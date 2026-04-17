@@ -1,0 +1,15 @@
+[default]
+[default.extend-words]
+CANN = "CANN"
+cann = "cann"
+NNAL = "NNAL"
+nnal = "nnal"
+ASCEND = "ASCEND"
+ascend = "ascend"
+EnQue = "EnQue"
+CopyIn = "CopyIn"
+ArchType = "ArchType"
+ND = "ND"
+tbe = "tbe"
+copyin = "copyin"
+alog = "alog"
