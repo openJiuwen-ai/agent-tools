@@ -22,20 +22,43 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 
+[project.optional-dependencies]
+infer-router = ["openjiuwentools-infer-router"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.1.0",
+    "pre-commit>=3.0",
+]
+top = [
+    "openjiuwentools-infer-router",
+]
+
 [project.urls]
 Homepage = "https://gitcode.com/openJiuwen/agent-tools"
 Repository = "https://gitcode.com/openJiuwen/agent-tools.git"
 Issues = "https://gitcode.com/openJiuwen/agent-tools/issues"
 
 [tool.setuptools]
-packages = []
+packages.find = {where = [".", "packages"], include = ["openjiuwentools*"]}
+
+[tool.setuptools.package-dir]
+# 建立明确的目录映射：包名 = 物理目录
+"openjiuwentools-infer-router" = "packages/infer_router"
 
 [tool.setuptools.dynamic]
-version = {attr = "openjiuwentools.__version__"}
-dependencies = {file = "requirements.txt"}
 
 [tool.setuptools_scm]
 git_describe_command = "git describe --long --first-parent"
+fallback_version = "0.0.1"
+
+# 声明工作区成员
+[tool.uv.workspace]
+members = ["packages/*"]
+
+# 声明依赖来源为工作区
+[tool.uv.sources]
+openjiuwentools-infer-router = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -49,8 +72,6 @@ filterwarnings = [
 ]
 
 [tool.ruff]
-select = ["E", "F", "W", "I", "A", "B", "C", "D", "N", "Q", "S"]
-ignore = ["E501", "D100", "D101", "D102", "D103", "D104", "D106", "D107", "D400", "D415", "S104", "S324"]
 line-length = 120
 
 [tool.ruff.format]
@@ -58,6 +79,8 @@ indent-style = "space"
 quote-style = "double"
 
 [tool.ruff.lint]
+select = ["E", "F", "W", "I", "A", "B", "C", "D", "N", "Q", "S"]
+ignore = ["D100", "D101", "D102", "D103", "D104", "D106", "D107", "D400", "D415", "S104", "S324"]
 fixable = ["A", "B", "C", "D", "E", "F", "I", "N", "Q", "S", "W"]
 
 [tool.ruff.lint.isort]
