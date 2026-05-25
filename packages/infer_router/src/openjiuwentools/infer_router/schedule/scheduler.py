@@ -137,18 +137,22 @@ class Scheduler:
         self.task_stats["total_tasks"] += 1
 
         logger.info(
-            f"[SCHEDULER: QUEUE] Request {route_hint.request_id} "
-            f"added to global queue. Queue size: {len(self.global_queue)}"
+            "[SCHEDULER: QUEUE] Request %s added to global queue. Queue size: %d",
+            route_hint.request_id, len(self.global_queue),
         )
 
     def get_next_request(self) -> ScheduledRequest | None:
         """按调度策略获取下一个请求"""
-        logger.info(f"[SCHEDULER: CHECK] Checking for next request in queue. Current size: {len(self.global_queue)}")
+        logger.info(
+            f"[SCHEDULER: CHECK] Checking for next request in queue. Current size: {len(self.global_queue)}"
+        )
         if not self.global_queue:
             logger.info("[SCHEDULER: EMPTY] Queue is empty, no request available")
             return None
 
-        logger.info(f"[SCHEDULER: SELECT] Selecting next request using {self.current_strategy.__class__.__name__}")
+        logger.info(
+            f"[SCHEDULER: SELECT] Selecting next request using {self.current_strategy.__class__.__name__}"
+        )
         next_request = self.current_strategy.select_next(self.global_queue)
         self.global_queue.remove(next_request)
 
@@ -157,13 +161,14 @@ class Scheduler:
         metrics.update_queue_size("global", len(self.global_queue))
 
         logger.info(
-            f"[SCHEDULER: DISPATCH] Dispatching request {next_request.route_hint.request_id} "
-            f"from global queue. Remaining queue size: {len(self.global_queue)}"
+            "[SCHEDULER: DISPATCH] Dispatching request %s from global queue."
+            " Remaining queue size: %d",
+            next_request.route_hint.request_id, len(self.global_queue),
         )
         logger.debug(
-            f"[SCHEDULER: DISPATCH] Selected request: "
-            f"priority={next_request.priority}, "
-            f"estimated_tokens={next_request.estimated_output_tokens}"
+            "[SCHEDULER: DISPATCH] Selected request: priority=%s,"
+            " estimated_tokens=%s",
+            next_request.priority, next_request.estimated_output_tokens,
         )
         return next_request
 
@@ -195,7 +200,9 @@ class Scheduler:
 
         current_time = time.time()
         avg_priority = sum(req.priority for req in self.global_queue) / len(self.global_queue)
-        avg_estimated_tokens = sum(req.estimated_output_tokens for req in self.global_queue) / len(self.global_queue)
+        avg_estimated_tokens = sum(req.estimated_output_tokens for req in self.global_queue) / len(
+            self.global_queue
+        )
         oldest_request_age = current_time - min(req.arrival_time for req in self.global_queue)
 
         return {

@@ -10,7 +10,9 @@ class WorkerTokenManager:
 
     def __init__(self):
         """初始化工作器 Token 管理器"""
-        self.worker_tokens: dict[str, list[tuple[int, float]]] = {}  # worker_id -> [(token_id, timestamp)]
+        self.worker_tokens: dict[
+            str, list[tuple[int, float]]
+        ] = {}  # worker_id -> [(token_id, timestamp)]
         self.token_capacity = settings.worker_token_capacity
         self.block_size = settings.kv_cache_block_size
         logger.info(f"WorkerTokenManager initialized with capacity: {self.token_capacity}")
@@ -42,7 +44,9 @@ class WorkerTokenManager:
         while len(self.worker_tokens[worker_id]) > self.token_capacity:
             removed_token, _ = self.worker_tokens[worker_id].pop(0)
             evicted_tokens.append(removed_token)
-            logger.debug(f"Removed token {removed_token} from worker {worker_id} (capacity exceeded)")
+            logger.debug(
+                f"Removed token {removed_token} from worker {worker_id} (capacity exceeded)"
+            )
 
         # 生成合并后的事件
         events = []
@@ -68,7 +72,9 @@ class WorkerTokenManager:
                 }
             )
 
-        logger.debug(f"Added {len(token_ids)} tokens to worker {worker_id}, generated {len(events)} events")
+        logger.debug(
+            f"Added {len(token_ids)} tokens to worker {worker_id}, generated {len(events)} events"
+        )
         return events
 
     def clear_worker_tokens(self, worker_id: str) -> list[dict]:
@@ -180,7 +186,9 @@ class WorkerTokenManager:
             stats["workers"][worker_id] = {
                 "token_count": len(tokens),
                 "block_count": len(tokens) // self.block_size,
-                "capacity_usage": len(tokens) / self.token_capacity if self.token_capacity > 0 else 0,
+                "capacity_usage": len(tokens) / self.token_capacity
+                if self.token_capacity > 0
+                else 0,
             }
 
         return stats

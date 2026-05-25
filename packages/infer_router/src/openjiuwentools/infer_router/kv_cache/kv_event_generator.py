@@ -1,9 +1,7 @@
 from loguru import logger
 
 from openjiuwentools.infer_router.kv_cache.event import CacheEvent
-from openjiuwentools.infer_router.kv_cache.worker_token_manager import (
-    WorkerTokenManager,
-)
+from openjiuwentools.infer_router.kv_cache.worker_token_manager import WorkerTokenManager
 
 
 class KVEventGenerator:
@@ -32,7 +30,9 @@ class KVEventGenerator:
         """
         # 如果 Radix Tree 未启用，不生成任何事件
         if not self.enable_radix_tree:
-            logger.debug(f"Radix Tree is disabled, skipping event generation for worker {worker_id}")
+            logger.debug(
+                f"Radix Tree is disabled, skipping event generation for worker {worker_id}"
+            )
             return []
 
         if not token_ids:

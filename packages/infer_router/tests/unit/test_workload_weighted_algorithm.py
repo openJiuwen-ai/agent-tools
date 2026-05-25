@@ -5,6 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 from openjiuwentools.infer_router.kv_cache.kv_cache import KVCacheManager
+from openjiuwentools.infer_router.routing.load_balance import FeatureParams, PrefixUpdateParams
 from openjiuwentools.infer_router.routing.router import WorkloadWeightedAlgorithm
 from openjiuwentools.infer_router.schemas.agent_hints import RouteHint, WorkerInfo
 
@@ -88,79 +89,86 @@ class TestContextualThompsonSamplingAlgorithm:
     @staticmethod
     def test_norm_level(cts_algorithm):
         """测试级别规范化"""
-        assert WorkloadWeightedAlgorithm.norm_level("LOW") == "LOW"
-        assert WorkloadWeightedAlgorithm.norm_level("MEDIUM") == "MEDIUM"
-        assert WorkloadWeightedAlgorithm.norm_level("HIGH") == "HIGH"
-        assert WorkloadWeightedAlgorithm.norm_level("invalid") == "MEDIUM"
-        assert WorkloadWeightedAlgorithm.norm_level(None) == "MEDIUM"
-        assert WorkloadWeightedAlgorithm.norm_level("") == "MEDIUM"
+        assert cts_algorithm.norm_level("LOW") == "LOW"
+        assert cts_algorithm.norm_level("MEDIUM") == "MEDIUM"
+        assert cts_algorithm.norm_level("HIGH") == "HIGH"
+        assert cts_algorithm.norm_level("invalid") == "MEDIUM"
+        assert cts_algorithm.norm_level(None) == "MEDIUM"
+        assert cts_algorithm.norm_level("") == "MEDIUM"
 
     @staticmethod
     def test_decode_cost(cts_algorithm):
         """测试解码成本计算"""
-        assert WorkloadWeightedAlgorithm.decode_cost("LOW") == 1.0
-        assert WorkloadWeightedAlgorithm.decode_cost("MEDIUM") == 2.0
-        assert WorkloadWeightedAlgorithm.decode_cost("HIGH") == 3.0
-        assert WorkloadWeightedAlgorithm.decode_cost("invalid") == 2.0
+        assert cts_algorithm.decode_cost("LOW") == 1.0
+        assert cts_algorithm.decode_cost("MEDIUM") == 2.0
+        assert cts_algorithm.decode_cost("HIGH") == 3.0
+        assert cts_algorithm.decode_cost("invalid") == 2.0
 
     @staticmethod
     def test_iat_factor(cts_algorithm):
         """测试 IAT 因子计算"""
-        assert WorkloadWeightedAlgorithm.iat_factor("LOW") == 1.5
-        assert WorkloadWeightedAlgorithm.iat_factor("MEDIUM") == 1.0
-        assert WorkloadWeightedAlgorithm.iat_factor("HIGH") == 0.6
-        assert WorkloadWeightedAlgorithm.iat_factor("invalid") == 1.0
+        assert cts_algorithm.iat_factor("LOW") == 1.5
+        assert cts_algorithm.iat_factor("MEDIUM") == 1.0
+        assert cts_algorithm.iat_factor("HIGH") == 0.6
+        assert cts_algorithm.iat_factor("invalid") == 1.0
 
     @staticmethod
     def test_estimate_osl(cts_algorithm):
         """测试输出序列长度估算"""
-        assert WorkloadWeightedAlgorithm.estimate_osl(None) == "MEDIUM"
-        assert WorkloadWeightedAlgorithm.estimate_osl(0) == "MEDIUM"
-        assert WorkloadWeightedAlgorithm.estimate_osl(64) == "LOW"
-        assert WorkloadWeightedAlgorithm.estimate_osl(128) == "LOW"
-        assert WorkloadWeightedAlgorithm.estimate_osl(256) == "MEDIUM"
-        assert WorkloadWeightedAlgorithm.estimate_osl(512) == "MEDIUM"
-        assert WorkloadWeightedAlgorithm.estimate_osl(2048) == "HIGH"
+        assert cts_algorithm.estimate_osl(None) == "MEDIUM"
+        assert cts_algorithm.estimate_osl(0) == "MEDIUM"
+        assert cts_algorithm.estimate_osl(64) == "LOW"
+        assert cts_algorithm.estimate_osl(128) == "LOW"
+        assert cts_algorithm.estimate_osl(256) == "MEDIUM"
+        assert cts_algorithm.estimate_osl(512) == "MEDIUM"
+        assert cts_algorithm.estimate_osl(1024) == "HIGH"
+        assert cts_algorithm.estimate_osl(2048) == "HIGH"
 
     @staticmethod
     def test_estimate_iat(cts_algorithm):
         """测试到达时间间隔估算"""
-        assert WorkloadWeightedAlgorithm.estimate_iat(None) == "MEDIUM"
-        assert WorkloadWeightedAlgorithm.estimate_iat(0) == "MEDIUM"
-        assert WorkloadWeightedAlgorithm.estimate_iat(50) == "LOW"
-        assert WorkloadWeightedAlgorithm.estimate_iat(100) == "LOW"
-        assert WorkloadWeightedAlgorithm.estimate_iat(500) == "MEDIUM"
-        assert WorkloadWeightedAlgorithm.estimate_iat(1000) == "MEDIUM"
-        assert WorkloadWeightedAlgorithm.estimate_iat(2000) == "HIGH"
-        assert WorkloadWeightedAlgorithm.estimate_iat(5000) == "HIGH"
+        assert cts_algorithm.estimate_iat(None) == "MEDIUM"
+        assert cts_algorithm.estimate_iat(0) == "MEDIUM"
+        assert cts_algorithm.estimate_iat(50) == "LOW"
+        assert cts_algorithm.estimate_iat(100) == "LOW"
+        assert cts_algorithm.estimate_iat(500) == "MEDIUM"
+        assert cts_algorithm.estimate_iat(1000) == "MEDIUM"
+        assert cts_algorithm.estimate_iat(2000) == "HIGH"
+        assert cts_algorithm.estimate_iat(5000) == "HIGH"
 
     @staticmethod
     def test_get_prefix_new(cts_algorithm):
         """测试新前缀获取"""
-        last_w, reuse_budget = cts_algorithm.get_prefix("new-prefix")
+        last_w, last_group, reuse_budget = cts_algorithm.get_prefix("new-prefix")
         assert last_w is None
+        assert last_group is None
         assert reuse_budget == 0
 
     @staticmethod
     def test_get_prefix_existing(cts_algorithm):
         """测试已存在前缀获取"""
-        cts_algorithm.prefix_tracking["test-prefix"] = ("worker-1", 5)
-        last_w, reuse_budget = cts_algorithm.get_prefix("test-prefix")
+        cts_algorithm.prefix_tracking["test-prefix"] = ("worker-1", "group1", 5)
+        last_w, last_group, reuse_budget = cts_algorithm.get_prefix("test-prefix")
         assert last_w == "worker-1"
+        assert last_group == "group1"
         assert reuse_budget == 5
 
     @staticmethod
     def test_update_prefix(cts_algorithm):
         """测试前缀更新"""
         # 先设置初始前缀跟踪
-        cts_algorithm.prefix_tracking["test-prefix"] = ("worker-1", 5)
-        cts_algorithm.update_prefix("test-prefix", "worker-2")
-        assert cts_algorithm.prefix_tracking["test-prefix"] == ("worker-2", 4)
+        cts_algorithm.prefix_tracking["test-prefix"] = ("worker-1", "group1", 5)
+        cts_algorithm.update_prefix(PrefixUpdateParams(
+            prefix_id="test-prefix", worker_id="worker-2", group_id="group2",
+        ))
+        assert cts_algorithm.prefix_tracking["test-prefix"] == ("worker-2", "group2", 4)
 
         # 测试重用预算为0的情况
-        cts_algorithm.prefix_tracking["test-prefix"] = ("worker-1", 0)
-        cts_algorithm.update_prefix("test-prefix", "worker-3")
-        assert cts_algorithm.prefix_tracking["test-prefix"] == ("worker-3", 0)
+        cts_algorithm.prefix_tracking["test-prefix"] = ("worker-1", "group1", 0)
+        cts_algorithm.update_prefix(PrefixUpdateParams(
+            prefix_id="test-prefix", worker_id="worker-3", group_id="group1",
+        ))
+        assert cts_algorithm.prefix_tracking["test-prefix"] == ("worker-3", "group1", 0)
 
     @staticmethod
     def test_prefill_cost_for_worker(cts_algorithm):
@@ -184,24 +192,22 @@ class TestContextualThompsonSamplingAlgorithm:
     @staticmethod
     def test_feature_vector(cts_algorithm, sample_workers):
         """测试特征向量构建"""
-        from openjiuwentools.infer_router.routing.load_balance import FeatureVectorParams
-
         worker = sample_workers[0]  # worker-1, load=10
         overlap = 0.5
-        params = FeatureVectorParams(
-            worker=worker,
-            overlap=overlap,
-            last_w="worker-1",
-            reuse_after=3,
-            decode_cost=2.0,
-            prefill_cost=1.5,
-            iat_factor=1.0,
-        )
+        last_w = "worker-1"
+        reuse_after = 3
+        decode_cost = 2.0
+        prefill_cost = 1.5
+        iat_factor = 1.0
 
-        features = cts_algorithm.feature_vector(params)
+        features = cts_algorithm.feature_vector(FeatureParams(
+            worker=worker, overlap=overlap, last_w=last_w, reuse_after=reuse_after,
+            decode_cost=decode_cost, prefill_cost=prefill_cost, iat_factor=iat_factor,
+            last_group="default",
+        ))
 
         # 检查特征向量维度
-        assert len(features) == 9
+        assert len(features) == 11
 
         # 检查特征值范围
         assert features[0] == 1.0  # 偏置项
@@ -262,8 +268,9 @@ class TestContextualThompsonSamplingAlgorithm:
         # 负载越低，得分越高
         assert load_score > 0.5  # 10%负载应该得到较高分数
 
+    @staticmethod
     @pytest.mark.parametrize("num_workers", [1, 2, 3, 5])
-    def test_select_worker_different_counts(self, cts_algorithm, num_workers):
+    def test_select_worker_different_counts(cts_algorithm, num_workers):
         """测试不同数量工作器的选择"""
         workers = [
             WorkerInfo(
@@ -300,7 +307,7 @@ class TestContextualThompsonSamplingAlgorithm:
     def test_select_worker_with_prefix_tracking(cts_algorithm, sample_workers, route_hint):
         """测试带前缀跟踪的选择"""
         # 设置初始前缀跟踪
-        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", 5)
+        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", "default", 5)
 
         # Mock KV cache manager
         cts_algorithm.kv_cache_manager.find_matches = Mock(
@@ -311,7 +318,7 @@ class TestContextualThompsonSamplingAlgorithm:
 
         # 检查前缀跟踪是否更新
         assert route_hint.prefix_id in cts_algorithm.prefix_tracking
-        last_worker, reuse_budget = cts_algorithm.prefix_tracking[route_hint.prefix_id]
+        last_worker, last_group, reuse_budget = cts_algorithm.prefix_tracking[route_hint.prefix_id]
         assert last_worker == selected_worker.worker_id
         assert reuse_budget == 4  # 重用预算减少1
 
@@ -350,14 +357,16 @@ class TestContextualThompsonSamplingAlgorithm:
             assert any(val != 0.0 for val in b)
 
     @staticmethod
-    def test_select_worker_exploration_exploitation(cts_algorithm, sample_workers, route_hint):
+    def test_select_worker_exploration_exploitation(
+        cts_algorithm, sample_workers, route_hint
+    ):
         """测试探索/利用平衡"""
         # 设置不同的温度
         original_temp = cts_algorithm.temp_base
 
         # 低温（更多利用）
         cts_algorithm.temp_base = 0.1
-        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", 10)
+        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", "default", 10)
         cts_algorithm.kv_cache_manager.find_matches = Mock(
             return_value={"worker-1": 0.9, "worker-2": 0.1, "worker-3": 0.1}
         )
@@ -371,7 +380,7 @@ class TestContextualThompsonSamplingAlgorithm:
 
         # 高温（更多探索）
         cts_algorithm.temp_base = 2.0
-        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", 10)
+        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", "default", 10)
 
         results_high_temp = []
         for _ in range(50):
@@ -388,13 +397,15 @@ class TestContextualThompsonSamplingAlgorithm:
         # 高温应该有更高的探索率
         # 使用更宽松的断言，允许一定的随机波动
         # 高温选择的worker种类应该至少是低温的70%
-        assert unique_high >= unique_low * 0.7, f"unique_high={unique_high}, unique_low={unique_low}"
+        assert unique_high >= unique_low * 0.7, (
+            f"unique_high={unique_high}, unique_low={unique_low}"
+        )
 
     @staticmethod
     def test_select_worker_stickiness(cts_algorithm, sample_workers, route_hint):
         """测试粘性（stickiness）"""
         # 设置 worker-1 为上次选择的工作器
-        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", 5)
+        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", "default", 5)
 
         # Mock KV cache manager - worker-1 有高重叠
         cts_algorithm.kv_cache_manager.find_matches = Mock(

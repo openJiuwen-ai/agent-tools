@@ -148,6 +148,37 @@ class TokenizerManager:
             logger.error(f"Error tokenizing messages for model {model}: {e}")
             return self._fallback_tokenize(messages)
 
+    def tokenize_prompt(
+        self,
+        prompt: str | list[int],
+        model: str,
+    ) -> list[int]:
+        """将原始prompt转换为token ID列表
+
+        Args:
+            prompt: 提示文本（str）或已有的token ID列表
+            model: 模型名称
+
+        Returns:
+            token ID列表
+
+        """
+        if isinstance(prompt, list):
+            return prompt
+
+        tokenizer = self._get_tokenizer(model)
+        if tokenizer is None:
+            logger.warning(f"No tokenizer available for model {model}, using fallback for prompt")
+            return [ord(c) for c in prompt]
+
+        try:
+            token_ids = tokenizer.encode(prompt, add_special_tokens=False)
+            logger.debug(f"Tokenized prompt to {len(token_ids)} tokens")
+            return list(token_ids)
+        except Exception as e:
+            logger.error(f"Error tokenizing prompt for model {model}: {e}")
+            return [ord(c) for c in prompt]
+
     @staticmethod
     def _tokenize_with_chat_template(tokenizer: Any, messages: list[dict]) -> list[int]:
         """使用chat_template进行tokenize

@@ -13,18 +13,6 @@ from openjiuwentools.infer_router.config.config import settings
 T = TypeVar("T")
 
 
-@dataclass
-class RetryConfig:
-    """重试配置"""
-
-    max_attempts: int = settings.retry_attempts
-    delay: float = settings.retry_delay
-    retry_exceptions: tuple = field(default_factory=lambda: (Exception,))
-    jitter: bool = True
-    jitter_factor: float = 0.1
-    circuit_breaker: Optional["CircuitBreaker"] = None
-
-
 class RetryResult(Generic[T]):
     """重试结果"""
 
@@ -193,26 +181,29 @@ def retry_sync(
                 raise
 
 
-def retry(config: RetryConfig = None, **kwargs):
+@dataclass
+class RetryConfig:
+    """重试配置参数"""
+
+    max_attempts: int = settings.retry_attempts
+    delay: float = settings.retry_delay
+    retry_exceptions: tuple = field(default=(Exception,))
+    jitter: bool = True
+    jitter_factor: float = 0.1
+
+
+def retry(
+    config: RetryConfig | None = None,
+    circuit_breaker: Optional["CircuitBreaker"] = None,
+):
     """通用重试装饰器
 
     Args:
-        config: 重试配置（优先使用）
-        **kwargs: 旧的关键字参数格式（向后兼容）
+        config: 重试配置参数，为None时使用默认配置
+        circuit_breaker: 断路器实例，用于避免对不健康的服务重试
 
     """
-    # 如果提供了 config，使用它；否则从 kwargs 创建配置
-    if config is not None:
-        effective_config = config
-    else:
-        effective_config = RetryConfig(
-            max_attempts=kwargs.get("max_attempts", RetryConfig().max_attempts),
-            delay=kwargs.get("delay", RetryConfig().delay),
-            retry_exceptions=kwargs.get("retry_exceptions", RetryConfig().retry_exceptions),
-            jitter=kwargs.get("jitter", RetryConfig().jitter),
-            jitter_factor=kwargs.get("jitter_factor", RetryConfig().jitter_factor),
-            circuit_breaker=kwargs.get("circuit_breaker", RetryConfig().circuit_breaker),
-        )
+    cfg = config or RetryConfig()
 
     def decorator(func):
         @wraps(func)
@@ -220,12 +211,12 @@ def retry(config: RetryConfig = None, **kwargs):
             return await retry_async(
                 func,
                 *args,
-                max_attempts=effective_config.max_attempts,
-                delay=effective_config.delay,
-                retry_exceptions=effective_config.retry_exceptions,
-                jitter=effective_config.jitter,
-                jitter_factor=effective_config.jitter_factor,
-                circuit_breaker=effective_config.circuit_breaker,
+                max_attempts=cfg.max_attempts,
+                delay=cfg.delay,
+                retry_exceptions=cfg.retry_exceptions,
+                jitter=cfg.jitter,
+                jitter_factor=cfg.jitter_factor,
+                circuit_breaker=circuit_breaker,
                 **kwargs,
             )
 
@@ -234,12 +225,12 @@ def retry(config: RetryConfig = None, **kwargs):
             return retry_sync(
                 func,
                 *args,
-                max_attempts=effective_config.max_attempts,
-                delay=effective_config.delay,
-                retry_exceptions=effective_config.retry_exceptions,
-                jitter=effective_config.jitter,
-                jitter_factor=effective_config.jitter_factor,
-                circuit_breaker=effective_config.circuit_breaker,
+                max_attempts=cfg.max_attempts,
+                delay=cfg.delay,
+                retry_exceptions=cfg.retry_exceptions,
+                jitter=cfg.jitter,
+                jitter_factor=cfg.jitter_factor,
+                circuit_breaker=circuit_breaker,
                 **kwargs,
             )
 
@@ -333,7 +324,9 @@ class CircuitBreaker:
 
         if self.state == "CLOSED":
             self.failure_count += 1
-            logger.warning(f"Circuit breaker failure count: {self.failure_count}/{self.failure_threshold}")
+            logger.warning(
+                f"Circuit breaker failure count: {self.failure_count}/{self.failure_threshold}"
+            )
 
             if self.failure_count >= self.failure_threshold:
                 logger.info("Circuit breaker transitioning from CLOSED to OPEN")

@@ -44,6 +44,11 @@ class WorkerManager:
         self.kv_cache_manager = kv_cache_manager
         self._workload_manager = None
         self._load_store = AtomicLoadStore()  # 线程安全的负载存储
+        self._on_worker_discovered_callbacks: list = []
+
+    def on_worker_discovered(self, callback) -> None:
+        """注册 worker 发现回调，callback(worker: WorkerInfo)"""
+        self._on_worker_discovered_callbacks.append(callback)
 
     def set_workload_manager(self, workload_manager):
         """设置 workload_manager 引用"""
@@ -142,25 +147,33 @@ class WorkerManager:
         """获取指定group内的所有工作器"""
         if group not in self.groups:
             return []
-        return [self.workers[worker_id] for worker_id in self.groups[group] if worker_id in self.workers]
+        return [
+            self.workers[worker_id] for worker_id in self.groups[group] if worker_id in self.workers
+        ]
 
     @staticmethod
-    def _is_prefill_worker(worker: WorkerInfo) -> bool:
-        """检查是否为prefill工作器（包括combined类型）"""
-        return worker.worker_type in (WorkerType.PREFILL, WorkerType.COMBINED)
+    def _is_prefill_capable(worker: WorkerInfo, model: str) -> bool:
+        """判断工作器是否为指定模型的prefill节点（包括combined类型）"""
+        return worker.model == model and worker.worker_type in (
+            WorkerType.PREFILL, WorkerType.COMBINED,
+        )
 
     @staticmethod
-    def _is_decode_worker(worker: WorkerInfo) -> bool:
-        """检查是否为decode工作器（包括combined类型）"""
-        return worker.worker_type in (WorkerType.DECODE, WorkerType.COMBINED)
+    def _is_decode_capable(worker: WorkerInfo, model: str) -> bool:
+        """判断工作器是否为指定模型的decode节点（包括combined类型）"""
+        return worker.model == model and worker.worker_type in (
+            WorkerType.DECODE, WorkerType.COMBINED,
+        )
 
     def get_prefill_workers_in_group(self, group: str, model: str) -> list[WorkerInfo]:
         """获取指定group内的prefill工作器（包括combined类型）"""
-        return [w for w in self.get_workers_in_group(group) if w.model == model and self._is_prefill_worker(w)]
+        workers = self.get_workers_in_group(group)
+        return [w for w in workers if self._is_prefill_capable(w, model)]
 
     def get_decode_workers_in_group(self, group: str, model: str) -> list[WorkerInfo]:
         """获取指定group内的decode工作器（包括combined类型）"""
-        return [w for w in self.get_workers_in_group(group) if w.model == model and self._is_decode_worker(w)]
+        workers = self.get_workers_in_group(group)
+        return [w for w in workers if self._is_decode_capable(w, model)]
 
     def get_healthy_groups(self, model: str) -> list[str]:
         """获取包含指定模型健康工作器的group列表"""
@@ -180,7 +193,9 @@ class WorkerManager:
 
         # 如果没有找到健康的 group，返回所有包含该模型的 group（降级模式）
         if not healthy_groups and all_groups:
-            logger.warning(f"No healthy groups found for model {model}, using all groups in degraded mode")
+            logger.warning(
+                f"No healthy groups found for model {model}, using all groups in degraded mode"
+            )
             return all_groups
 
         return healthy_groups
@@ -231,8 +246,8 @@ class WorkerManager:
         group_model = workers_in_group[0].model
         if worker.model != group_model:
             logger.warning(
-                f"Worker {worker.worker_id} model {worker.model} "
-                f"does not match group {worker.group} model {group_model}"
+                "Worker %s model %s does not match group %s model %s",
+                worker.worker_id, worker.model, worker.group, group_model,
             )
             return False
 
@@ -240,15 +255,17 @@ class WorkerManager:
 
         if has_combined and worker.worker_type != WorkerType.COMBINED:
             logger.warning(
-                f"Worker {worker.worker_id} type {worker.worker_type} "
-                f"cannot join group {worker.group} which contains combined workers"
+                "Worker %s type %s cannot join group %s"
+                " which contains combined workers",
+                worker.worker_id, worker.worker_type, worker.group,
             )
             return False
 
         if not has_combined and worker.worker_type == WorkerType.COMBINED:
             logger.warning(
-                f"Worker {worker.worker_id} type COMBINED "
-                f"cannot join group {worker.group} which contains non-combined workers"
+                "Worker %s type COMBINED cannot join group %s"
+                " which contains non-combined workers",
+                worker.worker_id, worker.group,
             )
             return False
 
@@ -264,7 +281,9 @@ class WorkerManager:
         discovery_type = settings.worker_discovery_type.lower()
 
         if discovery_type == "config":
-            logger.info(f"Using config-based worker discovery with file: {settings.worker_config_path}")
+            logger.info(
+                f"Using config-based worker discovery with file: {settings.worker_config_path}"
+            )
             return ConfigDiscovery(config_path=settings.worker_config_path)
         elif discovery_type == "etcd":
             logger.info(
@@ -285,7 +304,9 @@ class WorkerManager:
 
             return discovery
         else:
-            logger.warning(f"Unknown discovery type: {discovery_type}, falling back to config-based discovery")
+            logger.warning(
+                f"Unknown discovery type: {discovery_type}, falling back to config-based discovery"
+            )
             return ConfigDiscovery(config_path=settings.worker_config_path)
 
     async def _on_worker_change(self, event_type: str, data):
@@ -477,6 +498,13 @@ class WorkerManager:
 
                 # 添加到group
                 self.add_to_group(worker)
+
+                # 通知回调
+                for cb in self._on_worker_discovered_callbacks:
+                    try:
+                        cb(worker)
+                    except Exception as e:
+                        logger.error(f"Worker discovered callback error: {e}")
             else:
                 # 更新现有工作器信息
                 old_worker = self.workers[worker.worker_id]
@@ -544,17 +572,23 @@ class WorkerManager:
                     new_consecutive_failures = 0
                     is_healthy = True
                 else:
-                    logger.warning(f"Worker {worker_id} health check failed with status {response.status_code}")
+                    logger.warning(
+                        f"Worker {worker_id} health check failed with status {response.status_code}"
+                    )
                     new_consecutive_failures = old_consecutive_failures + 1
                     # 只有连续失败次数超过阈值时才标记为不健康
-                    is_healthy = new_consecutive_failures < settings.worker_health_check_max_failures
+                    is_healthy = (
+                        new_consecutive_failures < settings.worker_health_check_max_failures
+                    )
 
             except httpx.HTTPStatusError as e:
-                logger.error(f"Worker {worker_id} health check failed: HTTP {e.response.status_code}")
+                logger.error(
+                    f"Worker {worker_id} health check failed: HTTP {e.response.status_code}"
+                )
                 new_consecutive_failures = old_consecutive_failures + 1
                 is_healthy = new_consecutive_failures < settings.worker_health_check_max_failures
             except httpx.RequestError as e:
-                logger.error(f"Worker {worker_id} health check failed: {e}")
+                logger.warning(f"Worker {worker_id} health check failed: {e}")
                 new_consecutive_failures = old_consecutive_failures + 1
                 is_healthy = new_consecutive_failures < settings.worker_health_check_max_failures
 
@@ -608,7 +642,9 @@ class WorkerManager:
 
         # 如果没有找到健康的工作器，返回所有工作器（降级模式）
         if not healthy_workers and all_workers:
-            logger.warning(f"No healthy workers found for model {model}, using all workers in degraded mode")
+            logger.warning(
+                f"No healthy workers found for model {model}, using all workers in degraded mode"
+            )
             return all_workers
 
         return healthy_workers
@@ -630,12 +666,7 @@ class WorkerManager:
         return self.worker_statuses.copy()
 
     async def forward_request(
-        self,
-        worker_id: str,
-        endpoint: str,
-        method: str,
-        data: dict,
-        headers: dict | None = None,
+        self, worker_id: str, endpoint: str, method: str, data: dict, headers: dict | None = None
     ) -> dict:
         """转发请求到工作器
 
@@ -650,9 +681,7 @@ class WorkerManager:
             工作器响应
 
         """
-        logger.info(f"[WORKER: FORWARD] Forwarding request to worker {worker_id}")
-        logger.debug(f"[WORKER: FORWARD] Endpoint: {endpoint}, Method: {method}")
-        logger.debug(f"[WORKER: FORWARD] Data keys: {list(data.keys()) if data else None}")
+        logger.debug(f"[WORKER: FORWARD] Forwarding request to worker {worker_id}, endpoint={endpoint}")
 
         worker = self.workers.get(worker_id)
         if not worker:
@@ -660,31 +689,24 @@ class WorkerManager:
             raise ValueError(f"Worker {worker_id} not found")
 
         url = f"{worker.url}{endpoint}"
-        logger.info(f"[WORKER: URL] Forwarding to {url}")
 
         request_headers = {"Content-Type": "application/json"}
         if worker.api_key:
             request_headers["Authorization"] = f"Bearer {worker.api_key}"
-            logger.debug(f"[WORKER: AUTH] Using API key for worker {worker_id}")
         if headers:
             request_headers.update(headers)
 
-        logger.info(f"[WORKER: FINAL_HEADERS] {request_headers}")
-        logger.info(
-            f"[WORKER: REQUEST_DATA] model={data.get('model')}, "
-            f"max_tokens={data.get('max_tokens')}, "
-            f"messages_count={len(data.get('messages', []))}"
+        logger.debug(
+            f"[WORKER: REQUEST] {worker_id} url={url}, model={data.get('model')}, max_tokens={data.get('max_tokens')}"
         )
 
         timeout = httpx.Timeout(settings.request_forward_timeout, connect=30.0)
-        logger.debug(f"[WORKER: TIMEOUT] Request timeout: {settings.request_forward_timeout}s")
-        logger.info(f"[WORKER: REQUEST] URL: {url}")
-        logger.info(f"[WORKER: REQUEST] Headers: {request_headers}")
 
         try:
             if method.upper() == "POST":
-                logger.info(f"[WORKER: POST] Sending POST request to worker {worker_id}")
-                response = await self.http_client.post(url, json=data, headers=request_headers, timeout=timeout)
+                response = await self.http_client.post(
+                    url, json=data, headers=request_headers, timeout=timeout
+                )
             elif method.upper() == "GET":
                 response = await self.http_client.get(url, headers=request_headers, timeout=timeout)
             else:
@@ -698,7 +720,7 @@ class WorkerManager:
             try:
                 error_detail = e.response.text
             except Exception:
-                error_detail = "Unable to read response text"
+                logger.debug("Failed to read error response body for worker %s", worker_id)
             logger.error(
                 f"Forward request failed for worker {worker_id}: HTTP {e.response.status_code}, "
                 f"response: {error_detail}"
@@ -715,12 +737,7 @@ class WorkerManager:
             raise
 
     async def forward_request_stream(
-        self,
-        worker_id: str,
-        endpoint: str,
-        method: str,
-        data: dict,
-        headers: dict | None = None,
+        self, worker_id: str, endpoint: str, method: str, data: dict, headers: dict | None = None
     ) -> AsyncGenerator[bytes, None]:
         """转发流式请求到工作器
 
@@ -735,9 +752,7 @@ class WorkerManager:
             流式响应生成器
 
         """
-        logger.info(f"[WORKER: FORWARD_STREAM] Forwarding stream request to worker {worker_id}")
-        logger.debug(f"[WORKER: FORWARD_STREAM] Endpoint: {endpoint}, Method: {method}")
-        logger.debug(f"[WORKER: FORWARD_STREAM] Data keys: {list(data.keys()) if data else None}")
+        logger.debug(f"[WORKER: FORWARD_STREAM] Forwarding stream request to worker {worker_id}, endpoint={endpoint}")
 
         worker = self.workers.get(worker_id)
         if not worker:
@@ -745,28 +760,22 @@ class WorkerManager:
             raise ValueError(f"Worker {worker_id} not found")
 
         url = f"{worker.url}{endpoint}"
-        logger.info(f"[WORKER: URL] Forwarding to {url}")
 
         request_headers = {"Content-Type": "application/json"}
         if worker.api_key:
             request_headers["Authorization"] = f"Bearer {worker.api_key}"
-            logger.debug(f"[WORKER: AUTH] Using API key for worker {worker_id}")
         if headers:
             request_headers.update(headers)
 
-        logger.info(f"[WORKER: FINAL_HEADERS] {request_headers}")
-        logger.info(
-            f"[WORKER: REQUEST_DATA] model={data.get('model')}, "
-            f"max_tokens={data.get('max_tokens')}, "
-            f"messages_count={len(data.get('messages', []))}"
+        logger.debug(
+            "[WORKER: REQUEST_STREAM] %s url=%s, model=%s, max_tokens=%s",
+            worker_id, url, data.get("model"), data.get("max_tokens"),
         )
 
         timeout = httpx.Timeout(settings.request_forward_timeout, connect=30.0)
-        logger.debug(f"[WORKER: TIMEOUT] Request timeout: {settings.request_forward_timeout}s")
 
         try:
             if method.upper() == "POST":
-                logger.info(f"[WORKER: POST_STREAM] Sending POST stream request to worker {worker_id}")
                 async with self.http_client.stream(
                     "POST", url, json=data, headers=request_headers, timeout=timeout
                 ) as response:
@@ -781,15 +790,17 @@ class WorkerManager:
             try:
                 error_detail = e.response.text
             except Exception:
-                error_detail = "Unable to read response text"
+                logger.debug("Failed to read error response body for stream worker %s", worker_id)
             logger.error(
-                f"Forward stream request failed for worker {worker_id}: "
-                f"HTTP {e.response.status_code}, response: {error_detail}"
+                f"Forward stream request failed for worker {worker_id}: HTTP {e.response.status_code}, "
+                f"response: {error_detail}"
             )
             raise
         except httpx.TimeoutException as e:
             logger.error(f"Forward stream request timeout for worker {worker_id}: {e}")
             raise
         except httpx.RequestError as e:
-            logger.error(f"Forward stream request failed for worker {worker_id}: {type(e).__name__}: {e}")
+            logger.error(
+                f"Forward stream request failed for worker {worker_id}: {type(e).__name__}: {e}"
+            )
             raise

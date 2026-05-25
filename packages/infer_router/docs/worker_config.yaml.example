@@ -1,0 +1,42 @@
+# Jiuwen vLLM Worker 配置示例
+# 先pip安装 SETUPTOOLS_SCM_PRETEND_VERSION=0.1.0 pip install -e "packages/infer_router"
+# 启动方式: jiuwen-infer-worker --config worker_config.yaml
+
+# ---- vLLM 引擎 ----
+model: /root/autodl-tmp/Qwen/Qwen3-0.6B
+# tensor_parallel_size: 1
+# pipeline_parallel_size: 1
+gpu_memory_utilization: 0.3
+# max_model_len: null
+# max_num_seqs: 256
+# dtype: auto
+# quantization: null
+trust_remote_code: true
+enable_prefix_caching: true
+
+# KV cache 事件上报
+kv_events_config:
+  enable_kv_cache_events: true
+  publisher: zmq
+  endpoint: "tcp://*:5557"
+
+# KV cache 传输 (P2P disagg, 可选)
+kv_transfer_config:
+  kv_connector: MooncakeConnector
+  kv_role: kv_producer
+
+# ---- Worker 服务 ----
+# host: "0.0.0.0"
+port: 8010
+# served_model_name: null  # 默认使用 model 名称
+# request_plane: http      # http 或 tcp
+worker_mode: prefill        # aggregated / prefill / decode
+
+# ---- ZMQ 事件上报 ----
+kv_relay_endpoint: "tcp://*:9010"
+# metrics_interval: 5.0
+
+# ---- 服务注册 (可选) ----
+# etcd_endpoints: "localhost:2379"
+# service_name: null
+# registry_ttl: 10

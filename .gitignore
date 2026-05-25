@@ -82,6 +82,7 @@ logs/
 # Git
 .git/
 .gitattributes
+.github/
 
 # Build artifacts
 get-pip.py
@@ -90,3 +91,7 @@ uv.lock
 
 # Trae IDE
 .trae/
+
+# Claude
+CLAUDE.md
+.claude/

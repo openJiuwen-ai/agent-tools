@@ -130,9 +130,7 @@ async def test_config_discovery_default_values(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_config_discovery_with_worker_type_and_group(
-    sample_worker_config_with_types: Path,
-):
+async def test_config_discovery_with_worker_type_and_group(sample_worker_config_with_types: Path):
     """测试解析包含worker_type和group的配置"""
     discovery = ConfigDiscovery(config_path=str(sample_worker_config_with_types))
     workers = await discovery.discover()

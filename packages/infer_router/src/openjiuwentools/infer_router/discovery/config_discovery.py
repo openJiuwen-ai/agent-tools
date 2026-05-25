@@ -50,7 +50,9 @@ class ConfigDiscovery(WorkerDiscovery):
                 logger.error("PyYAML package not installed. Install it with: pip install pyyaml")
                 raise
         else:
-            raise ValueError(f"Unsupported config file format: {suffix}. Supported formats: .json, .yaml, .yml")
+            raise ValueError(
+                f"Unsupported config file format: {suffix}. Supported formats: .json, .yaml, .yml"
+            )
 
     async def discover(self) -> list[WorkerInfo]:
         """从配置文件读取工作器信息
@@ -93,6 +95,7 @@ class ConfigDiscovery(WorkerDiscovery):
                         "worker_type": worker_type,
                         "group": worker_data.get("group", "default"),
                         "kv_addr": worker_data.get("kv_addr", ""),
+                        "publisher_endpoint": worker_data.get("publisher_endpoint", ""),
                     }
                     if total_tokens > 0:
                         worker_kwargs["total_tokens"] = total_tokens

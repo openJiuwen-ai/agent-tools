@@ -1,15 +1,13 @@
 """测试工作器管理器"""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from openjiuwentools.infer_router.schemas.agent_hints import WorkerInfo, WorkerType
-from openjiuwentools.infer_router.worker.worker_manager import (
-    WorkerManager,
-    WorkerStatus,
-)
+from openjiuwentools.infer_router.worker.worker_manager import WorkerManager, WorkerStatus
 
 
 @pytest.fixture
@@ -54,16 +52,16 @@ async def test_worker_manager_start_stop(worker_manager: WorkerManager):
         assert worker_manager.health_check_task is not None
 
         await worker_manager.stop()
-        # 任务被取消后会进入 cancelling 状态
-        assert worker_manager.discovery_task.cancelling() or worker_manager.discovery_task.done()
-        assert worker_manager.health_check_task.cancelling() or worker_manager.health_check_task.done()
+        await asyncio.sleep(0)
+        assert worker_manager.discovery_task.cancelled() or worker_manager.discovery_task.done()
+        assert (
+            worker_manager.health_check_task.cancelled() or worker_manager.health_check_task.done()
+        )
 
 
 @pytest.mark.asyncio
 async def test_worker_manager_discover_workers(
-    worker_manager: WorkerManager,
-    sample_workers: list[WorkerInfo],
-    sample_worker_config_json: Path,
+    worker_manager: WorkerManager, sample_workers: list[WorkerInfo], sample_worker_config_json: Path
 ):
     """测试工作器发现"""
     with patch.object(worker_manager, "create_discovery") as mock_create:
@@ -81,11 +79,15 @@ async def test_worker_manager_discover_workers(
 
 
 @pytest.mark.asyncio
-async def test_worker_manager_remove_workers(worker_manager: WorkerManager, sample_workers: list[WorkerInfo]):
+async def test_worker_manager_remove_workers(
+    worker_manager: WorkerManager, sample_workers: list[WorkerInfo]
+):
     """测试移除不再存在的工作器"""
     worker_manager.workers = {w.worker_id: w for w in sample_workers}
     worker_manager.worker_statuses = {
-        w.worker_id: WorkerStatus(worker_id=w.worker_id, last_health_check=0, is_healthy=True, response_time=0)
+        w.worker_id: WorkerStatus(
+            worker_id=w.worker_id, last_health_check=0, is_healthy=True, response_time=0
+        )
         for w in sample_workers
     }
 
@@ -103,7 +105,9 @@ async def test_worker_manager_remove_workers(worker_manager: WorkerManager, samp
 
 
 @pytest.mark.asyncio
-async def test_worker_manager_health_check(worker_manager: WorkerManager, sample_workers: list[WorkerInfo]):
+async def test_worker_manager_health_check(
+    worker_manager: WorkerManager, sample_workers: list[WorkerInfo]
+):
     """测试健康检查"""
     worker_manager.workers = {w.worker_id: w for w in sample_workers}
 
@@ -122,11 +126,15 @@ async def test_worker_manager_health_check(worker_manager: WorkerManager, sample
         assert status.is_healthy is True
 
 
-def test_worker_manager_get_healthy_workers(worker_manager: WorkerManager, sample_workers: list[WorkerInfo]):
+def test_worker_manager_get_healthy_workers(
+    worker_manager: WorkerManager, sample_workers: list[WorkerInfo]
+):
     """测试获取健康工作器"""
     worker_manager.workers = {w.worker_id: w for w in sample_workers}
     worker_manager.worker_statuses = {
-        w.worker_id: WorkerStatus(worker_id=w.worker_id, last_health_check=0, is_healthy=True, response_time=0)
+        w.worker_id: WorkerStatus(
+            worker_id=w.worker_id, last_health_check=0, is_healthy=True, response_time=0
+        )
         for w in sample_workers
     }
 
@@ -149,7 +157,9 @@ def test_worker_manager_get_worker(worker_manager: WorkerManager, sample_workers
     assert worker is None
 
 
-def test_worker_manager_get_all_workers(worker_manager: WorkerManager, sample_workers: list[WorkerInfo]):
+def test_worker_manager_get_all_workers(
+    worker_manager: WorkerManager, sample_workers: list[WorkerInfo]
+):
     """测试获取所有工作器"""
     worker_manager.workers = {w.worker_id: w for w in sample_workers}
 
@@ -248,7 +258,9 @@ def workers_with_groups():
     ]
 
 
-def test_worker_manager_get_groups(worker_manager: WorkerManager, workers_with_groups: list[WorkerInfo]):
+def test_worker_manager_get_groups(
+    worker_manager: WorkerManager, workers_with_groups: list[WorkerInfo]
+):
     """测试获取所有groups"""
     for worker in workers_with_groups:
         worker_manager.workers[worker.worker_id] = worker
@@ -261,7 +273,9 @@ def test_worker_manager_get_groups(worker_manager: WorkerManager, workers_with_g
     assert "default" in groups
 
 
-def test_worker_manager_get_workers_in_group(worker_manager: WorkerManager, workers_with_groups: list[WorkerInfo]):
+def test_worker_manager_get_workers_in_group(
+    worker_manager: WorkerManager, workers_with_groups: list[WorkerInfo]
+):
     """测试获取指定group内的工作器"""
     for worker in workers_with_groups:
         worker_manager.workers[worker.worker_id] = worker
@@ -314,7 +328,9 @@ def test_worker_manager_get_decode_workers_in_group(
     assert "combined-2" in [w.worker_id for w in decode_workers_b]
 
 
-def test_worker_manager_is_combined_group(worker_manager: WorkerManager, workers_with_groups: list[WorkerInfo]):
+def test_worker_manager_is_combined_group(
+    worker_manager: WorkerManager, workers_with_groups: list[WorkerInfo]
+):
     """测试判断组合型group"""
     for worker in workers_with_groups:
         worker_manager.workers[worker.worker_id] = worker
@@ -325,7 +341,9 @@ def test_worker_manager_is_combined_group(worker_manager: WorkerManager, workers
     assert worker_manager.is_combined_group("default") is False
 
 
-def test_worker_manager_get_group_model(worker_manager: WorkerManager, workers_with_groups: list[WorkerInfo]):
+def test_worker_manager_get_group_model(
+    worker_manager: WorkerManager, workers_with_groups: list[WorkerInfo]
+):
     """测试获取group的模型类型"""
     for worker in workers_with_groups:
         worker_manager.workers[worker.worker_id] = worker

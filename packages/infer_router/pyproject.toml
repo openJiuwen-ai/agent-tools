@@ -32,9 +32,14 @@ dependencies = [
     "pyyaml>=6.0",
     "transformers>=4.30.0",
     "tokenizers>=0.13.0",
+    "orjson>=3.9.0",
 ]
 
 [project.optional-dependencies]
+zmq = [
+    "pyzmq>=25.0",
+    "msgspec>=0.18.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
@@ -50,6 +55,7 @@ openjiuwentools_infer_router = "openjiuwentools.infer_router.api.server:app"
 
 [project.scripts]
 jiuwen-infer-router = "openjiuwentools.infer_router.api.server:main"
+jiuwen-infer-worker = "openjiuwentools.infer_router.vllm.cli:main"
 
 [project.urls]
 Homepage = "https://gitcode.com/openJiuwen/agent-tools"
@@ -67,11 +73,12 @@ packages.find = {where = ["src"]}
 root = "../.."
 
 [tool.ruff]
-line-length = 120
+line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

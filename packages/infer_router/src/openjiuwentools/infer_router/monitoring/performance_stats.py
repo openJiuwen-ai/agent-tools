@@ -7,13 +7,12 @@ from loguru import logger
 
 
 @dataclass
-class RequestStats:
-    """请求统计数据"""
+class RequestTimings:
+    """请求时间度量参数"""
 
     request_id: str
     start_time: float
     end_time: float
-    e2e_duration: float
     router_dispatch_duration: float
     prefill_duration: float
     decode_duration: float
@@ -25,12 +24,13 @@ class RequestStats:
 
 
 @dataclass
-class RecordRequestParams:
-    """记录请求参数"""
+class RequestStats:
+    """请求统计数据"""
 
     request_id: str
     start_time: float
     end_time: float
+    e2e_duration: float
     router_dispatch_duration: float
     prefill_duration: float
     decode_duration: float
@@ -90,24 +90,30 @@ class PerformanceStats:
         while self.requests and self.requests[0].end_time < cutoff:
             self.requests.popleft()
 
-    def record_request(self, params: RecordRequestParams):
-        """记录请求统计数据"""
-        e2e_duration = params.end_time - params.start_time
+    def record_request(self, timings: RequestTimings):
+        """记录请求统计数据
+
+        Args:
+            timings: 请求时间度量参数
+
+        """
+        e2e_duration = timings.end_time - timings.start_time
 
         stats = RequestStats(
-            request_id=params.request_id,
-            start_time=params.start_time,
-            end_time=params.end_time,
+            request_id=timings.request_id,
+            start_time=timings.start_time,
+            end_time=timings.end_time,
             e2e_duration=e2e_duration,
-            router_dispatch_duration=params.router_dispatch_duration,
-            prefill_duration=params.prefill_duration,
-            decode_duration=params.decode_duration,
-            response_return_duration=params.response_return_duration,
-            prompt_tokens=params.prompt_tokens,
-            completion_tokens=params.completion_tokens,
-            total_tokens=params.total_tokens,
-            osl=params.osl,
+            router_dispatch_duration=timings.router_dispatch_duration,
+            prefill_duration=timings.prefill_duration,
+            decode_duration=timings.decode_duration,
+            response_return_duration=timings.response_return_duration,
+            prompt_tokens=timings.prompt_tokens,
+            completion_tokens=timings.completion_tokens,
+            total_tokens=timings.total_tokens,
+            osl=timings.osl,
         )
+
         self.requests.append(stats)
         self._cleanup_old_requests()
 
@@ -204,7 +210,9 @@ class PerformanceStats:
         )
 
         prompt_tokens_list = [req.prompt_tokens for req in self.requests if req.prompt_tokens > 0]
-        completion_tokens_list = [req.completion_tokens for req in self.requests if req.completion_tokens > 0]
+        completion_tokens_list = [
+            req.completion_tokens for req in self.requests if req.completion_tokens > 0
+        ]
         total_tokens_list = [req.total_tokens for req in self.requests if req.total_tokens > 0]
 
         if prompt_tokens_list:
@@ -225,7 +233,9 @@ class PerformanceStats:
             completion_sum = sum(completion_tokens_list)
             completion_min = min(completion_tokens_list)
             completion_max = max(completion_tokens_list)
-            completion_percentiles = self._calculate_percentiles([float(x) for x in completion_tokens_list])
+            completion_percentiles = self._calculate_percentiles(
+                [float(x) for x in completion_tokens_list]
+            )
             logger.info(
                 f"[TOKEN STATS] Completion Tokens: count={len(completion_tokens_list)}, "
                 f"sum={completion_sum}, avg={completion_avg:.1f}, min={completion_min}, max={completion_max}, "

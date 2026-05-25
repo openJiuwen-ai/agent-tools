@@ -9,7 +9,7 @@ import httpx
 from loguru import logger
 
 from openjiuwentools.infer_router.discovery.base import WorkerDiscovery
-from openjiuwentools.infer_router.schemas.agent_hints import WorkerInfo
+from openjiuwentools.infer_router.schemas.agent_hints import WorkerInfo, WorkerType
 
 
 class EtcdDiscovery(WorkerDiscovery):
@@ -47,7 +47,7 @@ class EtcdDiscovery(WorkerDiscovery):
         self._watch_stop_event: threading.Event | None = None
         self._on_change_callback: Callable | None = None
 
-    async def get_client(self):
+    async def _get_client(self):
         """获取或创建HTTP客户端"""
         if self.client is None:
             try:
@@ -76,7 +76,7 @@ class EtcdDiscovery(WorkerDiscovery):
 
         """
         try:
-            client = await self.get_client()
+            client = await self._get_client()
 
             # 构建etcd key前缀的URL
             key_prefix = f"/v2/keys{self.etcd_prefix}"
@@ -99,13 +99,25 @@ class EtcdDiscovery(WorkerDiscovery):
                             if total_tokens <= 0:
                                 total_tokens = worker_data.get("available_memory", 0)
 
+                            worker_type_str = worker_data.get("worker_type", "combined").lower()
+                            worker_type = (
+                                WorkerType(worker_type_str)
+                                if worker_type_str in [t.value for t in WorkerType]
+                                else WorkerType.COMBINED
+                            )
+
                             worker_kwargs = {
                                 "worker_id": worker_data["worker_id"],
                                 "model": worker_data["model"],
                                 "url": worker_data["url"],
                                 "current_load": worker_data.get("current_load", 0),
                                 "cached_prefixes": worker_data.get("cached_prefixes", []),
+                                "engine_type": worker_data.get("engine_type", "vllm"),
+                                "api_key": worker_data.get("api_key"),
+                                "worker_type": worker_type,
+                                "group": worker_data.get("group", "default"),
                                 "kv_addr": worker_data.get("kv_addr", ""),
+                                "publisher_endpoint": worker_data.get("publisher_endpoint", ""),
                             }
                             if total_tokens > 0:
                                 worker_kwargs["total_tokens"] = total_tokens
@@ -141,7 +153,7 @@ class EtcdDiscovery(WorkerDiscovery):
     async def start(self):
         """启动发现服务"""
         try:
-            await self.get_client()
+            await self._get_client()
             logger.info(f"Etcd discovery started with prefix: {self.etcd_prefix}")
 
         except Exception as e:

@@ -16,7 +16,9 @@ class WorkerWorkload:
         self.pending_osl: int = 0  # 当前待服务的请求总 osl 数
         self.prompt_ratio: float = 1000.0  # prompt_tokens的吞吐速率（tokens/秒），默认1000
         self.completion_ratio: float = 100.0  # completion_tokens的吞吐速率（tokens/秒），默认100
-        self.throughput_records: list[tuple[float, int, int]] = []  # (timestamp, prompt_tokens, completion_tokens)
+        self.throughput_records: list[
+            tuple[float, int, int]
+        ] = []  # (timestamp, prompt_tokens, completion_tokens)
 
 
 class WorkloadManager:
@@ -32,8 +34,7 @@ class WorkloadManager:
 
     负载计算公式：
     - prefill 节点: current_load = pending_tokens / (4 * total_tokens) * 100
-    - decode 节点: current_load = (pending_tokens + pending_osl) /
-      (3 * total_tokens) * 100
+    - decode 节点: current_load = (pending_tokens + pending_osl) / (3 * total_tokens) * 100
     - combined 节点: (prefill_load + decode_load) / 2
     """
 
@@ -67,41 +68,47 @@ class WorkloadManager:
         if event.event_type == "prefill_start":
             pending_tokens = event.effective_token_count
             workload.pending_tokens += pending_tokens
-            logger.debug(f"[WORKLOAD] prefill_start event: {event.worker_id}, pending_tokens={workload.pending_tokens}")
+            logger.info(
+                f"[WORKLOAD] prefill_start: {event.worker_id}, "
+                f"+{pending_tokens} tokens, pending={workload.pending_tokens}"
+            )
         elif event.event_type == "prefill_end":
             pending_tokens = event.effective_token_count
             workload.pending_tokens = max(0, workload.pending_tokens - pending_tokens)
-            self._update_throughput_from_event(workload, prompt_tokens=pending_tokens, completion_tokens=1)
-            logger.debug(f"[WORKLOAD] prefill_end event: {event.worker_id}, pending_tokens={workload.pending_tokens}")
+            self._update_throughput_from_event(
+                workload, prompt_tokens=pending_tokens, completion_tokens=1
+            )
+            logger.info(
+                f"[WORKLOAD] prefill_end: {event.worker_id}, "
+                f"-{pending_tokens} tokens, pending={workload.pending_tokens}"
+            )
         elif event.event_type == "decode_start":
             pending_tokens = event.effective_token_count
             pending_osl = event.engine_specific.get("osl", 0)
             workload.pending_tokens += pending_tokens
             workload.pending_osl += pending_osl
-            logger.debug(
-                f"[WORKLOAD] decode_start event: {event.worker_id}, "
-                f"pending_tokens={workload.pending_tokens}, "
-                f"pending_osl={workload.pending_osl}"
+            logger.info(
+                f"[WORKLOAD] decode_start: {event.worker_id}, "
+                f"+{pending_tokens} tokens, +{pending_osl} osl, "
+                f"pending={workload.pending_tokens}, osl={workload.pending_osl}"
             )
         elif event.event_type == "decode_end":
-            # 移除 decode_start 时添加的 token 和 osl
             workload.pending_tokens = max(0, workload.pending_tokens - event.effective_token_count)
-            workload.pending_osl = max(0, workload.pending_osl - event.engine_specific.get("osl", 0))
-            # 从事件中获取 completion_tokens，默认为1
+            workload.pending_osl = max(
+                0, workload.pending_osl - event.engine_specific.get("osl", 0)
+            )
             completion_tokens = event.engine_specific.get("completion_tokens", 1)
             self._update_throughput_from_event(
                 workload,
                 prompt_tokens=event.effective_token_count,
                 completion_tokens=completion_tokens,
             )
-
-            logger.debug(
-                f"[WORKLOAD] decode_end event: {event.worker_id}, "
-                f"pending_tokens={workload.pending_tokens}, "
-                f"pending_osl={workload.pending_osl}"
+            logger.info(
+                f"[WORKLOAD] decode_end: {event.worker_id}, "
+                f"pending={workload.pending_tokens}, osl={workload.pending_osl}"
             )
         else:
-            logger.debug(f"[WORKLOAD] unknown event type: {event.event_type}")
+            logger.warning(f"[WORKLOAD] unknown event type: {event.event_type}")
 
     def process_cache_events(self, events: list[CacheEvent]) -> None:
         """批量处理缓存事件"""
@@ -141,9 +148,10 @@ class WorkloadManager:
         load = max(0, min(100, load))
 
         logger.info(
-            f"[WORKLOAD] calculated load for {worker.worker_id}: {load:.2f}% "
-            f"(type={worker_type}, pending_tokens={workload.pending_tokens}, "
-            f"pending_osl={workload.pending_osl}, total_tokens={total_tokens})"
+            "[WORKLOAD] calculated load for %s: %.2f%% "
+            "(type=%s, pending_tokens=%d, pending_osl=%d, total_tokens=%d)",
+            worker.worker_id, load, worker_type,
+            workload.pending_tokens, workload.pending_osl, total_tokens,
         )
 
         return load
@@ -172,9 +180,8 @@ class WorkloadManager:
         self.update_ratios(workload)
 
         logger.debug(
-            f"[WORKLOAD] Updated throughput for {worker_id}: "
-            f"prompt_tokens={prompt_tokens}, completion_tokens={completion_tokens}, "
-            f"prompt_ratio={workload.prompt_ratio:.2f}, "
+            f"[WORKLOAD] Updated throughput for {worker_id}: prompt_tokens={prompt_tokens}, "
+            f"completion_tokens={completion_tokens}, prompt_ratio={workload.prompt_ratio:.2f}, "
             f"completion_ratio={workload.completion_ratio:.2f}"
         )
 
@@ -196,9 +203,8 @@ class WorkloadManager:
         self.update_ratios(workload)
 
         logger.debug(
-            f"[WORKLOAD] Updated throughput from event: {workload.worker_id}, "
-            f"prompt_tokens={prompt_tokens}, completion_tokens={completion_tokens}, "
-            f"prompt_ratio={workload.prompt_ratio:.2f}, "
+            f"[WORKLOAD] Updated throughput from event: {workload.worker_id}, prompt_tokens={prompt_tokens}, "
+            f"completion_tokens={completion_tokens}, prompt_ratio={workload.prompt_ratio:.2f}, "
             f"completion_ratio={workload.completion_ratio:.2f}"
         )
 
@@ -213,7 +219,9 @@ class WorkloadManager:
 
         # 过滤掉5分钟之前的记录
         workload.throughput_records = [
-            (ts, pt, ct) for ts, pt, ct in workload.throughput_records if current_time - ts <= window_seconds
+            (ts, pt, ct)
+            for ts, pt, ct in workload.throughput_records
+            if current_time - ts <= window_seconds
         ]
 
         if not workload.throughput_records:

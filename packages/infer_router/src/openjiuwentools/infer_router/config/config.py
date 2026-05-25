@@ -147,36 +147,27 @@ class Settings(BaseSettings):
         return cls()
 
 
+_global_settings: Settings | None = None
+
+
 class SettingsProxy:
     """设置代理类，用于动态访问全局设置"""
 
-    _global_settings: Settings | None = None
-
     @classmethod
-    def _ensure_settings(cls):
-        """确保全局设置已初始化"""
-        if cls._global_settings is None:
-            cls._global_settings = create_settings()
-        return cls._global_settings
-
-    @classmethod
-    def set_settings(cls, new_settings: Settings) -> None:
-        """设置全局配置实例"""
-        cls._global_settings = new_settings
-
-    @classmethod
-    def get_settings(cls) -> Settings:
-        """获取全局配置实例"""
-        return cls._ensure_settings()
+    def _get_settings(cls) -> "Settings":
+        global _global_settings
+        if _global_settings is None:
+            _global_settings = create_settings()
+        return _global_settings
 
     def __getattr__(self, name):
-        return getattr(self._ensure_settings(), name)
+        return getattr(self._get_settings(), name)
 
     def __setattr__(self, name, value):
         if name == "_internal":
             super().__setattr__(name, value)
             return
-        setattr(self._ensure_settings(), name, value)
+        setattr(self._get_settings(), name, value)
 
 
 def create_settings(config_path: str | None = None) -> Settings:
@@ -205,7 +196,8 @@ def set_global_settings(new_settings: Settings) -> None:
         new_settings: 新的配置实例
 
     """
-    SettingsProxy.set_settings(new_settings)
+    global _global_settings
+    _global_settings = new_settings
 
 
 def get_global_settings() -> Settings:
@@ -215,7 +207,10 @@ def get_global_settings() -> Settings:
         配置实例
 
     """
-    return SettingsProxy.get_settings()
+    global _global_settings
+    if _global_settings is None:
+        _global_settings = create_settings()
+    return _global_settings
 
 
 settings = SettingsProxy()

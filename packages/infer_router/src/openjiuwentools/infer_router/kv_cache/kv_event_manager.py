@@ -76,9 +76,10 @@ class KVEventManager:
                         success_count += 1
                     except Exception as e:
                         logger.error(f"Error in event handler for {event.event_type}: {e}")
-                logger.debug(
-                    f"Processed event: {event.event_type}, block_hashes: {event.block_hashes}, "
-                    f"handlers: {success_count}/{len(self.event_handlers[event.event_type])}"
+                logger.info(
+                    f"[KV_EVENT] {event.event_type}: block_hashes={event.block_hashes}, "
+                    f"worker={event.engine_specific.get('worker_id', '?')}, "
+                    f"handlers={success_count}/{len(self.event_handlers[event.event_type])}"
                 )
                 return success_count > 0
             else:

@@ -256,9 +256,7 @@ async def test_full_request_flow(sample_worker_config_json: Path):
             },
         }
 
-        from openjiuwentools.infer_router.schemas.agent_hints import (
-            ChatCompletionRequest,
-        )
+        from openjiuwentools.infer_router.schemas.agent_hints import ChatCompletionRequest
 
         chat_request = ChatCompletionRequest(**chat_request_data)
         agent_hints = chat_request.jiuwenext.agent_hints if chat_request.jiuwenext else None
@@ -370,4 +368,6 @@ async def test_concurrent_requests(client):
 
                     # 大部分请求应该成功，允许少数失败（熔断器可能偶尔触发）
                     success_count = sum(1 for code in status_codes if code == 200)
-                    assert success_count >= 3, f"只有 {success_count}/5 请求成功，状态码: {status_codes}"
+                    assert success_count >= 3, (
+                        f"只有 {success_count}/5 请求成功，状态码: {status_codes}"
+                    )

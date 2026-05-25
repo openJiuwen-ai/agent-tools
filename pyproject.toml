@@ -80,7 +80,7 @@ quote-style = "double"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "A", "B", "C", "D", "N", "Q", "S"]
-ignore = ["D100", "D101", "D102", "D103", "D104", "D106", "D107", "D400", "D415", "S104", "S324"]
+ignore = ["E501", "D100", "D101", "D102", "D103", "D104", "D106", "D107", "D400", "D415", "S104", "S324"]
 fixable = ["A", "B", "C", "D", "E", "F", "I", "N", "Q", "S", "W"]
 
 [tool.ruff.lint.isort]

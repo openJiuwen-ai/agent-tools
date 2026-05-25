@@ -12,16 +12,6 @@ from openjiuwentools.infer_router.kv_cache.kv_event_manager import KVEventManage
 from openjiuwentools.infer_router.monitoring import metrics
 
 
-@dataclass
-class CacheUpdateParams:
-    """缓存更新参数"""
-
-    block_hashes: list[str] = field(default_factory=list)
-    token_count: int = 0
-    location: str = "gpu"
-    token_ids: list[int] = field(default_factory=list)
-
-
 class EngineType(Enum):
     """推理引擎类型"""
 
@@ -56,7 +46,7 @@ class RadixNode:
     is_pinned: bool = False
     location: CacheLocation = CacheLocation.NPU
     block_ids: list[str] = field(default_factory=list)
-    last_accessed: float = 0.0
+    last_accessed: float = field(default_factory=time.time)
 
     def get_token_ids(self) -> list[int]:
         """通过 parent 回溯获取完整 token 路径"""
@@ -77,6 +67,7 @@ class PodCacheState:
     model_id: str
     cached_blocks: dict[str, BlockInfo] = field(default_factory=dict)
     radix_tree_root: RadixNode | None = None
+    block_node_map: dict[str, RadixNode] = field(default_factory=dict)
     gpu_usage_percent: float = 0.0
     cpu_usage_percent: float = 0.0
     queue_depth: int = 0
@@ -126,11 +117,12 @@ class RadixTree:
         self.total_tokens = 0
         self._rw_lock = _ReadWriteLock()  # 使用读写锁
 
-    def insert(self, token_ids: list[int]) -> tuple[RadixNode, int]:
-        """插入 token 序列，返回最终节点和匹配长度（写操作）
+    def insert(self, token_ids: list[int], start_node: RadixNode | None = None) -> tuple[RadixNode, int]:
+        """插入 token 序列，返回最终节点和新插入 token 数量（写操作）
 
         Args:
             token_ids: token ID 列表
+            start_node: 起始节点（默认从 root 开始）
 
         Returns:
             (最终节点, 新插入的 token 数量)
@@ -138,7 +130,7 @@ class RadixTree:
         """
         self._rw_lock.acquire_write()
         try:
-            current = self.root
+            current = start_node if start_node is not None else self.root
             matched_len = 0
 
             for token_id in token_ids:
@@ -155,7 +147,7 @@ class RadixTree:
                     token_id = token_ids[i]
                     new_node = RadixNode(
                         node_id=f"node_{self.node_count}",
-                        token_id=token_id,  # 只存储单个 token
+                        token_id=token_id,
                         parent=current,
                     )
                     current.children[token_id] = new_node
@@ -415,8 +407,7 @@ class PrefixCacheScorer:
         token_str = ",".join(map(str, token_ids))
         return hashlib.sha256(token_str.encode()).hexdigest()
 
-    @staticmethod
-    def score_vllm(pod_state: PodCacheState, token_ids: list[int]) -> float:
+    def score_vllm(self, pod_state: PodCacheState, token_ids: list[int]) -> float:
         """VLLM 评分：基于块级前缀匹配（已弃用，保留兼容）
 
         Args:
@@ -427,10 +418,9 @@ class PrefixCacheScorer:
             评分（0-1）
 
         """
-        return PrefixCacheScorer.score(pod_state, token_ids)
+        return self.score(pod_state, token_ids)
 
-    @staticmethod
-    def score_sglang(pod_state: PodCacheState, token_ids: list[int]) -> float:
+    def score_sglang(self, pod_state: PodCacheState, token_ids: list[int]) -> float:
         """SGLang 评分：基于 Radix Tree 最长前缀匹配（已弃用，保留兼容）
 
         Args:
@@ -441,7 +431,7 @@ class PrefixCacheScorer:
             评分（0-1）
 
         """
-        return PrefixCacheScorer.score(pod_state, token_ids)
+        return self.score(pod_state, token_ids)
 
     @staticmethod
     def score(pod_state: PodCacheState, token_ids: list[int]) -> float:
@@ -472,6 +462,18 @@ class PrefixCacheScorer:
         ref_count_bonus = min(node.ref_count / 10, 0.5)
 
         return min(match_ratio * pin_bonus + ref_count_bonus, 1.0)
+
+
+@dataclass
+class CacheStateUpdate:
+    """缓存状态更新参数"""
+
+    worker_id: str
+    event_type: str
+    block_hashes: list[str] = field(default_factory=list)
+    token_count: int = 0
+    location: str = "gpu"
+    token_ids: list[int] = field(default_factory=list)
 
 
 class KVCacheManager:
@@ -520,12 +522,16 @@ class KVCacheManager:
             )
 
             self.event_generator = KVEventGenerator(enable_radix_tree=self.enable_radix_tree)
-            logger.info(f"KVEventGenerator initialized (inner_event mode, enable_radix_tree={self.enable_radix_tree})")
+            logger.info(
+                f"KVEventGenerator initialized (inner_event mode, enable_radix_tree={self.enable_radix_tree})"
+            )
         elif self.event_generator:
             # 如果提供了外部事件生成器，同步 enable_radix_tree 设置
             if hasattr(self.event_generator, "enable_radix_tree"):
                 self.event_generator.enable_radix_tree = self.enable_radix_tree
-            logger.info(f"Using provided KVEventGenerator (enable_radix_tree={self.enable_radix_tree})")
+            logger.info(
+                f"Using provided KVEventGenerator (enable_radix_tree={self.enable_radix_tree})"
+            )
         else:
             logger.info("Using worker event mode")
 
@@ -570,24 +576,49 @@ class KVCacheManager:
         logger.debug("Registered event handlers")
 
     def _handle_store_event(self, event):
-        """处理 store 事件
-
-        Args:
-            event: 缓存事件
-
-        """
-        # 如果 Radix Tree 功能未启用，跳过更新
+        """处理 store 事件，利用 parent_block_hash 还原 block 链关系插入 RadixTree"""
         if not self.enable_radix_tree:
             return
 
         worker_id = event.engine_specific.get("worker_id")
-        if worker_id:
-            pod_state = self.index.pod_states.get(worker_id)
-            if pod_state and pod_state.radix_tree_root and event.token_ids:
-                radix_tree = RadixTree()
-                radix_tree.root = pod_state.radix_tree_root
-                radix_tree.insert(event.token_ids)
-                pod_state.radix_tree_root = radix_tree.root
+        if not worker_id:
+            return
+        pod_state = self.index.pod_states.get(worker_id)
+        if not pod_state or not pod_state.radix_tree_root or not event.token_ids:
+            return
+
+        radix_tree = RadixTree()
+        radix_tree.root = pod_state.radix_tree_root
+
+        parent_hash = event.engine_specific.get("parent_block_hash")
+        start_node = pod_state.block_node_map.get(parent_hash) if parent_hash else None
+        if start_node is None:
+            start_node = radix_tree.root
+
+        _, new_count = radix_tree.insert(event.token_ids, start_node=start_node)
+        pod_state.radix_tree_root = radix_tree.root
+
+        block_hashes = event.block_hashes
+        block_size = event.engine_specific.get("block_size", 16)
+        if block_hashes and event.token_ids:
+            current = start_node
+            for i, tid in enumerate(event.token_ids):
+                current = current.children.get(tid, current)
+                block_idx = i // block_size
+                if (i + 1) % block_size == 0 and block_idx < len(block_hashes):
+                    pod_state.block_node_map[block_hashes[block_idx]] = current
+            remaining = len(event.token_ids) % block_size
+            if remaining != 0:
+                last_block_idx = len(event.token_ids) // block_size
+                if last_block_idx < len(block_hashes):
+                    pod_state.block_node_map[block_hashes[last_block_idx]] = current
+
+        if new_count > 0:
+            logger.debug(
+                f"[KV_CACHE] RadixTree updated for {worker_id}: "
+                f"+{new_count} tokens, {len(block_hashes)} blocks, "
+                f"parent={parent_hash is not None}"
+            )
 
     def _handle_removed_event(self, event):
         """处理 removed 事件
@@ -609,7 +640,7 @@ class KVCacheManager:
         if worker_id:
             # 清空工作器的缓存
             self._clear_worker_cache(worker_id)
-            logger.debug(f"Cleared cache for worker {worker_id}")
+            logger.info(f"[KV_CACHE] Cleared cache for worker {worker_id}")
 
     def _handle_evict_event(self, event):
         """处理 evict 事件
@@ -641,32 +672,13 @@ class KVCacheManager:
         """
         pass
 
-    def update_cache_state(
-        self,
-        worker_id: str,
-        event_type: str,
-        params: CacheUpdateParams = None,
-    ):
+    def update_cache_state(self, update: CacheStateUpdate):
         """更新缓存状态
 
         Args:
-            worker_id: 工作器 ID
-            event_type: 事件类型（store, evict, hit）
-            params: 缓存更新参数
+            update: 缓存状态更新参数
 
         """
-        if params is None:
-            params = CacheUpdateParams()
-
-        block_hashes = params.block_hashes
-        location = params.location
-        token_ids = params.token_ids
-
-        if block_hashes is None:
-            block_hashes = []
-        if token_ids is None:
-            token_ids = []
-
         location_map = {
             "npu": CacheLocation.NPU,
             "cpu": CacheLocation.CPU,
@@ -674,14 +686,14 @@ class KVCacheManager:
         }
 
         event = CacheEvent(
-            event_type=event_type,
-            block_hashes=block_hashes,
-            location=location_map.get(location, CacheLocation.NPU),
-            token_ids=token_ids,
-            engine_specific={"worker_id": worker_id},
+            event_type=update.event_type,
+            block_hashes=update.block_hashes,
+            location=location_map.get(update.location, CacheLocation.NPU),
+            token_ids=update.token_ids,
+            engine_specific={"worker_id": update.worker_id},
         )
 
-        self.index.update_pod_cache(worker_id, event)
+        self.index.update_pod_cache(update.worker_id, event)
 
     def get_best_worker_for_prefix(
         self,
@@ -867,7 +879,9 @@ class KVCacheManager:
         return len(pod_state.cached_blocks)
 
     @staticmethod
-    def compute_decay_factor(current_output_tokens: int, expected_output_tokens: int) -> float:
+    def compute_decay_factor(
+        current_output_tokens: int, expected_output_tokens: int
+    ) -> float:
         """计算输出块衰减因子
 
         Args:
@@ -959,7 +973,7 @@ class KVCacheManager:
                 self.index.prefix_index[block_hash].discard(worker_id)
 
         if expired_blocks:
-            logger.debug(f"Cleaned {len(expired_blocks)} expired blocks from worker {worker_id}")
+            logger.info(f"[KV_CACHE] Cleaned {len(expired_blocks)} expired blocks from worker {worker_id}")
 
         return len(expired_blocks)
 
@@ -1004,7 +1018,10 @@ class KVCacheManager:
                 trimmed += 1
 
         if trimmed > 0:
-            logger.debug(f"Trimmed {trimmed} blocks from worker {worker_id}, new size: {len(pod_state.cached_blocks)}")
+            logger.info(
+                f"[KV_CACHE] Trimmed {trimmed} blocks from worker {worker_id}, "
+                f"new size: {len(pod_state.cached_blocks)}"
+            )
 
         return trimmed
 
@@ -1054,7 +1071,9 @@ class KVCacheManager:
         # 1. 检查工作器是否存在
         # 2. 构建预热请求
         # 3. 发送预热请求到工作器
-        logger.debug(f"Warming cache for prefix {prefix_hash} on worker {worker_id} for model {model}")
+        logger.debug(
+            f"Warming cache for prefix {prefix_hash} on worker {worker_id} for model {model}"
+        )
 
     def process_event(self, event: CacheEvent) -> bool:
         """处理事件
@@ -1139,9 +1158,7 @@ class KVCacheManager:
         pod_state = self.index.pod_states.get(worker_id)
         if pod_state:
             block_info = BlockInfo(
-                block_hash=block_hash,
-                token_count=token_count,
-                location=CacheLocation.NPU,
+                block_hash=block_hash, token_count=token_count, location=CacheLocation.NPU
             )
             pod_state.cached_blocks[block_hash] = block_info
             # 更新前缀索引

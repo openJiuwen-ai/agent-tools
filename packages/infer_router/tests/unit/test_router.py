@@ -6,21 +6,8 @@ import pytest
 
 from openjiuwentools.infer_router.kv_cache.kv_cache import KVCacheManager
 from openjiuwentools.infer_router.routing.router import Router
-from openjiuwentools.infer_router.schemas.agent_hints import (
-    RouteHint,
-    WorkerInfo,
-    WorkerType,
-)
+from openjiuwentools.infer_router.schemas.agent_hints import RouteHint, WorkerInfo, WorkerType
 from openjiuwentools.infer_router.worker.worker_manager import WorkerManager
-
-
-def create_worker_getter(workers: list[WorkerInfo]):
-    """创建worker获取函数"""
-
-    def get_worker(worker_id: str) -> WorkerInfo | None:
-        return next((w for w in workers if w.worker_id == worker_id), None)
-
-    return get_worker
 
 
 @pytest.fixture
@@ -139,7 +126,9 @@ def workers_with_groups_for_router():
 
 
 @pytest.mark.asyncio
-async def test_router_route_to_workers_returns_pair(router, route_hint, workers_with_groups_for_router):
+async def test_router_route_to_workers_returns_pair(
+    router, route_hint, workers_with_groups_for_router
+):
     """测试路由到worker对"""
     router.kvcache_manager.find_matches.return_value = {
         "prefill-1": 0.5,
@@ -148,8 +137,12 @@ async def test_router_route_to_workers_returns_pair(router, route_hint, workers_
     router.worker_manager.get_healthy_groups.return_value = ["group-a"]
     router.worker_manager.is_combined_group.return_value = False
 
-    prefill_workers = [w for w in workers_with_groups_for_router if w.worker_type == WorkerType.PREFILL]
-    decode_workers = [w for w in workers_with_groups_for_router if w.worker_type == WorkerType.DECODE]
+    prefill_workers = [
+        w for w in workers_with_groups_for_router if w.worker_type == WorkerType.PREFILL
+    ]
+    decode_workers = [
+        w for w in workers_with_groups_for_router if w.worker_type == WorkerType.DECODE
+    ]
 
     router.worker_manager.get_prefill_workers_in_group.return_value = prefill_workers
     router.worker_manager.get_decode_workers_in_group.return_value = decode_workers
@@ -161,7 +154,9 @@ async def test_router_route_to_workers_returns_pair(router, route_hint, workers_
 
 
 @pytest.mark.asyncio
-async def test_router_route_to_workers_returns_combined(router, route_hint, workers_with_groups_for_router):
+async def test_router_route_to_workers_returns_combined(
+    router, route_hint, workers_with_groups_for_router
+):
     """测试路由到组合型worker"""
     router.kvcache_manager.find_matches.return_value = {
         "combined-1": 0.8,
@@ -170,7 +165,9 @@ async def test_router_route_to_workers_returns_combined(router, route_hint, work
     router.worker_manager.get_healthy_groups.return_value = ["group-b"]
     router.worker_manager.is_combined_group.return_value = True
 
-    combined_workers = [w for w in workers_with_groups_for_router if w.worker_type == WorkerType.COMBINED]
+    combined_workers = [
+        w for w in workers_with_groups_for_router if w.worker_type == WorkerType.COMBINED
+    ]
     router.worker_manager.get_workers_in_group.return_value = combined_workers
 
     prefill_id, decode_id = router.route_to_workers(route_hint)
@@ -179,7 +176,9 @@ async def test_router_route_to_workers_returns_combined(router, route_hint, work
 
 
 @pytest.mark.asyncio
-async def test_router_route_to_workers_records_metrics(router, route_hint, workers_with_groups_for_router):
+async def test_router_route_to_workers_records_metrics(
+    router, route_hint, workers_with_groups_for_router
+):
     """测试路由到worker对时记录指标"""
     from unittest.mock import patch
 
@@ -190,12 +189,22 @@ async def test_router_route_to_workers_records_metrics(router, route_hint, worke
     router.worker_manager.get_healthy_groups.return_value = ["group-a"]
     router.worker_manager.is_combined_group.return_value = False
 
-    prefill_workers = [w for w in workers_with_groups_for_router if w.worker_type == WorkerType.PREFILL]
-    decode_workers = [w for w in workers_with_groups_for_router if w.worker_type == WorkerType.DECODE]
+    prefill_workers = [
+        w for w in workers_with_groups_for_router if w.worker_type == WorkerType.PREFILL
+    ]
+    decode_workers = [
+        w for w in workers_with_groups_for_router if w.worker_type == WorkerType.DECODE
+    ]
 
     router.worker_manager.get_prefill_workers_in_group.return_value = prefill_workers
     router.worker_manager.get_decode_workers_in_group.return_value = decode_workers
-    router.worker_manager.get_worker.side_effect = create_worker_getter(workers_with_groups_for_router)
+
+    def _find_worker(worker_id):
+        return next(
+            (w for w in workers_with_groups_for_router if w.worker_id == worker_id), None
+        )
+
+    router.worker_manager.get_worker.side_effect = _find_worker
 
     with patch("openjiuwentools.infer_router.routing.router.metrics") as mock_metrics:
         prefill_id, decode_id = router.route_to_workers(route_hint)

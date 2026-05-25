@@ -7,21 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from openjiuwentools.infer_router.api.server import get_app
-from openjiuwentools.infer_router.schemas.agent_hints import RouteHint, WorkerInfo, WorkerType
-
-
-def create_worker_info(worker_id: str) -> WorkerInfo:
-    """创建WorkerInfo实例"""
-    return WorkerInfo(
-        worker_id=worker_id,
-        model="test-model",
-        url="http://localhost:8000/v1",
-        available_memory=1000000,
-        current_load=10,
-        cached_prefixes=[],
-        worker_type=WorkerType.COMBINED,
-        group="test-group",
-    )
+from openjiuwentools.infer_router.schemas.agent_hints import RouteHint
 
 
 @pytest.fixture
@@ -32,6 +18,7 @@ def client():
 
 def test_auth_disabled(client):
     """测试认证禁用的情况"""
+    from openjiuwentools.infer_router.schemas.agent_hints import WorkerInfo, WorkerType
 
     with patch("openjiuwentools.infer_router.api.server.settings") as mock_settings:
         mock_settings.enable_auth = False
@@ -46,21 +33,7 @@ def test_auth_disabled(client):
                 prefix_id=None,
                 total_requests=10,
                 iat=250,
-                token_ids=[
-                    60,
-                    124,
-                    117,
-                    115,
-                    101,
-                    114,
-                    124,
-                    62,
-                    72,
-                    101,
-                    108,
-                    108,
-                    111,
-                ],
+                token_ids=[60, 124, 117, 115, 101, 114, 124, 62, 72, 101, 108, 108, 111],
             )
             mock_preprocessor.process.return_value = mock_route_hint
 
@@ -74,7 +47,20 @@ def test_auth_disabled(client):
 
                 mock_manager.get_healthy_workers.return_value = ["worker-1"]
                 mock_manager.forward_request = mock_forward_request
-                mock_manager.get_worker.side_effect = create_worker_info
+
+                def _make_worker(worker_id):
+                    return WorkerInfo(
+                        worker_id=worker_id,
+                        model="test-model",
+                        url="http://localhost:8000/v1",
+                        available_memory=1000000,
+                        current_load=10,
+                        cached_prefixes=[],
+                        worker_type=WorkerType.COMBINED,
+                        group="test-group",
+                    )
+
+                mock_manager.get_worker.side_effect = _make_worker
 
                 with patch("openjiuwentools.infer_router.api.server.router") as mock_router:
                     mock_router.route.return_value = "worker-1"
@@ -151,6 +137,7 @@ def test_auth_enabled_invalid_key(client):
 
 def test_auth_enabled_valid_key(client):
     """测试认证启用且有效密钥的情况"""
+    from openjiuwentools.infer_router.schemas.agent_hints import WorkerInfo, WorkerType
 
     with patch("openjiuwentools.infer_router.api.server.settings") as mock_settings:
         mock_settings.enable_auth = True
@@ -166,21 +153,7 @@ def test_auth_enabled_valid_key(client):
                 prefix_id=None,
                 total_requests=10,
                 iat=250,
-                token_ids=[
-                    60,
-                    124,
-                    117,
-                    115,
-                    101,
-                    114,
-                    124,
-                    62,
-                    72,
-                    101,
-                    108,
-                    108,
-                    111,
-                ],
+                token_ids=[60, 124, 117, 115, 101, 114, 124, 62, 72, 101, 108, 108, 111],
             )
             mock_preprocessor.process.return_value = mock_route_hint
 
@@ -194,13 +167,28 @@ def test_auth_enabled_valid_key(client):
 
                 mock_manager.get_healthy_workers.return_value = ["worker-1"]
                 mock_manager.forward_request = mock_forward_request
-                mock_manager.get_worker.side_effect = create_worker_info
+
+                def _make_worker(worker_id):
+                    return WorkerInfo(
+                        worker_id=worker_id,
+                        model="test-model",
+                        url="http://localhost:8000/v1",
+                        available_memory=1000000,
+                        current_load=10,
+                        cached_prefixes=[],
+                        worker_type=WorkerType.COMBINED,
+                        group="test-group",
+                    )
+
+                mock_manager.get_worker.side_effect = _make_worker
 
                 with patch("openjiuwentools.infer_router.api.server.router") as mock_router:
                     mock_router.route.return_value = "worker-1"
                     mock_router.route_to_workers.return_value = ("worker-1", None)
 
-                    with patch("openjiuwentools.infer_router.api.server.circuit_breaker") as mock_cb:
+                    with patch(
+                        "openjiuwentools.infer_router.api.server.circuit_breaker"
+                    ) as mock_cb:
                         mock_cb.return_value.is_closed = True
 
                         response = client.post(

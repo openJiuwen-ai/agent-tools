@@ -59,17 +59,12 @@ class TestServerEvents:
 
         mock_event_manager.process_event = capture_event
 
-        with patch(
-            "openjiuwentools.infer_router.api.server.worker_manager",
-            mock_worker_manager,
-        ):
+        with patch("openjiuwentools.infer_router.api.server.worker_manager", mock_worker_manager):
             with patch(
-                "openjiuwentools.infer_router.api.server.event_generator",
-                mock_event_generator,
+                "openjiuwentools.infer_router.api.server.event_generator", mock_event_generator
             ):
                 with patch(
-                    "openjiuwentools.infer_router.api.server.event_manager",
-                    mock_event_manager,
+                    "openjiuwentools.infer_router.api.server.event_manager", mock_event_manager
                 ):
                     await _handle_combined_worker(
                         worker_id="test-worker",
@@ -84,7 +79,9 @@ class TestServerEvents:
                     assert "decode_start" in event_types, "应该生成 decode_start 事件"
 
                     # 验证 decode_start 事件内容
-                    decode_start_event = next(e for e in events_received if e.event_type == "decode_start")
+                    decode_start_event = next(
+                        e for e in events_received if e.event_type == "decode_start"
+                    )
                     assert decode_start_event.worker_id == "test-worker"
                     assert decode_start_event.token_count == 16  # route_hint.token_ids 的长度
                     assert decode_start_event.engine_specific.get("osl") == 100  # max_tokens
@@ -124,27 +121,23 @@ class TestServerEvents:
 
         mock_event_manager.process_event = capture_event
 
-        with patch(
-            "openjiuwentools.infer_router.api.server.worker_manager",
-            mock_worker_manager,
-        ):
+        with patch("openjiuwentools.infer_router.api.server.worker_manager", mock_worker_manager):
             with patch(
-                "openjiuwentools.infer_router.api.server.event_generator",
-                mock_event_generator,
+                "openjiuwentools.infer_router.api.server.event_generator", mock_event_generator
             ):
                 with patch(
-                    "openjiuwentools.infer_router.api.server.event_manager",
-                    mock_event_manager,
+                    "openjiuwentools.infer_router.api.server.event_manager", mock_event_manager
                 ):
-                    params = DisaggWorkerParams(
-                        prefill_id="prefill-worker",
-                        decode_id="decode-worker",
+                    await _handle_disagg_workers(
+                        DisaggWorkerParams(
+                            prefill_id="prefill-worker",
+                            decode_id="decode-worker",
+                            max_tokens=100,
+                            prefill_start_time=0.0,
+                        ),
                         chat_request=mock_chat_request,
                         route_hint=mock_route_hint,
-                        max_tokens=100,
-                        prefill_start_time=0.0,
                     )
-                    await _handle_disagg_workers(params)
 
                     # 验证事件生成（decode_end事件现在在响应返回后生成）
                     event_types = [e.event_type for e in events_received]
@@ -153,17 +146,23 @@ class TestServerEvents:
                     assert "decode_start" in event_types, "应该生成 decode_start 事件"
 
                     # 验证 prefill_start 事件
-                    prefill_start_event = next(e for e in events_received if e.event_type == "prefill_start")
+                    prefill_start_event = next(
+                        e for e in events_received if e.event_type == "prefill_start"
+                    )
                     assert prefill_start_event.worker_id == "prefill-worker"
                     assert prefill_start_event.token_count == 16
 
                     # 验证 prefill_end 事件
-                    prefill_end_event = next(e for e in events_received if e.event_type == "prefill_end")
+                    prefill_end_event = next(
+                        e for e in events_received if e.event_type == "prefill_end"
+                    )
                     assert prefill_end_event.worker_id == "prefill-worker"
                     assert prefill_end_event.token_count == 16
 
                     # 验证 decode_start 事件
-                    decode_start_event = next(e for e in events_received if e.event_type == "decode_start")
+                    decode_start_event = next(
+                        e for e in events_received if e.event_type == "decode_start"
+                    )
                     assert decode_start_event.worker_id == "decode-worker"
                     assert decode_start_event.token_count == 16  # route_hint.token_ids 的长度
                     assert decode_start_event.engine_specific.get("osl") == 100
@@ -200,28 +199,24 @@ class TestServerEvents:
 
         mock_event_manager.process_event = capture_event
 
-        with patch(
-            "openjiuwentools.infer_router.api.server.worker_manager",
-            mock_worker_manager,
-        ):
+        with patch("openjiuwentools.infer_router.api.server.worker_manager", mock_worker_manager):
             with patch(
-                "openjiuwentools.infer_router.api.server.event_generator",
-                mock_event_generator,
+                "openjiuwentools.infer_router.api.server.event_generator", mock_event_generator
             ):
                 with patch(
-                    "openjiuwentools.infer_router.api.server.event_manager",
-                    mock_event_manager,
+                    "openjiuwentools.infer_router.api.server.event_manager", mock_event_manager
                 ):
-                    params = DisaggWorkerParams(
-                        prefill_id="prefill-worker",
-                        decode_id="decode-worker",
-                        chat_request=mock_chat_request,
-                        route_hint=mock_route_hint,
-                        max_tokens=100,
-                        prefill_start_time=0.0,
-                    )
                     with pytest.raises(Exception, match="Connection error"):
-                        await _handle_disagg_workers(params)
+                        await _handle_disagg_workers(
+                            DisaggWorkerParams(
+                                prefill_id="prefill-worker",
+                                decode_id="decode-worker",
+                                max_tokens=100,
+                                prefill_start_time=0.0,
+                            ),
+                            chat_request=mock_chat_request,
+                            route_hint=mock_route_hint,
+                        )
 
                     # 即使失败，也应该生成 prefill_start 和 prefill_end 事件
                     event_types = [e.event_type for e in events_received]
@@ -273,28 +268,26 @@ class TestServerEvents:
 
         mock_event_manager.process_event = capture_event
 
-        with patch(
-            "openjiuwentools.infer_router.api.server.worker_manager",
-            mock_worker_manager,
-        ):
+        with patch("openjiuwentools.infer_router.api.server.worker_manager", mock_worker_manager):
             with patch(
-                "openjiuwentools.infer_router.api.server.event_generator",
-                mock_event_generator,
+                "openjiuwentools.infer_router.api.server.event_generator", mock_event_generator
             ):
                 with patch(
-                    "openjiuwentools.infer_router.api.server.event_manager",
-                    mock_event_manager,
+                    "openjiuwentools.infer_router.api.server.event_manager", mock_event_manager
                 ):
-                    params = DisaggWorkerParams(
-                        prefill_id="prefill-worker",
-                        decode_id="decode-worker",
+                    await _handle_disagg_workers(
+                        DisaggWorkerParams(
+                            prefill_id="prefill-worker",
+                            decode_id="decode-worker",
+                            max_tokens=100,
+                            prefill_start_time=0.0,
+                        ),
                         chat_request=chat_request,
                         route_hint=mock_route_hint,
-                        max_tokens=100,
-                        prefill_start_time=0.0,
                     )
-                    await _handle_disagg_workers(params)
 
                     # 验证 decode_start 事件使用 agent_hints 的 estimated_output_tokens
-                    decode_start_event = next(e for e in events_received if e.event_type == "decode_start")
+                    decode_start_event = next(
+                        e for e in events_received if e.event_type == "decode_start"
+                    )
                     assert decode_start_event.engine_specific.get("osl") == 50  # 来自 agent_hints

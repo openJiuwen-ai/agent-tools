@@ -17,7 +17,9 @@ class AgentHints(BaseModel):
     priority: int | None = Field(default=0, description="请求优先级，值越高越重要")
     estimated_output_tokens: int | None = Field(default=128, description="预期输出token数量")
     next_turn_prefill: bool | None = Field(default=False, description="是否启用下一轮预填充")
-    prefix_id: str | None = Field(default=None, description="前缀ID，用于标识同一对话或工作流的请求")
+    prefix_id: str | None = Field(
+        default=None, description="前缀ID，用于标识同一对话或工作流的请求"
+    )
     total_requests: int | None = Field(default=10, description="预期请求总数")
     iat: int | None = Field(default=250, description="预期请求间隔时间（毫秒）")
 
@@ -41,6 +43,24 @@ class ChatCompletionRequest(BaseModel):
     top_p: float | None = Field(default=1.0)
     n: int | None = Field(default=1)
     stream: bool | None = Field(default=False)
+    stream_options: dict[str, Any] | None = Field(default=None)
+
+
+class CompletionRequest(BaseModel):
+    """文本完成请求模型（/v1/completions）"""
+
+    model: str = Field(description="模型名称")
+    prompt: str | list[int] = Field(description="提示文本或token ID列表")
+    jiuwenext: JWExt | None = Field(default=None, description="Jiuwen扩展字段")
+    max_tokens: int | None = Field(default=128)
+    temperature: float | None = Field(default=1.0)
+    top_p: float | None = Field(default=1.0)
+    n: int | None = Field(default=1)
+    stream: bool | None = Field(default=False)
+    stream_options: dict[str, Any] | None = Field(default=None)
+    echo: bool | None = Field(default=False)
+    stop: str | list[str] | None = Field(default=None)
+    suffix: str | None = Field(default=None)
 
 
 class RouteHint(BaseModel):
@@ -72,6 +92,8 @@ class WorkerInfo(BaseModel):
     model: str
     total_tokens: int = Field(default=1000000, description="工作器可以承载的token个数")
     current_load: float = 0.0
+    queue_depth: int = 0
+    running_requests: int = 0
     cached_prefixes: list[str] = []
     engine_type: str = "vllm"
     url: str = ""
@@ -79,6 +101,7 @@ class WorkerInfo(BaseModel):
     worker_type: WorkerType = WorkerType.COMBINED
     group: str = "default"
     kv_addr: str = Field(default="", description="KV存储地址，用于P2P disagg connector")
+    publisher_endpoint: str = Field(default="", description="ZMQ PUB endpoint for KV cache events from worker")
 
     @property
     def available_memory(self) -> int:

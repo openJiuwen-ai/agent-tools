@@ -1,3 +1,5 @@
+import time
+
 from loguru import logger
 
 from openjiuwentools.infer_router.config.config import settings
@@ -22,7 +24,9 @@ class Router:
             "round_robin": RoundRobinAlgorithm(),
             "weighted": WorkloadWeightedAlgorithm(kvcache_manager, worker_manager),
         }
-        self.current_algorithm = self.algorithms.get(settings.load_balancing_algorithm, RoundRobinAlgorithm())
+        self.current_algorithm = self.algorithms.get(
+            settings.load_balancing_algorithm, RoundRobinAlgorithm()
+        )
 
     def set_algorithm(self, algorithm_name: str):
         """设置负载均衡算法"""
@@ -53,7 +57,9 @@ class Router:
         logger.info(f"Session affinity: routing to worker {affinity_worker}")
         return affinity_worker
 
-    def find_best_worker_pair(self, model: str, route_hint: RouteHint) -> tuple[str | None, str | None]:
+    def find_best_worker_pair(
+        self, model: str, route_hint: RouteHint
+    ) -> tuple[str | None, str | None]:
         """筛选出可用的非组合型group的workers，由路由算法选择最佳的prefill-decode节点对
 
         Returns:
@@ -93,12 +99,17 @@ class Router:
             return None, None
 
         try:
+            t0 = time.perf_counter()
             prefill_worker, decode_worker = self.current_algorithm.select_worker_pair(
                 workers=all_workers,
                 groups=filtered_groups,
                 route_hint=route_hint,
             )
-            logger.info(f"Selected best worker pair: {prefill_worker.worker_id} + {decode_worker.worker_id}")
+            algo_ms = (time.perf_counter() - t0) * 1000
+            logger.info(
+                f"Selected best worker pair: {prefill_worker.worker_id} + {decode_worker.worker_id} "
+                f"(algorithm={type(self.current_algorithm).__name__}, took={algo_ms:.2f}ms)"
+            )
             return prefill_worker.worker_id, decode_worker.worker_id
         except ValueError as e:
             logger.warning(f"No valid worker pair found: {e}")
@@ -125,8 +136,13 @@ class Router:
             return None
 
         try:
+            t0 = time.perf_counter()
             best_worker = self.current_algorithm.select_worker(combined_workers, route_hint)
-            logger.info(f"Selected best combined worker: {best_worker.worker_id}")
+            algo_ms = (time.perf_counter() - t0) * 1000
+            logger.info(
+                f"Selected best combined worker: {best_worker.worker_id} "
+                f"(algorithm={type(self.current_algorithm).__name__}, took={algo_ms:.2f}ms)"
+            )
             return best_worker.worker_id
         except ValueError as e:
             logger.warning(f"No valid combined worker found: {e}")
@@ -146,6 +162,7 @@ class Router:
             (combined_worker_id, None) - 如果是组合型
             (None, None) - 如果没有可用worker
         """
+        t_start = time.perf_counter()
         logger.info(f"[ROUTER: START] Routing request {route_hint.request_id} to worker pair")
 
         prefill_id, decode_id = self.find_best_worker_pair(route_hint.model, route_hint)
@@ -160,6 +177,8 @@ class Router:
             if decode_worker:
                 metrics.record_routed_request(decode_worker.worker_id, route_hint.model)
 
+            total_ms = (time.perf_counter() - t_start) * 1000
+            logger.info(f"[ROUTER: END] Request {route_hint.request_id} routed in {total_ms:.2f}ms")
             return prefill_id, decode_id
 
         combined_id = self.find_best_combined_worker(route_hint.model, route_hint)
@@ -171,7 +190,10 @@ class Router:
             if combined_worker:
                 metrics.record_routed_request(combined_worker.worker_id, route_hint.model)
 
+            total_ms = (time.perf_counter() - t_start) * 1000
+            logger.info(f"[ROUTER: END] Request {route_hint.request_id} routed in {total_ms:.2f}ms")
             return combined_id, None
 
-        logger.error(f"No available workers for model {route_hint.model}")
+        total_ms = (time.perf_counter() - t_start) * 1000
+        logger.error(f"No available workers for model {route_hint.model} (took {total_ms:.2f}ms)")
         return None, None

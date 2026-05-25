@@ -40,29 +40,34 @@ class Metrics:
         # KV缓存相关指标
         self.cache_hits_total = Counter("router_cache_hits_total", "Total number of cache hits")
 
-        self.cache_misses_total = Counter("router_cache_misses_total", "Total number of cache misses")
+        self.cache_misses_total = Counter(
+            "router_cache_misses_total", "Total number of cache misses"
+        )
 
         self.cache_blocks_total = Gauge("router_cache_blocks_total", "Total number of cache blocks")
 
-        self.cache_aging_blocks_total = Gauge("router_cache_aging_blocks_total", "Total number of aging cache blocks")
+        self.cache_aging_blocks_total = Gauge(
+            "router_cache_aging_blocks_total", "Total number of aging cache blocks"
+        )
 
-        self.cache_fresh_blocks_total = Gauge("router_cache_fresh_blocks_total", "Total number of fresh cache blocks")
+        self.cache_fresh_blocks_total = Gauge(
+            "router_cache_fresh_blocks_total", "Total number of fresh cache blocks"
+        )
 
         # 工作器相关指标
         self.workers_total = Gauge("router_workers_total", "Total number of workers")
 
-        self.healthy_workers_total = Gauge("router_healthy_workers_total", "Total number of healthy workers")
+        self.healthy_workers_total = Gauge(
+            "router_healthy_workers_total", "Total number of healthy workers"
+        )
 
         self.worker_response_time_seconds = Histogram(
-            "router_worker_response_time_seconds",
-            "Worker response time in seconds",
-            ["worker_id"],
+            "router_worker_response_time_seconds", "Worker response time in seconds", ["worker_id"]
         )
 
         # Agent Hints相关指标
         self.requests_with_agent_hints_total = Counter(
-            "router_requests_with_agent_hints_total",
-            "Total number of requests with agent hints",
+            "router_requests_with_agent_hints_total", "Total number of requests with agent hints"
         )
 
         self.priority_distribution = Histogram(
@@ -70,8 +75,7 @@ class Metrics:
         )
 
         self.estimated_output_tokens_distribution = Histogram(
-            "router_estimated_output_tokens_distribution",
-            "Distribution of estimated output tokens",
+            "router_estimated_output_tokens_distribution", "Distribution of estimated output tokens"
         )
 
         # 事件相关指标

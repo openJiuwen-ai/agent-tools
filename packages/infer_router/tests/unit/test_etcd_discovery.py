@@ -24,7 +24,7 @@ async def etcd_discovery():
             etcd_password=None,
         )
 
-        # 提前设置client，避免None，并保存引用
+        # 提前设置_client，避免None，并保存引用
         discovery.client = mock_client
 
         # 保存原始client引用，用于验证
@@ -43,11 +43,11 @@ async def test_etcd_discovery_discover(etcd_discovery):
             "nodes": [
                 {
                     "key": "/test/workers/worker1",
-                    "value": ('{"worker_id": "worker-1", "model": "test-model", "url": "http://localhost:8001/v1"}'),
+                    "value": '{"worker_id": "worker-1", "model": "test-model", "url": "http://localhost:8001/v1"}',
                 },
                 {
                     "key": "/test/workers/worker2",
-                    "value": ('{"worker_id": "worker-2", "model": "test-model", "url": "http://localhost:8002/v1"}'),
+                    "value": '{"worker_id": "worker-2", "model": "test-model", "url": "http://localhost:8002/v1"}',
                 },
             ]
         }
@@ -107,7 +107,9 @@ async def test_etcd_discovery_invalid_json(etcd_discovery):
     """测试etcd发现无效JSON"""
     # 模拟无效JSON
     mock_response = Mock()
-    mock_response.json.return_value = {"node": {"nodes": [{"key": "/test/workers/worker1", "value": "invalid json"}]}}
+    mock_response.json.return_value = {
+        "node": {"nodes": [{"key": "/test/workers/worker1", "value": "invalid json"}]}
+    }
     mock_response.raise_for_status = Mock()
 
     etcd_discovery.client.get = AsyncMock(return_value=mock_response)
