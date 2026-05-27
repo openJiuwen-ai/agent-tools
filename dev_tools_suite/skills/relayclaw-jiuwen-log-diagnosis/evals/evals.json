@@ -1,0 +1,41 @@
+{
+  "skill_name": "relayclaw-jiuwen-log-diagnosis",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "这里有一包 OfficeClaw 日志，前端在早上 10:05 显示“这次处理没有顺利完成”，帮我判断是 jiuwenclaw 还是上层 relayclaw 的问题，并给证据链。",
+      "expected_output": "先对齐 UTC 与本地时间；优先检查 api/desktop-launcher 与 full.log；提取 invocationId/request_id/session_id；给出明确边界结论；如果出现 Huawei MaaS session not found，应判断为上层 API/MaaS session 问题。"
+    },
+    {
+      "id": 2,
+      "prompt": "定时任务凌晨提示模型调用异常，jiuwenclaw full.log 有 LLM invoke 失败和 3 次重试，帮我定位。",
+      "expected_output": "判断请求已进入 jiuwenclaw，失败在 LLM/model 网关调用链路；区分主任务与 session_memory_update；总结 retry 证据和网络/模型服务修复策略。"
+    },
+    {
+      "id": 3,
+      "prompt": "我只有一个日志目录，不知道 session_id，里面有 full.log、api 日志、desktop-launcher.log 和 sessions/history.json，请帮我还原这次任务过程。",
+      "expected_output": "先用日志目录自动发现关键文件；从 API/jiuwen 日志提取 session_id/request_id/invocationId；确定目标 session_id 后再建议或运行 history/trace 工具；输出时间线和定界结论。"
+    },
+    {
+      "id": 4,
+      "prompt": "用户说 PPT 预览和 html 都是 OK 的，但打开 pptx 之后没有内容。日志是 office_claw_log_collector_4.2.bat 采集出来的包，帮我定位。",
+      "expected_output": "识别为 PPT 产物/转换效果类问题；先读 MANIFEST 和采集包结构；从 sessions/history.json 确认生成路径和工具调用；用 trace 查看模型生成 HTML/PPT 指令；如果 HTML OK 但 pptx 空白，重点怀疑 HTML 到 PPT 转换、资源路径、打包或旧产物复用，而不是只看 API 错误。"
+    },
+    {
+      "id": 5,
+      "prompt": "任务中断后继续执行，没有生成 ppt 就结束了，而且继续执行时重新识别需求花了 10 分钟，帮我分析。",
+      "expected_output": "识别为中断/继续/性能问题；覆盖原任务开始、中断、继续和结束时间窗口；用 API 日志看 invocation/request 是否取消或过期；用 history 比较继续前后会话历史是否丢失；用 trace Timing 判断耗时在 LLM 还是工具，检查是否因上下文丢失导致重新规划。"
+    },
+    {
+      "id": 6,
+      "prompt": "多智能体成语接龙时，后面的 Agent 看不到前面 Agent 的回复。应该怎么看日志？",
+      "expected_output": "识别为多 agent 上下文传递问题；先确定父子 session/subagent/fork 关系；用 history 验证前序回复是否写入；用 LLM trace 检查后续 Agent 的 messages 是否包含前序 Agent 输出；不要只按单一 session_id 分析。"
+    },
+    {
+      "id": 7,
+      "prompt": "我有一个 sessions/officeclaw_xxx/history.json，用户反馈工具调用前一直卡着。请分析 chat.tool_calls.delta 的时间间隔，判断慢在 LLM 返回工具调用参数，还是工具真实执行。",
+      "expected_output": "先确认对应 session_id/request_id；使用 scripts/analyze_history_tool_call_speed.py 解析 history.json；明确 chat.tool_calls.delta 是 LLM 流式返回工具调用参数，不是工具执行；分别报告 LLM delta 段、chat.tool_call 到 tool_update 的启动延迟、tool_update 到 tool_result 的工具执行耗时；提醒 history timestamp 只是观测时间，必要时用 LLM_IO_TRACE 或网关日志交叉验证。"
+    }
+  ]
+}
+

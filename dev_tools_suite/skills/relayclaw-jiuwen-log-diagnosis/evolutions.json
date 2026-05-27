@@ -1,0 +1,47 @@
+{
+  "skill_id": "relayclaw-jiuwen-log-diagnosis",
+  "version": "1.0.0",
+  "updated_at": "2026-05-12T09:11:13.482340+00:00",
+  "entries": [
+    {
+      "id": "ev_6909ec7f",
+      "source": "conversation_review",
+      "timestamp": "2026-05-12T09:09:21.013803+00:00",
+      "context": "[conversation_review] [Auto] No rule-based signals. Analyze conversation for implicit experiences.",
+      "change": {
+        "section": "Troubleshooting",
+        "action": "append",
+        "content": "## 非UTF-8编码日志文件的读取处理\n- 采集包中的 MANIFEST.txt 和 desktop-launcher.log 在中文 Windows 系统上常为 GBK/GB2312 编码，read_file 工具默认 UTF-8 会报解码错误（如 `0xc8 invalid continuation byte`）\n- 遇到 UTF-8 解码失败时，改用 bash 工具读取：PowerShell 用 `Get-Content -Encoding Default`，Linux/macOS 用 `iconv -f GBK -t UTF-8` 转换后再读取\n- 优先对 MANIFEST.txt 采用此策略，因为它是最先读取的文件且编码问题最常见",
+        "target": "body"
+      },
+      "applied": false,
+      "score": 0.5,
+      "usage_stats": {
+        "times_presented": 0,
+        "times_used": 0,
+        "times_positive": 0,
+        "times_negative": 0
+      }
+    },
+    {
+      "id": "ev_6d61d387",
+      "source": "conversation_review",
+      "timestamp": "2026-05-12T09:09:21.013803+00:00",
+      "context": "[conversation_review] [Auto] No rule-based signals. Analyze conversation for implicit experiences.",
+      "change": {
+        "section": "Instructions",
+        "action": "append",
+        "content": "## 大体积API日志的grep搜索策略\n- API日志常超过1MB，单独用宽泛关键词（如 `invocation`、`thread`）grep 会返回数十万字符的无效输出，应避免\n- 采用\"时间窗口+关键词\"组合搜索：先用精确时间范围（如 `08:2[8-9]`）限定行数，再叠加 invocationId/session_id 等具体ID过滤\n- 若单次 grep 输出超过 5000 字符，说明搜索条件过宽，应追加过滤条件缩小范围后再分析，而非直接阅读全量结果",
+        "target": "body"
+      },
+      "applied": false,
+      "score": 0.5,
+      "usage_stats": {
+        "times_presented": 0,
+        "times_used": 0,
+        "times_positive": 0,
+        "times_negative": 0
+      }
+    }
+  ]
+}

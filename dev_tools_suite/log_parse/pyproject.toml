@@ -1,0 +1,19 @@
+[project]
+name = "trace-log-parse"
+version = "0.1.0"
+description = "Parse jiuwenclaw [LLM_IO_TRACE] debug logs into a performance HTML report"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+trace-llm-report = "trace_log_parse.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv]
+dev-dependencies = []
