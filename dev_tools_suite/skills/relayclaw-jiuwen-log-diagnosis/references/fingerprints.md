@@ -97,6 +97,53 @@ invokeSingleCat crashed before fallback error emission
 - 通常说明请求已到 jiuwenclaw 或 agent service。
 - 需要转到 `full.log` 用 `requestId/sessionId` 查根因。
 
+### `jiuwen WebSocket connection closed unexpectedly`
+
+边界：RelayClaw 到 jiuwenclaw 的 transport / sidecar 生命周期。
+
+常见同伴日志：
+
+```text
+jiuwen WebSocket connection closed unexpectedly
+relayclaw sidecar stop invoked
+relayclaw sidecar exited
+runtime signature changed — restarting
+jiuwen frame for unknown/expired request
+Agent service emitted error message
+```
+
+含义：
+
+- RelayClaw 的 WebSocket close handler 会把该错误作为 `chat.error` 注入所有活动请求队列。
+- 它不是模型错误本身，通常需要继续查 sidecar 是被主动 stop、runtime signature 变化重启、进程退出，还是连接异常断开。
+- 如果同一时间 jiuwenclaw 已经发出 complete chunk，但上层 queue 已过期，则可能出现 late delivery / unknown request。
+
+分析要点：
+
+- 先用 `requestId` 对齐 `jiuwen request sent`、`Inbound raw payload`、上层 close/error。
+- 再用 `sidecarPid` 和时间窗口查 `relayclaw sidecar stop invoked`、`relayclaw sidecar exited`。
+- 如果有 `runtime signature changed — restarting`，必须保留 `signatureDiff` 判断触发重启的配置项。
+
+### `connection.ack` 缺失或超时
+
+边界：jiuwenclaw Agent WebSocket readiness / sidecar 启动。
+
+含义：
+
+- RelayClaw 只有收到 `connection.ack` 才认为 WebSocket server ready。
+- 只有 `tcp_ready` 不代表 app 协议可用；需要继续看 `app_ready` / `fully ready` / `connection.ack`。
+
+常见同伴日志：
+
+```text
+relayclaw sidecar spawned
+jiuwen sidecar tcp_ready
+jiuwen sidecar app_ready
+jiuwen sidecar fully ready
+[AgentWebSocketServer] 已发送 connection.ack
+relayclaw sidecar startup failed: readiness timeout
+```
+
 ### `[scheduler] dyn-...: tick completed`
 
 边界：调度器。
@@ -118,6 +165,53 @@ invokeSingleCat crashed before fallback error emission
 - 如果用户说“处理失败”，它通常不是模型根因。
 
 ## 2. jiuwenclaw 指纹
+
+### `[AgentWebSocketServer] Inbound raw payload`
+
+边界：jiuwenclaw Agent WebSocket 入口。
+
+含义：
+
+- 这条日志说明 jiuwenclaw 进程已经收到 WebSocket 原始 payload。
+- 它早于 E2A 协议解析、`AgentRequest` 转换、LLM 调用和工具执行。
+- payload 会经过脱敏：`params.query`、`params.system_prompt`、`params.supplementary_info` 可能被替换为 `******` 或首尾片段。
+
+关键字段：
+
+```text
+request_id
+channel_id / channel
+session_id
+req_method / method
+is_stream
+params
+metadata
+channel_context
+```
+
+推荐串联：
+
+```text
+API: jiuwen request sent requestId=...
+jiuwen: [AgentWebSocketServer] Inbound raw payload ... request_id=...
+jiuwen: Inbound raw payload json 解析成功: request_id=...
+jiuwen: Inbound raw payload E2A协议解析成功: request_id=...
+jiuwen: [E2A][in] request_id=... channel=... method=... is_stream=...
+jiuwen: [AgentWebSocketServer] 收到请求: request_id=... channel_id=... is_stream=...
+```
+
+判定：
+
+- 有 `jiuwen request sent` 且有 `Inbound raw payload`：请求已经跨过上层 WebSocket 进入 jiuwenclaw。
+- 有 `Inbound raw payload` 但无 `收到请求`：优先怀疑 JSON/E2A/legacy payload 解析或 req_method 分发前异常。
+- 有 `收到请求` 但无 `[LLM] >>> request` / `LLM_CALL_START`：问题可能在 AgentManager、上下文构造、SessionMemory、工具/权限前置处理，不应直接判为模型网关失败。
+- 有 `[LLM] >>> request` 或 `LLM_CALL_START` 后才开始判断 LLM 调用链路。
+
+反误判：
+
+- `params.query=******` 不是空 query，而是脱敏。
+- `E2A协议解析失败，按旧 payload 解析` 不是必然失败；只要后面有 `收到请求`，legacy 路径仍继续。
+- 只有 `Inbound raw payload` 不代表 jiuwenclaw 已开始模型调用。
 
 ### `LLM invoke 失败 [连接错误]`
 
@@ -154,8 +248,10 @@ retry notification sent successfully
 含义：
 
 - 已记录 LLM 输入。
-- 可以还原 messages、tools、system prompt、上下文。
-- 如果只有 request 没有 output，说明调用中断或日志缺失。
+- 可以还原 messages、tools、system prompt、上下文、model、stream、max_tokens、temperature、top_p 等。
+- trace 只在 jiuwenclaw logger 为 DEBUG 时写出。
+- 如果 body 很长，会出现同一 header 下的 `body_part=i/total`，必须拼完整再分析。
+- 如果只有 request 没有 output，只能说明输出 trace 缺失或调用中断；需要用 `[LLM] <<< response`、`Executing tool:`、后续 ReAct iteration 交叉验证，不能直接判定模型挂死。
 
 ### `[LLM_IO_TRACE] event=invoke_output`
 
@@ -164,8 +260,23 @@ retry notification sent successfully
 含义：
 
 - 已记录 LLM 输出。
-- 可以看 content、tool_calls、finish_reason、token。
+- 可以看 content、reasoning_content、tool_calls、finish_reason、usage_metadata。
 - 如果 output 是 tool_calls，需要继续找工具结果。
+
+### `[LLM] >>> request` / `[LLM] <<< response`
+
+边界：openjiuwen ReAct 执行流。
+
+含义：
+
+- `[LLM] >>> request` 说明 ReAct 侧已经形成 LLM 输入，字段有 `msg_count`、`tool_count`。
+- `[LLM] <<< response` 说明 ReAct 侧已经拿到模型返回；如果 full.log 中没有 `invoke_output`，这条日志可证明模型并非一定未返回。
+- 非敏感模式下会打印更多消息/工具调用摘要；敏感模式下只打印长度和数量。
+
+分析要点：
+
+- 用它们交叉验证 `[LLM_IO_TRACE]` 是否缺失或分片不完整。
+- 如果有 response 且随后 `Executing tool:`，问题边界通常转到工具执行或后续 ReAct 推进。
 
 ### `Executing tool: <name>`
 

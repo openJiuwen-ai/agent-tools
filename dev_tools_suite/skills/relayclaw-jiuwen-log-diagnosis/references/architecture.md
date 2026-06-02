@@ -1,6 +1,8 @@
-# RelayClaw / JiuWenClaw 架构与日志地图
+# RelayClaw / JiuWenClaw 架构边界
 
 这份参考用于在日志分析时快速建立系统边界。优先根据日志证据定界，不要先假设某一层有问题。
+
+关键日志逐条语义、字段和误判规则见 `references/key-log-map.md`；本文件只保留架构链路和边界判断。
 
 适用性：
 
@@ -18,13 +20,16 @@
 3. 上层 OfficeClaw/RelayClaw API 创建 `invocationId`。
 4. API 绑定或恢复 `cliSessionId` / `threadId` / `catId`。
 5. API 通过 relayclaw-agent 把请求发送到 jiuwenclaw，生成 `request_id`。
-6. jiuwenclaw AgentWebSocketServer 收到 E2A 请求。
-7. jiuwenclaw 创建/复用 AgentManager 和 JiuWenClawDeepAdapter。
-8. jiuwenclaw 构造 system prompt、上下文、工具列表。
-9. jiuwenclaw 调 LLM，进入 ReAct/tool loop。
-10. jiuwenclaw 通过 E2A chunk 返回内容或错误。
-11. API 更新 invocation 状态，并尝试 outbound delivery。
-12. 前端展示完成、失败或兜底错误文案。
+6. RelayClaw WebSocket 连接等待 jiuwenclaw `connection.ack`，收到后认为 Agent WebSocket ready。
+7. jiuwenclaw AgentWebSocketServer 收到原始 payload，记录 `Inbound raw payload`。
+8. jiuwenclaw 解析 E2AEnvelope，记录 `[E2A][in]`，再转换为内部 `AgentRequest`。
+9. jiuwenclaw 创建/复用 AgentManager 和 JiuWenClawDeepAdapter。
+10. jiuwenclaw 构造 system prompt、上下文、工具列表。
+11. jiuwenclaw 调 LLM，进入 ReAct/tool loop。
+12. jiuwenclaw 通过 E2A chunk 返回内容或错误。
+13. API 按 `request_id` 将 frame 投递到 request queue，转换成 OfficeClaw `AgentMessage`。
+14. API 更新 invocation 状态，并尝试 outbound delivery。
+15. 前端展示完成、失败或兜底错误文案。
 
 判断问题边界时，先问：
 
@@ -87,6 +92,17 @@ No bindings found for thread - skipping outbound delivery
 Invocation ... completed
 ```
 
+### 2.1 readiness / queue 边界
+
+RelayClaw 侧要区分四种“可用”：
+
+- `sidecar spawned`：进程已启动，不代表端口、应用或 Agent WebSocket 可用。
+- `tcp_ready` / `app_ready` / `fully ready`：runtime 启动逐步就绪，但仍要看具体请求是否发送成功。
+- `connection.ack`：jiuwenclaw Agent WebSocket 已应用层 ready，不代表某个业务请求已处理。
+- active request queue：API 按 `requestId` 等待 jiuwenclaw frame；超时、abort 或连接关闭后，后续 frame 可能变成 late / unknown request。
+
+因此，`jiuwenclaw 已完成但前端失败` 这类问题不能只看 jiuwenclaw final。还要查 RelayClaw 是否已清理 request queue、是否出现 hard timeout / `AbortError`、是否收到 unknown/expired request frame，以及 outbound / frontend 映射是否失败。
+
 ## 3. jiuwenclaw
 
 职责：
@@ -117,7 +133,7 @@ Invocation ... completed
 关键日志模式：
 
 ```text
-[AgentWebSocketServer] inbound raw payload
+[AgentWebSocketServer] Inbound raw payload
 [E2A][in] request_id=...
 [AgentWebSocketServer] 收到请求
 [TenantAgentPool] 创建新 AgentManager 实例
@@ -133,6 +149,37 @@ Executing tool:
 [E2A][wire][out] chunk request_id=...
 流式响应已发送
 ```
+
+### 3.1 E2A 后的请求分流
+
+`Inbound raw payload` / `[E2A][in]` 只证明请求进入 jiuwenclaw WebSocket / E2A 层，不保证进入 LLM。当前 AgentWebSocketServer 会先把请求转换为 `AgentRequest`，再按 `req_method` / `channel_id` / `event_type` 分流：
+
+- `chat.send` / `chat.resume` / `chat.answer` 等主对话请求：进入 stream / unary chat 路径，后续才可能出现 AgentManager、ReAct、LLM、tool 日志。
+- `session.*`、`history.*`、`command.*`、`browser.*`、`config.*`、`extensions.*`：属于管理或控制请求，通常不应当按模型调用失败分析。
+- `file_transfer.*`：属于文件传输链路，重点看 payload、路径、编码和 wire response。
+- 自定义 WebSocket handler：可能绕过标准 ReqMethod 路由，需看 handler 名称、返回 payload 和异常。
+
+所以看到 `[E2A][in]` 后，下一步必须确认 `收到请求`、`处理 chat 流式请求` / `处理 chat 非流式请求`，或对应的非 chat 分支日志，再决定是否继续追 LLM。
+
+### 3.2 Agent 执行层
+
+主 chat 路径大致是：
+
+```text
+AgentWebSocketServer
+  -> TenantAgentPool
+  -> AgentManager
+  -> JiuWenClawDeepAdapter / DeepAgent
+  -> openjiuwen ReActAgent
+  -> LLM / tool / SessionMemory / SpawnAgent
+```
+
+边界判断：
+
+- `TenantAgentPool` / `AgentManager` 负责 agent 实例、workspace、配置和会话复用；卡在这里通常还没进入 openjiuwen ReAct。
+- `JiuWenClawDeepAdapter` / `DeepAgent` 负责把 jiuwenclaw 请求接入 openjiuwen runtime，并组织 prompt、skills、tools、stream 输出。
+- `ReAct iteration`、`[LLM] >>> request`、`[LLM] <<< response`、`Executing tool:` 才是 openjiuwen ReAct / tool loop 的推进证据。
+- `[SessionMemory]` 多数是后台记忆更新；`[SpawnAgent]` / subagent 日志表示主 Agent 进入子代理链路，需区分主任务与子任务。
 
 ## 4. ID 关系
 
