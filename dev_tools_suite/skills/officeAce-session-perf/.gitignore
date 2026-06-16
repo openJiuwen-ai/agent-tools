@@ -1,0 +1,8 @@
+# Local config
+config/config.local.ps1
+
+# Python runtime artifacts (do not upload)
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+ocperf/tests/
