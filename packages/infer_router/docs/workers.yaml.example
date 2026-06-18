@@ -1,0 +1,27 @@
+workers:
+  - worker_id: worker-1
+    model: llama-3-70b
+    url: http://localhost:8001/v1
+    available_memory: 1000000
+    current_load: 10
+    cached_prefixes:
+      - prefix-1
+      - prefix-2
+
+  - worker_id: worker-2
+    model: llama-3-70b
+    url: http://localhost:8002/v1
+    available_memory: 800000
+    current_load: 5
+    cached_prefixes:
+      - prefix-2
+      - prefix-3
+
+  - worker_id: worker-3
+    model: llama-3-70b
+    url: http://localhost:8003/v1
+    available_memory: 1200000
+    current_load: 15
+    cached_prefixes:
+      - prefix-1
+      - prefix-3

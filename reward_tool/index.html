@@ -1,0 +1,1776 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>openJiuwen社区抽奖工具</title>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: linear-gradient(135deg, #ff6b6b 0%, #feca57 25%, #ff9ff3 50%, #f368e0 75%, #ff6b6b 100%);
+            background-size: 400% 400%;
+            animation: gradientShift 15s ease infinite;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            text-align: center;
+            color: #ff6b6b;
+            margin-bottom: 30px;
+            font-size: 48px;
+            text-shadow: 
+                3px 3px 6px rgba(0, 0, 0, 0.3),
+                -1px -1px 0 #fff,
+                1px -1px 0 #fff,
+                -1px 1px 0 #fff,
+                1px 1px 0 #fff;
+            animation: titleBounce 2s ease-in-out infinite;
+        }
+
+        @keyframes titleBounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .powered-by {
+            text-align: center;
+            color: #999;
+            font-size: 14px;
+            margin-top: -20px;
+            margin-bottom: 30px;
+            font-weight: normal;
+        }
+
+        .powered-by-footer {
+            text-align: center;
+            color: #999;
+            font-size: 14px;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(153, 153, 153, 0.2);
+            font-weight: normal;
+        }
+
+        .config-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .config-section h2 {
+            color: #555;
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .input-group label {
+            font-weight: bold;
+            color: #333;
+            min-width: 120px;
+        }
+
+        .input-group input {
+            padding: 10px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .input-group textarea {
+            padding: 10px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            width: 100%;
+            min-height: 80px;
+            resize: vertical;
+            transition: border-color 0.3s;
+        }
+
+        .input-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%);
+            color: white;
+            font-size: 20px;
+            padding: 15px 40px;
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: 0 8px 25px rgba(255, 107, 107, 0.6);
+        }
+
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(17, 153, 142, 0.4);
+        }
+
+        .result-section {
+            background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+            padding: 30px;
+            border-radius: 20px;
+            margin-top: 20px;
+            border: 3px solid rgba(200, 200, 200, 0.3);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .result-section h2 {
+            color: #ff6b6b;
+            margin-bottom: 20px;
+            font-size: 28px;
+            text-align: center;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .stat-item {
+            background: linear-gradient(135deg, #fff 0%, #fff5f5 100%);
+            padding: 20px 30px;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(255, 107, 107, 0.2);
+            border: 2px solid rgba(255, 215, 0, 0.3);
+            transition: all 0.3s;
+        }
+
+        .stat-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(255, 107, 107, 0.3);
+        }
+
+        .stat-item .label {
+            color: #ff6b6b;
+            font-size: 16px;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        .stat-item .value {
+            color: #feca57;
+            font-size: 32px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .winner-list {
+            display: grid;
+            grid-auto-flow: column;
+            gap: 25px;
+            margin-top: 15px;
+            justify-content: start;
+        }
+
+        .winner-item {
+            background: linear-gradient(135deg, #fff 0%, #fff9e6 100%);
+            width: 55px;
+            height: 55px;
+            padding: 0;
+            border-radius: 50%;
+            text-align: center;
+            box-shadow: 0 5px 20px rgba(255, 107, 107, 0.2);
+            border: 3px solid rgba(255, 215, 0, 0.4);
+            transition: all 0.3s;
+            position: relative;
+            overflow: visible;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        .winner-item-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .winner-order-label {
+            font-size: 11px;
+            color: #666;
+            font-weight: bold;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+
+        .winner-item::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 215, 0, 0.3) 0%, transparent 70%);
+            animation: shimmer 3s linear infinite;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .winner-item:hover::before {
+            opacity: 1;
+        }
+
+        @keyframes shimmer {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .winner-item.active {
+            background: linear-gradient(135deg, #ff6b6b 0%, #feca57 50%, #ff9ff3 100%);
+            color: white;
+            transform: scale(1.15) translateY(-5px);
+            box-shadow: 
+                0 15px 50px rgba(255, 107, 107, 0.6),
+                0 0 30px rgba(255, 215, 0, 0.8),
+                inset 0 0 20px rgba(255, 255, 255, 0.3);
+            border: 4px solid rgba(255, 215, 0, 1);
+            animation: winnerPulse 0.8s ease-in-out infinite, winnerGlow 2s ease-in-out infinite;
+            z-index: 10;
+        }
+
+        @keyframes winnerPulse {
+            0%, 100% { 
+                transform: scale(1.15) translateY(-5px);
+            }
+            50% { 
+                transform: scale(1.18) translateY(-8px);
+            }
+        }
+
+        @keyframes winnerGlow {
+            0%, 100% {
+                box-shadow: 
+                    0 15px 50px rgba(255, 107, 107, 0.6),
+                    0 0 30px rgba(255, 215, 0, 0.8),
+                    inset 0 0 20px rgba(255, 255, 255, 0.3);
+            }
+            50% {
+                box-shadow: 
+                    0 20px 60px rgba(255, 107, 107, 0.8),
+                    0 0 50px rgba(255, 215, 0, 1),
+                    inset 0 0 30px rgba(255, 255, 255, 0.5);
+            }
+        }
+
+        .winner-item .number {
+            font-size: 16px;
+            font-weight: bold;
+            color: #ff6b6b;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.15);
+            position: relative;
+            z-index: 2;
+        }
+
+        .winner-item.active .number {
+            color: white;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.4);
+        }
+
+        .draw-animation {
+            text-align: center;
+            padding: 60px;
+            background: linear-gradient(135deg, rgba(255, 107, 107, 0.1) 0%, rgba(255, 215, 0, 0.1) 50%, rgba(255, 159, 243, 0.1) 100%);
+            border-radius: 20px;
+            margin: 30px 0;
+            display: none;
+            border: 4px solid rgba(255, 215, 0, 0.5);
+            box-shadow: 0 15px 50px rgba(255, 107, 107, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .draw-animation::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 215, 0, 0.4) 0%, transparent 70%);
+            animation: rotateGlow 2s linear infinite;
+        }
+
+        @keyframes rotateGlow {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .draw-animation.show {
+            display: block;
+            animation: slideIn 0.5s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .draw-animation .number {
+            font-size: 100px;
+            font-weight: bold;
+            color: #ff6b6b;
+            animation: numberPulse 0.3s ease-in-out infinite;
+            text-shadow: 4px 4px 8px rgba(0, 0, 0, 0.2);
+            position: relative;
+            z-index: 1;
+        }
+
+        @keyframes numberPulse {
+            0%, 100% { 
+                transform: scale(1);
+                color: #ff6b6b;
+            }
+            50% { 
+                transform: scale(1.15);
+                color: #feca57;
+            }
+        }
+
+        .info-text {
+            color: #ff6b6b;
+            font-size: 18px;
+            margin-top: 15px;
+            font-weight: bold;
+            position: relative;
+            z-index: 1;
+            animation: textBlink 1s ease-in-out infinite;
+        }
+
+        @keyframes textBlink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .error {
+            color: #e74c3c;
+            background: #ffe6e6;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        .success {
+            color: #27ae60;
+            background: #e6ffe6;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        .prize-item {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            border: 2px solid #ddd;
+        }
+
+        .prize-header {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 10px;
+            background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%);
+            border-radius: 8px;
+            font-weight: bold;
+            color: white;
+        }
+
+        .prize-header-name {
+            flex: 1;
+            text-align: center;
+        }
+
+        .prize-header-count {
+            width: 80px;
+            text-align: center;
+        }
+
+        .prize-header-extra {
+            width: 80px;
+            text-align: center;
+        }
+
+        .prize-header-action {
+            width: 70px;
+            text-align: center;
+        }
+
+        .prize-name {
+            flex: 1;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .prize-count {
+            width: 80px;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .prize-extra {
+            width: 80px;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .btn-remove-prize {
+            padding: 8px 15px;
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .btn-add-prize {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .btn-add-prize:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.4);
+        }
+
+        .prize-group {
+            flex: 1;
+            min-width: 435px;
+            max-width: 555px;
+            padding: 25px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 245, 245, 0.9) 100%);
+            border-radius: 15px;
+            border: 2px dashed rgba(255, 107, 107, 0.3);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.1);
+        }
+
+        #winnerList {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .prize-group-title {
+            font-size: 22px;
+            font-weight: bold;
+            color: #ff6b6b;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .btn-sort {
+            padding: 8px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .btn-sort:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        #currentPrize {
+            padding: 10px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            min-width: 200px;
+            cursor: pointer;
+        }
+
+        #currentPrize:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .section-toggle {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            padding: 10px;
+            background: linear-gradient(135deg, #fff 0%, #f8f9fa 100%);
+            border-radius: 8px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+            user-select: none;
+        }
+
+        .section-toggle:hover {
+            background: linear-gradient(135deg, #fff5f5 0%, #ffe8e8 100%);
+            box-shadow: 0 3px 10px rgba(255, 107, 107, 0.2);
+        }
+
+        .section-toggle h2 {
+            margin: 0;
+            color: #ff6b6b;
+            font-size: 20px;
+        }
+
+        .toggle-icon {
+            font-size: 20px;
+            color: #ff6b6b;
+            transition: transform 0.3s;
+        }
+
+        .toggle-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .collapsible-panel {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                max-height: 0;
+            }
+            to {
+                opacity: 1;
+                max-height: 500px;
+            }
+        }
+
+        .confetti {
+            position: fixed;
+            width: 10px;
+            height: 10px;
+            background: #f00;
+            animation: confettiRise 3s ease-out forwards;
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        @keyframes confettiRise {
+            0% {
+                transform: translateY(0) rotate(0deg) scale(1);
+                opacity: 1;
+            }
+            50% {
+                opacity: 1;
+            }
+            100% {
+                transform: translateY(-100vh) rotate(1080deg) scale(0.5);
+                opacity: 0;
+            }
+        }
+
+        .color-config-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border: 2px solid #ddd;
+        }
+
+        .color-label {
+            padding: 8px 20px;
+            border-radius: 6px;
+            color: white;
+            font-weight: bold;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        .color-range-inputs {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .color-range-inputs input {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            width: 100px;
+        }
+
+        .color-config-item textarea {
+            flex: 1;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            min-height: 60px;
+            resize: vertical;
+        }
+
+        .winner-number-red {
+            background: radial-gradient(circle at 30% 30%, #ff9999 0%, #ff6b6b 50%, #e63939 100%) !important;
+            border-color: #ff6b6b !important;
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.5), inset 0 2px 10px rgba(255, 255, 255, 0.5) !important;
+        }
+
+        .winner-number-red .number {
+            color: #fff !important;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3) !important;
+        }
+
+        .winner-number-blue {
+            background: radial-gradient(circle at 30% 30%, #8de4fe 0%, #48dbfb 50%, #25c5d8 100%) !important;
+            border-color: #48dbfb !important;
+            box-shadow: 0 5px 15px rgba(72, 219, 251, 0.5), inset 0 2px 10px rgba(255, 255, 255, 0.5) !important;
+        }
+
+        .winner-number-blue .number {
+            color: #fff !important;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3) !important;
+        }
+
+        .winner-number-yellow {
+            background: radial-gradient(circle at 30% 30%, #f7b731 0%, #f39c12 50%, #d68910 100%) !important;
+            border-color: #f39c12 !important;
+            box-shadow: 0 5px 15px rgba(243, 156, 18, 0.5), inset 0 2px 10px rgba(255, 255, 255, 0.5) !important;
+        }
+
+        .winner-number-yellow .number {
+            color: #fff !important;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4) !important;
+        }
+
+        .winner-number-green {
+            background: radial-gradient(circle at 30% 30%, #4cd137 0%, #26de81 50%, #20bf6b 100%) !important;
+            border-color: #26de81 !important;
+            box-shadow: 0 5px 15px rgba(38, 222, 129, 0.5), inset 0 2px 10px rgba(255, 255, 255, 0.5) !important;
+        }
+
+        .winner-number-green .number {
+            color: #fff !important;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4) !important;
+        }
+
+        .winner-number-brown {
+            background: radial-gradient(circle at 30% 30%, #cb7c5a 0%, #a55e3c 50%, #8b4513 100%) !important;
+            border-color: #a55e3c !important;
+            box-shadow: 0 5px 15px rgba(165, 94, 60, 0.5), inset 0 2px 10px rgba(255, 255, 255, 0.5) !important;
+        }
+
+        .winner-number-brown .number {
+            color: #fff !important;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4) !important;
+        }
+
+        .winner-number-purple {
+            background: radial-gradient(circle at 30% 30%, #c56cf0 0%, #a55eea 50%, #8854d0 100%) !important;
+            border-color: #a55eea !important;
+            box-shadow: 0 5px 15px rgba(165, 94, 234, 0.5), inset 0 2px 10px rgba(255, 255, 255, 0.5) !important;
+        }
+
+        .winner-number-purple .number {
+            color: #fff !important;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4) !important;
+        }
+
+        .winner-number-pink {
+            background: radial-gradient(circle at 30% 30%, #ff9de2 0%, #fd79a8 50%, #f368a0 100%) !important;
+            border-color: #fd79a8 !important;
+            box-shadow: 0 5px 15px rgba(253, 121, 168, 0.5), inset 0 2px 10px rgba(255, 255, 255, 0.5) !important;
+        }
+
+        .winner-number-pink .number {
+            color: #fff !important;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4) !important;
+        }
+
+        .btn-add-color {
+            background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%);
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .btn-add-color:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+        }
+
+        .btn-remove-color {
+            padding: 8px 15px;
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .color-add-section {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 15px;
+        }
+
+        .color-select {
+            flex: 1;
+            padding: 10px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .color-select:focus {
+            outline: none;
+            border-color: #ff6b6b;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎉 openJiuwen社区抽奖工具</h1>
+        <div class="powered-by">Powered by openJiuwen</div>
+
+        <!-- 配置区域 -->
+        <div class="config-section">
+            <div class="section-toggle" onclick="togglePrizeSettings()">
+                <h2>🏆 奖项设置</h2>
+                <span class="toggle-icon" id="prizeToggleIcon">▼</span>
+            </div>
+            
+            <div id="prizeSettingsPanel" class="collapsible-panel" style="display: none;">
+                <div class="prize-header">
+                    <span class="prize-header-name">奖项名称</span>
+                    <span class="prize-header-count">名额</span>
+                    <span class="prize-header-extra">补抽名额</span>
+                    <span class="prize-header-action">操作</span>
+                </div>
+                <div id="prizeConfig">
+                    <div class="prize-item">
+                        <input type="text" class="prize-name" placeholder="最多20个汉字" value="openJiuwen定制-奖项1" maxlength="20">
+                        <input type="number" class="prize-count" placeholder="名额" value="1" min="0">
+                        <input type="number" class="prize-extra" placeholder="补抽" value="0" min="0">
+                        <button class="btn-remove-prize" onclick="removePrize(0)">删除</button>
+                    </div>
+                    <div class="prize-item">
+                        <input type="text" class="prize-name" placeholder="最多20个汉字" value="openJiuwen定制-奖项2" maxlength="20">
+                        <input type="number" class="prize-count" placeholder="名额" value="2" min="0">
+                        <input type="number" class="prize-extra" placeholder="补抽" value="0" min="0">
+                        <button class="btn-remove-prize" onclick="removePrize(1)">删除</button>
+                    </div>
+                    <div class="prize-item">
+                        <input type="text" class="prize-name" placeholder="最多20个汉字" value="openJiuwen定制-奖项3" maxlength="20">
+                        <input type="number" class="prize-count" placeholder="名额" value="3" min="0">
+                        <input type="number" class="prize-extra" placeholder="补抽" value="0" min="0">
+                        <button class="btn-remove-prize" onclick="removePrize(2)">删除</button>
+                    </div>
+                </div>
+                
+                <button class="btn btn-add-prize" onclick="addPrize()">+ 添加奖项</button>
+            </div>
+            
+            <h2>基础配置</h2>
+            
+            <div class="input-group">
+                <label>活动名称：</label>
+                <input type="text" id="activityName" placeholder="请输入活动名称" value="openJiuwen走进高校-XX" style="flex: 1; padding: 8px 12px; border: 2px solid #ddd; border-radius: 6px; font-size: 14px;">
+            </div>
+            
+            <div class="section-toggle" onclick="toggleColorSettings()">
+                <h3>🎨 颜色号码配置</h3>
+                <span class="toggle-icon" id="colorToggleIcon">▼</span>
+            </div>
+            
+            <div id="colorSettingsPanel" class="collapsible-panel" style="display: none;">
+                <div id="colorConfig">
+                    <div class="color-config-item" data-color="red">
+                        <div class="color-label" style="background: #ff6b6b;">红色</div>
+                        <div class="color-range-inputs">
+                            <input type="number" class="color-min" placeholder="最小号码" value="1" min="1">
+                            <span>至</span>
+                            <input type="number" class="color-max" placeholder="最大号码" value="50" min="1">
+                        </div>
+                        <textarea class="color-exclude" placeholder="剔除号码(逗号分隔)&#10;例: 1, 5, 10 或 1-20&#10;表示剔除指定号码或范围"></textarea>
+                        <button class="btn-remove-color" onclick="removeColor('red')" style="display: none;">删除</button>
+                    </div>
+                </div>
+                
+                <div class="color-add-section">
+                    <select id="colorSelect" class="color-select">
+                        <option value="">选择要添加的颜色</option>
+                        <option value="blue" style="color: #48dbfb; font-weight: bold;">蓝色 ●</option>
+                        <option value="yellow" style="color: #feca57; font-weight: bold;">黄色 ●</option>
+                        <option value="green" style="color: #26de81; font-weight: bold;">绿色 ●</option>
+                        <option value="brown" style="color: #a55e3c; font-weight: bold;">棕色 ●</option>
+                        <option value="purple" style="color: #a55eea; font-weight: bold;">紫色 ●</option>
+                        <option value="pink" style="color: #fd79a8; font-weight: bold;">粉色 ●</option>
+                    </select>
+                    <button class="btn btn-add-color" onclick="addSelectedColor()">添加</button>
+                </div>
+            </div>
+            
+            <div class="input-group">
+                <label>当前奖项：</label>
+                <select id="currentPrize" onchange="updateDrawCount()"></select>
+            </div>
+
+            <div class="input-group">
+                <button class="btn btn-primary" id="drawBtn" onclick="startDraw()">开始抽奖</button>
+                <button class="btn btn-success" onclick="resetAll()">重置所有</button>
+                <button class="btn btn-primary" onclick="captureSnapshot()" style="background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);">定格瞬间</button>
+            </div>
+
+            <div id="message"></div>
+        </div>
+
+        <!-- 抽奖动画 -->
+        <div class="draw-animation" id="drawAnimation">
+            <div class="number" id="animationNumber">?</div>
+            <p class="info-text">正在抽取中...</p>
+        </div>
+
+        <!-- 结果展示 -->
+        <div class="result-section">
+            <h2>中奖结果</h2>
+            
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="label">总中奖人数</div>
+                    <div class="value" id="totalWinners">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="label">实际中奖人数</div>
+                    <div class="value" id="activeWinners">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="label">剩余可抽号码</div>
+                    <div class="value" id="remainingNumbers">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="label">总抽奖池</div>
+                    <div class="value" id="totalPool">0</div>
+                </div>
+            </div>
+
+            <div class="winner-list" id="winnerList"></div>
+        </div>
+        
+        <div class="powered-by-footer">Powered by openJiuwen</div>
+    </div>
+
+    <script>
+        let winners = [];
+        let excludedNumbers = new Set();
+        let originalWinnersOrder = [];
+        let sortedPrizes = new Set();
+        let highlightAllStates = new Map();
+        let isDrawingInProgress = false;
+        let drawingAbortController = null;
+
+        function init() {
+            updatePrizeSelect();
+            updateStats();
+        }
+
+        function togglePrizeSettings() {
+            const panel = document.getElementById('prizeSettingsPanel');
+            const icon = document.getElementById('prizeToggleIcon');
+            
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                icon.classList.remove('collapsed');
+            } else {
+                panel.style.display = 'none';
+                icon.classList.add('collapsed');
+            }
+        }
+
+        function toggleColorSettings() {
+            const panel = document.getElementById('colorSettingsPanel');
+            const icon = document.getElementById('colorToggleIcon');
+            
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                icon.classList.remove('collapsed');
+            } else {
+                panel.style.display = 'none';
+                icon.classList.add('collapsed');
+            }
+        }
+
+        function getColorRanges() {
+            const colorItems = document.querySelectorAll('#colorConfig .color-config-item');
+            const colors = [];
+            const colorLabels = { 
+                red: '红色', 
+                blue: '蓝色', 
+                yellow: '黄色',
+                green: '绿色',
+                brown: '棕色',
+                purple: '紫色',
+                pink: '粉色'
+            };
+            const colorBgs = { 
+                red: '#ff6b6b', 
+                blue: '#48dbfb', 
+                yellow: '#feca57',
+                green: '#26de81',
+                brown: '#a55e3c',
+                purple: '#a55eea',
+                pink: '#fd79a8'
+            };
+            
+            colorItems.forEach((item, index) => {
+                const colorName = item.dataset.color;
+                colors.push({
+                    name: colorName,
+                    label: colorLabels[colorName] || `颜色${index + 1}`,
+                    bg: colorBgs[colorName] || '#ff6b6b',
+                    min: parseInt(item.querySelector('.color-min').value) || 1,
+                    max: parseInt(item.querySelector('.color-max').value) || 50,
+                    exclude: parseExcludeNumbersByElement(item.querySelector('.color-exclude'))
+                });
+            });
+            return colors;
+        }
+
+        function parseExcludeNumbersByElement(element) {
+            const input = element.value;
+            const numbers = new Set();
+            
+            const parts = input.split(',').map(s => s.trim()).filter(s => s);
+            
+            parts.forEach(part => {
+                if (part.includes('-')) {
+                    const rangeParts = part.split('-').map(s => parseInt(s.trim()));
+                    if (rangeParts.length === 2 && !isNaN(rangeParts[0]) && !isNaN(rangeParts[1])) {
+                        const start = Math.min(rangeParts[0], rangeParts[1]);
+                        const end = Math.max(rangeParts[0], rangeParts[1]);
+                        for (let i = start; i <= end; i++) {
+                            numbers.add(i);
+                        }
+                    }
+                } else {
+                    const num = parseInt(part);
+                    if (!isNaN(num)) {
+                        numbers.add(num);
+                    }
+                }
+            });
+            
+            return numbers;
+        }
+
+        function addSelectedColor() {
+            const colorSelect = document.getElementById('colorSelect');
+            const selectedColor = colorSelect.value;
+            
+            if (!selectedColor) {
+                showMessage('请选择要添加的颜色！', 'error');
+                return;
+            }
+            
+            const colorConfig = document.getElementById('colorConfig');
+            const colorCount = colorConfig.children.length;
+            
+            if (colorCount >= 7) {
+                showMessage('最多支持7种颜色！', 'error');
+                return;
+            }
+            
+            const existingColors = Array.from(colorConfig.children).map(item => item.dataset.color);
+            
+            if (existingColors.includes(selectedColor)) {
+                showMessage('该颜色已存在！', 'error');
+                return;
+            }
+            
+            const colors = [
+                { name: 'red', label: '红色', bg: '#ff6b6b' },
+                { name: 'blue', label: '蓝色', bg: '#48dbfb' },
+                { name: 'yellow', label: '黄色', bg: '#feca57' },
+                { name: 'green', label: '绿色', bg: '#26de81' },
+                { name: 'brown', label: '棕色', bg: '#a55e3c' },
+                { name: 'purple', label: '紫色', bg: '#a55eea' },
+                { name: 'pink', label: '粉色', bg: '#fd79a8' }
+            ];
+            
+            const newColor = colors.find(c => c.name === selectedColor);
+            
+            const newColorItem = document.createElement('div');
+            newColorItem.className = 'color-config-item';
+            newColorItem.dataset.color = newColor.name;
+            newColorItem.innerHTML = `
+                <div class="color-label" style="background: ${newColor.bg};">${newColor.label}</div>
+                <div class="color-range-inputs">
+                    <input type="number" class="color-min" placeholder="最小号码" value="1" min="1">
+                    <span>至</span>
+                    <input type="number" class="color-max" placeholder="最大号码" value="50" min="1">
+                </div>
+                <textarea class="color-exclude" placeholder="剔除号码(逗号分隔)&#10;例: 1, 5, 10 或 1-20&#10;表示剔除指定号码或范围"></textarea>
+                <button class="btn-remove-color" onclick="removeColor('${newColor.name}')">删除</button>
+            `;
+            colorConfig.appendChild(newColorItem);
+            
+            colorSelect.value = '';
+            updateColorSelect();
+            updateColorRemoveButtons();
+            updateStats();
+        }
+
+        function updateColorSelect() {
+            const colorSelect = document.getElementById('colorSelect');
+            const colorConfig = document.getElementById('colorConfig');
+            const existingColors = Array.from(colorConfig.children).map(item => item.dataset.color);
+            
+            const allColors = [
+                { name: 'red', label: '红色', bg: '#ff6b6b' },
+                { name: 'blue', label: '蓝色', bg: '#48dbfb' },
+                { name: 'yellow', label: '黄色', bg: '#feca57' },
+                { name: 'green', label: '绿色', bg: '#26de81' },
+                { name: 'brown', label: '棕色', bg: '#a55e3c' },
+                { name: 'purple', label: '紫色', bg: '#a55eea' },
+                { name: 'pink', label: '粉色', bg: '#fd79a8' }
+            ];
+            
+            const availableColors = allColors.filter(c => !existingColors.includes(c.name));
+            
+            colorSelect.innerHTML = '<option value="">选择要添加的颜色</option>';
+            availableColors.forEach(color => {
+                const option = document.createElement('option');
+                option.value = color.name;
+                option.textContent = color.label + ' ●';
+                option.style.color = color.bg;
+                option.style.fontWeight = 'bold';
+                colorSelect.appendChild(option);
+            });
+        }
+
+        function removeColor(colorName) {
+            const colorConfig = document.getElementById('colorConfig');
+            if (colorConfig.children.length <= 1) {
+                showMessage('至少保留一种颜色！', 'error');
+                return;
+            }
+            
+            const colorItem = colorConfig.querySelector(`[data-color="${colorName}"]`);
+            if (colorItem) {
+                colorItem.remove();
+            }
+            
+            updateColorSelect();
+            updateColorRemoveButtons();
+            updateStats();
+        }
+
+        function updateColorRemoveButtons() {
+            const colorConfig = document.getElementById('colorConfig');
+            const colorCount = colorConfig.children.length;
+            
+            colorConfig.querySelectorAll('.btn-remove-color').forEach(btn => {
+                btn.style.display = colorCount > 1 ? 'block' : 'none';
+            });
+        }
+
+        function getNumberColor(number) {
+            const colors = getColorRanges();
+            for (const color of colors) {
+                if (number >= color.min && number <= color.max && !color.exclude.has(number)) {
+                    return color.name;
+                }
+            }
+            return 'red';
+        }
+
+        function getValidRange() {
+            const colors = getColorRanges();
+            let min = Infinity;
+            let max = -Infinity;
+            
+            colors.forEach(color => {
+                min = Math.min(min, color.min);
+                max = Math.max(max, color.max);
+            });
+            
+            return { min: Math.max(1, min), max: Math.max(min, max) };
+        }
+
+        function parseExcludeNumbers() {
+            return new Set();
+        }
+
+        function getAvailableNumbers() {
+            const colors = getColorRanges();
+            const wonNumbersSet = new Set(winners.map(w => `${w.number}-${w.color}`));
+            
+            const available = [];
+            colors.forEach(color => {
+                for (let i = color.min; i <= color.max; i++) {
+                    const key = `${i}-${color.name}`;
+                    if (!color.exclude.has(i) && !wonNumbersSet.has(key)) {
+                        available.push({ number: i, color: color.name });
+                    }
+                }
+            });
+            return available;
+        }
+
+        function shuffleArray(array) {
+            const arr = [...array];
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        }
+
+        function getPrizes() {
+            const prizeItems = document.querySelectorAll('#prizeConfig .prize-item');
+            const prizes = [];
+            prizeItems.forEach((item, index) => {
+                const name = item.querySelector('.prize-name').value || `奖项${index + 1}`;
+                const count = parseInt(item.querySelector('.prize-count').value) || 0;
+                const extra = parseInt(item.querySelector('.prize-extra').value) || 0;
+                prizes.push({ name, count, extra, index });
+            });
+            return prizes;
+        }
+
+        function updatePrizeSelect() {
+            const prizes = getPrizes();
+            const select = document.getElementById('currentPrize');
+            select.innerHTML = '';
+            
+            prizes.forEach((prize, index) => {
+                const wonCount = winners.filter(w => w.prizeIndex === index).length;
+                const totalCount = prize.count + prize.extra;
+                const remaining = totalCount - wonCount;
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = `${prize.name} (剩余${remaining}/${totalCount}个)`;
+                option.disabled = remaining <= 0;
+                select.appendChild(option);
+            });
+        }
+
+        function updateDrawCount() {
+            updateStats();
+        }
+
+        function addPrize() {
+            const prizeConfig = document.getElementById('prizeConfig');
+            const prizeCount = prizeConfig.children.length;
+            const newPrize = document.createElement('div');
+            newPrize.className = 'prize-item';
+            newPrize.innerHTML = `
+                <input type="text" class="prize-name" placeholder="最多20个汉字" value="openJiuwen定制-${prizeCount + 1}" maxlength="20">
+                <input type="number" class="prize-count" placeholder="名额" value="1" min="0">
+                <input type="number" class="prize-extra" placeholder="补抽" value="0" min="0">
+                <button class="btn-remove-prize" onclick="removePrize(${prizeCount})">删除</button>
+            `;
+            prizeConfig.appendChild(newPrize);
+            updatePrizeSelect();
+            updateRemoveButtons();
+        }
+
+        function removePrize(index) {
+            const prizeConfig = document.getElementById('prizeConfig');
+            if (prizeConfig.children.length <= 1) {
+                showMessage('至少保留一个奖项！', 'error');
+                return;
+            }
+            
+            const wonInPrize = winners.filter(w => w.prizeIndex === index);
+            if (wonInPrize.length > 0) {
+                if (!confirm(`该奖项已有${wonInPrize.length}个中奖者，删除后这些中奖记录也会被清除，确定要删除吗？`)) {
+                    return;
+                }
+                winners = winners.filter(w => w.prizeIndex !== index);
+                winners.forEach(w => {
+                    if (w.prizeIndex > index) {
+                        w.prizeIndex--;
+                    }
+                });
+            }
+            
+            prizeConfig.children[index].remove();
+            updatePrizeSelect();
+            updateRemoveButtons();
+            renderWinnerList();
+            updateStats();
+        }
+
+        function updateRemoveButtons() {
+            const prizeItems = document.querySelectorAll('#prizeConfig .prize-item');
+            prizeItems.forEach((item, index) => {
+                const btn = item.querySelector('.btn-remove-prize');
+                btn.onclick = () => removePrize(index);
+            });
+        }
+
+        function showMessage(text, type = 'info') {
+            const messageDiv = document.getElementById('message');
+            messageDiv.className = type;
+            messageDiv.textContent = text;
+            setTimeout(() => {
+                messageDiv.textContent = '';
+                messageDiv.className = '';
+            }, 3000);
+        }
+
+        async function startDraw() {
+            if (isDrawingInProgress) {
+                showMessage('抽奖正在进行中！', 'error');
+                return;
+            }
+            
+            isDrawingInProgress = true;
+            drawingAbortController = { shouldAbort: false };
+            disableColorConfig(true);
+            
+            const prizes = getPrizes();
+            const prizeIndex = parseInt(document.getElementById('currentPrize').value);
+            const prize = prizes[prizeIndex];
+            
+            if (!prize) {
+                showMessage('请先设置奖项！', 'error');
+                isDrawingInProgress = false;
+                disableColorConfig(false);
+                return;
+            }
+            
+            const wonCount = winners.filter(w => w.prizeIndex === prizeIndex).length;
+            const totalCount = prize.count + prize.extra;
+            const remaining = totalCount - wonCount;
+            
+            if (remaining <= 0) {
+                showMessage(`${prize.name}已抽完！`, 'error');
+                isDrawingInProgress = false;
+                disableColorConfig(false);
+                return;
+            }
+
+            const available = getAvailableNumbers();
+
+            if (available.length === 0) {
+                showMessage('没有可抽奖的号码！', 'error');
+                isDrawingInProgress = false;
+                disableColorConfig(false);
+                return;
+            }
+
+            if (remaining > available.length) {
+                showMessage(`可抽号码不足！需要${remaining}个，剩余${available.length}个`, 'error');
+                isDrawingInProgress = false;
+                disableColorConfig(false);
+                return;
+            }
+
+            const drawBtn = document.getElementById('drawBtn');
+            drawBtn.disabled = true;
+
+            const animation = document.getElementById('drawAnimation');
+            const animationNumber = document.getElementById('animationNumber');
+            animation.classList.add('show');
+            let shuffledAvailable = shuffleArray(available);
+            for (let j = 0; j < 2 * shuffledAvailable.length; j++) {
+                shuffledAvailable = shuffleArray(shuffledAvailable);
+            }
+
+            const maxTotalTime = 120000;
+            const rollingTime = 450;
+            const displayTime = 1000;
+            const timePerWinner = rollingTime + displayTime;
+            
+            const maxWinnersByTime = Math.floor(maxTotalTime / timePerWinner);
+            const actualWinners = Math.min(remaining, maxWinnersByTime);
+            let completedWinners = 0;
+
+            for (let i = 0; i < actualWinners; i++) {
+                if (drawingAbortController.shouldAbort) {
+                    break;
+                }
+                
+                for (let j = 0; j < 15; j++) {
+                    if (drawingAbortController.shouldAbort) break;
+                    const randomItem = shuffledAvailable[Math.floor(Math.random() * shuffledAvailable.length)];
+                    animationNumber.textContent = randomItem.number;
+                    await sleep(20);
+                }
+                
+                if (drawingAbortController.shouldAbort) break;
+                
+                const winIndex = Math.floor(Math.random() * shuffledAvailable.length);
+                const winnerItem = shuffledAvailable.splice(winIndex, 1)[0];
+                animationNumber.textContent = winnerItem.number;
+                const newWinner = { 
+                    number: winnerItem.number, 
+                    active: false, 
+                    prizeName: prize.name,
+                    prizeIndex: prizeIndex,
+                    color: winnerItem.color
+                };
+                
+                winners.push(newWinner);
+                originalWinnersOrder.push(JSON.parse(JSON.stringify(newWinner)));
+                completedWinners++;
+                
+                renderWinnerList();
+                updateStats();
+                
+                createConfetti();
+                await sleep(1000);
+            }
+
+            animation.classList.remove('show');
+            drawBtn.disabled = false;
+            
+            isDrawingInProgress = false;
+            drawingAbortController = null;
+            disableColorConfig(false);
+            
+            updatePrizeSelect();
+            
+            if (completedWinners > 0) {
+                showMessage(`恭喜抽取 ${prize.name} 共 ${completedWinners} 个！`, 'success');
+            } else {
+                showMessage('抽奖已中止', 'info');
+            }
+        }
+
+        function disableColorConfig(disabled) {
+            const colorConfig = document.getElementById('colorConfig');
+            const addColorBtn = document.querySelector('.btn-add-color');
+            const colorSelect = document.getElementById('colorSelect');
+            
+            if (colorConfig) {
+                const inputs = colorConfig.querySelectorAll('input, textarea');
+                inputs.forEach(input => input.disabled = disabled);
+            }
+            
+            if (addColorBtn) {
+                addColorBtn.disabled = disabled;
+            }
+            
+            if (colorSelect) {
+                colorSelect.disabled = disabled;
+            }
+        }
+
+        function createConfetti() {
+            const colors = ['#ff6b6b', '#feca57', '#ff9ff3', '#f368e0', '#48dbfb', '#1dd1a1', '#ff9f43', '#ee5a24'];
+            const confettiCount = 60;
+            
+            for (let i = 0; i < confettiCount; i++) {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti';
+                
+                const startX = 30 + Math.random() * 40;
+                confetti.style.left = startX + 'vw';
+                confetti.style.bottom = '10vh';
+                confetti.style.top = 'auto';
+                
+                confetti.style.background = colors[Math.floor(Math.random() * colors.length)];
+                const size = Math.random() * 12 + 6;
+                confetti.style.width = size + 'px';
+                confetti.style.height = size + 'px';
+                
+                const angle = -30 + Math.random() * 60;
+                const distance = 60 + Math.random() * 40;
+                confetti.style.setProperty('--x-distance', (angle * 2) + 'vw');
+                confetti.style.setProperty('--y-distance', distance + 'vh');
+                
+                const duration = 2 + Math.random() * 1.5;
+                confetti.style.animationDelay = Math.random() * 0.3 + 's';
+                confetti.style.animationDuration = duration + 's';
+                
+                document.body.appendChild(confetti);
+                
+                setTimeout(() => {
+                    confetti.remove();
+                }, (duration + 0.5) * 1000);
+            }
+        }
+
+        function renderWinnerList() {
+            const listDiv = document.getElementById('winnerList');
+            listDiv.innerHTML = '';
+
+            const prizes = getPrizes();
+            
+            prizes.forEach((prize, prizeIndex) => {
+                const prizeWinners = winners.filter(w => w.prizeIndex === prizeIndex);
+                
+                if (prizeWinners.length > 0) {
+                    const group = document.createElement('div');
+                    group.className = 'prize-group';
+                    
+                    const activeCount = prizeWinners.filter(w => w.active).length;
+                    const totalCount = prize.count + prize.extra;
+                    
+                    const titleContainer = document.createElement('div');
+                    titleContainer.style.display = 'flex';
+                    titleContainer.style.justifyContent = 'space-between';
+                    titleContainer.style.alignItems = 'center';
+                    titleContainer.style.marginBottom = '15px';
+                    titleContainer.style.paddingBottom = '10px';
+                    titleContainer.style.borderBottom = '2px dashed rgba(255, 215, 0, 0.3)';
+                    
+                    const title = document.createElement('div');
+                    title.className = 'prize-group-title';
+                    title.style.marginBottom = '0';
+                    title.style.paddingBottom = '0';
+                    title.style.borderBottom = 'none';
+                    title.textContent = `${prize.name} (${prizeWinners.length}/${totalCount}) | 已点亮: ${activeCount}`;
+                    titleContainer.appendChild(title);
+                    
+                    const sortBtn = document.createElement('button');
+                    sortBtn.className = 'btn-sort';
+                    sortBtn.textContent = sortedPrizes.has(prizeIndex) ? '复位' : '分类';
+                    sortBtn.onclick = () => toggleSortOrReset(prizeIndex);
+                    titleContainer.appendChild(sortBtn);
+                    
+                    const highlightAllBtn = document.createElement('button');
+                    highlightAllBtn.className = 'btn-sort';
+                    highlightAllBtn.textContent = highlightAllStates.get(prizeIndex) ? '全熄灭' : '全点亮';
+                    highlightAllBtn.style.marginLeft = '10px';
+                    highlightAllBtn.onclick = () => toggleHighlightAll(prizeIndex);
+                    titleContainer.appendChild(highlightAllBtn);
+                    
+                    group.appendChild(titleContainer);
+                    
+                    const winnerGrid = document.createElement('div');
+                    winnerGrid.className = 'winner-list';
+                    
+                    const totalWinners = prizeWinners.length;
+                    const maxColumns = 6;
+                    const maxRowsPerColumn = 10;
+                    
+                    let rowsCount;
+                    if (totalWinners <= maxColumns) {
+                        rowsCount = 1;
+                    } else if (totalWinners <= maxColumns * maxRowsPerColumn) {
+                        const columnsNeeded = Math.ceil(totalWinners / maxRowsPerColumn);
+                        rowsCount = Math.ceil(totalWinners / Math.min(columnsNeeded, maxColumns));
+                    } else {
+                        rowsCount = maxRowsPerColumn;
+                    }
+                    
+                    winnerGrid.style.gridTemplateRows = `repeat(${rowsCount}, auto)`;
+                    
+                    prizeWinners.forEach((winner, localIndex) => {
+                        const globalIndex = winners.indexOf(winner);
+                        
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'winner-item-wrapper';
+                        
+                        const orderLabel = document.createElement('div');
+                        orderLabel.className = 'winner-order-label';
+                        orderLabel.textContent = `第 ${localIndex + 1} 个`;
+                        wrapper.appendChild(orderLabel);
+                        
+                        const item = document.createElement('div');
+                        const colorClass = winner.color ? `winner-number-${winner.color}` : '';
+                        item.className = `winner-item ${winner.active ? 'active' : ''} ${colorClass}`;
+                        item.onclick = () => toggleWinner(globalIndex);
+                        
+                        const numberDiv = document.createElement('div');
+                        numberDiv.className = 'number';
+                        numberDiv.textContent = winner.number;
+                        item.appendChild(numberDiv);
+                        
+                        wrapper.appendChild(item);
+                        winnerGrid.appendChild(wrapper);
+                    });
+                    
+                    group.appendChild(winnerGrid);
+                    listDiv.appendChild(group);
+                }
+            });
+        }
+
+        function toggleWinner(index) {
+            winners[index].active = !winners[index].active;
+            renderWinnerList();
+            updateStats();
+        }
+
+        function sortWinnersByColor(prizeIndex) {
+            const colors = getColorRanges();
+            const colorOrder = colors.map(c => c.name);
+            
+            const prizeWinners = winners.filter(w => w.prizeIndex === prizeIndex);
+            
+            prizeWinners.sort((a, b) => {
+                const colorIndexA = colorOrder.indexOf(a.color);
+                const colorIndexB = colorOrder.indexOf(b.color);
+                
+                if (colorIndexA !== colorIndexB) {
+                    return colorIndexA - colorIndexB;
+                }
+                
+                return a.number - b.number;
+            });
+            
+            let prizeWinnerIndex = 0;
+            for (let i = 0; i < winners.length; i++) {
+                if (winners[i].prizeIndex === prizeIndex) {
+                    winners[i] = prizeWinners[prizeWinnerIndex];
+                    prizeWinnerIndex++;
+                }
+            }
+            
+            sortedPrizes.add(prizeIndex);
+            renderWinnerList();
+            showMessage('已按颜色和号码排序！', 'success');
+        }
+
+        function resetWinnersOrder(prizeIndex) {
+            const prizeOriginalOrder = originalWinnersOrder.filter(w => w.prizeIndex === prizeIndex);
+            
+            let originalIndex = 0;
+            for (let i = 0; i < winners.length; i++) {
+                if (winners[i].prizeIndex === prizeIndex) {
+                    winners[i] = JSON.parse(JSON.stringify(prizeOriginalOrder[originalIndex]));
+                    originalIndex++;
+                }
+            }
+            
+            sortedPrizes.delete(prizeIndex);
+            renderWinnerList();
+            showMessage('已恢复初始顺序！', 'success');
+        }
+
+        function toggleSortOrReset(prizeIndex) {
+            if (sortedPrizes.has(prizeIndex)) {
+                resetWinnersOrder(prizeIndex);
+            } else {
+                sortWinnersByColor(prizeIndex);
+            }
+        }
+
+        function toggleHighlightAll(prizeIndex) {
+            const isHighlighted = highlightAllStates.get(prizeIndex);
+            
+            if (isHighlighted) {
+                winners.forEach(w => {
+                    if (w.prizeIndex === prizeIndex) {
+                        w.active = false;
+                    }
+                });
+                highlightAllStates.delete(prizeIndex);
+                showMessage('已全部熄灭！', 'success');
+            } else {
+                winners.forEach(w => {
+                    if (w.prizeIndex === prizeIndex) {
+                        w.active = true;
+                    }
+                });
+                highlightAllStates.set(prizeIndex, true);
+                showMessage('已全部点亮！', 'success');
+            }
+            
+            renderWinnerList();
+            updateStats();
+        }
+
+        function updateStats() {
+            const { min, max } = getValidRange();
+            const exclude = parseExcludeNumbers();
+            const available = getAvailableNumbers();
+            
+            const colors = getColorRanges();
+            let totalPoolCount = 0;
+            colors.forEach(color => {
+                for (let i = color.min; i <= color.max; i++) {
+                    if (!color.exclude.has(i)) {
+                        totalPoolCount++;
+                    }
+                }
+            });
+
+            document.getElementById('totalWinners').textContent = winners.length;
+            document.getElementById('activeWinners').textContent = winners.filter(w => w.active).length;
+            document.getElementById('remainingNumbers').textContent = available.length;
+            document.getElementById('totalPool').textContent = totalPoolCount;
+        }
+
+        function resetAll() {
+            if (isDrawingInProgress && drawingAbortController) {
+                drawingAbortController.shouldAbort = true;
+            }
+            
+            if (winners.length > 0 && !confirm('确定要重置所有中奖记录吗？')) {
+                if (drawingAbortController) {
+                    drawingAbortController.shouldAbort = false;
+                }
+                return;
+            }
+            
+            winners = [];
+            originalWinnersOrder = [];
+            sortedPrizes.clear();
+            highlightAllStates.clear();
+            
+            const animation = document.getElementById('drawAnimation');
+            animation.classList.remove('show');
+            
+            const drawBtn = document.getElementById('drawBtn');
+            drawBtn.disabled = false;
+            
+            isDrawingInProgress = false;
+            drawingAbortController = null;
+            disableColorConfig(false);
+            
+            renderWinnerList();
+            updatePrizeSelect();
+            updateStats();
+            showMessage('已重置所有数据', 'success');
+        }
+
+        async function captureSnapshot() {
+            const activityName = document.getElementById('activityName').value || 'openJiuwen走进高校-XX';
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const filename = `${activityName}_${timestamp}.jpg`;
+            
+            const resultSection = document.querySelector('.result-section');
+            
+            try {
+                const canvas = await html2canvas(resultSection, {
+                    backgroundColor: '#f5f5f5',
+                    scale: 2,
+                    useCORS: true
+                });
+                
+                const link = document.createElement('a');
+                link.download = filename;
+                link.href = canvas.toDataURL('image/jpeg', 0.95);
+                link.click();
+                
+                showMessage(`截图已保存: ${filename}`, 'success');
+            } catch (error) {
+                showMessage('截图失败，请重试', 'error');
+                console.error('截图错误:', error);
+            }
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        document.getElementById('prizeConfig').addEventListener('input', () => {
+            updatePrizeSelect();
+            updateStats();
+        });
+
+        document.getElementById('colorConfig').addEventListener('input', () => {
+            updateStats();
+        });
+
+        init();
+    </script>
+</body>
+</html>

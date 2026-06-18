@@ -1,0 +1,49 @@
+exclude: |
+  (?x)^(
+    Agent\ Innovation\ Challenge/
+  )$
+
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
+default_stages:
+  - pre-commit # Run locally
+  - manual # Run in CI
+
+repos:
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.14.0
+  hooks:
+  - id: ruff
+    args: [--fix]
+  - id: ruff-format
+
+- repo: https://github.com/codespell-project/codespell
+  rev: v2.4.1
+  hooks:
+  - id: codespell
+    args: [--ignore-words-list, "cann,nd"]
+
+- repo: https://github.com/crate-ci/typos
+  rev: v1.32.0
+  hooks:
+  - id: typos
+    args: [
+      "--force-exclude",
+      "--exclude", "csrc/**",
+      "--config", ".typos.toml"
+    ]
+
+- repo: https://github.com/igorshubovych/markdownlint-cli
+  rev: v0.45.0
+  hooks:
+  - id: markdownlint
+
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v5.0.0
+  hooks:
+  - id: trailing-whitespace
+  - id: end-of-file-fixer
+  - id: check-yaml
+  - id: check-added-large-files
