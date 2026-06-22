@@ -14,6 +14,7 @@ from trace_log_parse.parser import (
 )
 
 SessionPath = tuple[tuple[str, str, str], ...]  # (session_id, label, kind)
+PairKey = tuple[str, str, str]  # (kind, sid_or_eid, rid_or_empty) for LLM round pairing
 
 
 @dataclass
@@ -155,23 +156,41 @@ def interval_union_sec(intervals: list[tuple[datetime, datetime]]) -> float:
 
 
 def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[LLMRound], list[ToolGap]]:
-    """Pair request→output within each session; attach reasoning deltas; derive tool gaps."""
+    """Pair request→output within each session; attach reasoning deltas; derive tool gaps.
 
-    # Accumulate reasoning_delta sizes between pairing windows by (sid,rid) roughly:
-    # assign to next output by flushing when we pin an output timestamp
-    pending_reasoning_chars: dict[tuple[str, str], int] = {}
-    pending_reasoning_batches: dict[tuple[str, str], int] = {}
-    pending_reasoning_text: dict[tuple[str, str], list[str]] = {}
+    配对键策略：
+    - 新版日志带 ``event_id``，request 与对应 output（以及期间的 reasoning_delta）共享同
+      一 event_id，可严格唯一配对，支持同一 (session_id, request_id) 下的并发调用。
+    - 旧版日志没有 ``event_id``，退化为 ``(session_id, request_id)``，与之前行为一致。
+
+    Tool gap 推导（output → next request）必须按 ``(session_id, request_id)`` 维度排队，
+    因为下一次 request 并不知道它该接续哪个 event。为支持并发，``last_outputs`` 改为
+    FIFO 队列，按到达顺序匹配，避免被后到的 output 直接覆盖。
+    """
+
+    def _pair_key(rec: TraceRecord) -> PairKey:
+        """Pairing key prefers event_id (concurrency-safe), else (sid, rid)."""
+        if rec.event_id:
+            return ("eid", rec.event_id, "")
+        return ("sr", rec.session_id, rec.request_id)
+
+    # Accumulate reasoning_delta sizes between pairing windows;
+    # 同 pair_key 累积，配对成 round 时一次性冲刷
+    pending_reasoning_chars: dict[PairKey, int] = {}
+    pending_reasoning_batches: dict[PairKey, int] = {}
+    pending_reasoning_text: dict[PairKey, list[str]] = {}
 
     rounds: list[LLMRound] = []
     gaps: list[ToolGap] = []
 
-    pending_stream: dict[tuple[str, str], TraceRecord] = {}
-    pending_invoke: dict[tuple[str, str], TraceRecord] = {}
+    pending_stream: dict[PairKey, TraceRecord] = {}
+    pending_invoke: dict[PairKey, TraceRecord] = {}
 
+    # FIFO queue per (sid, rid)：支持同 request_id 下并发产生的多次 output，
+    # 后到的 next_request 会按到达顺序消费最早的未匹配 output。
     last_outputs: dict[
         tuple[str, str],
-        tuple[datetime, list[dict[str, Any]], Literal["stream", "invoke"], str, str],
+        list[tuple[datetime, list[dict[str, Any]], Literal["stream", "invoke"], str, str]],
     ] = {}
 
     # Sort for safety
@@ -179,15 +198,16 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
     final_at: dict[tuple[str, str], datetime] = {}
     for rec in recs:
         if rec.event == "chat.final":
-            key = (rec.session_id, rec.request_id)
-            final_at.setdefault(key, rec.ts)
+            sr_key = (rec.session_id, rec.request_id)
+            final_at.setdefault(sr_key, rec.ts)
 
     def _is_post_final(session_id: str, request_id: str, ts: datetime) -> bool:
         cutoff = final_at.get((session_id, request_id))
         return cutoff is not None and ts >= cutoff
 
     for rec in recs:
-        key = (rec.session_id, rec.request_id)
+        key = _pair_key(rec)
+        sr_key = (rec.session_id, rec.request_id)
 
         if rec.event == "reasoning_delta":
             pending_reasoning_chars[key] = pending_reasoning_chars.get(key, 0) + len(rec.body)
@@ -199,11 +219,14 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
             continue
 
         if rec.event in ("stream_request", "invoke_request"):
-            last_output = last_outputs.pop(key, None)
+            queue = last_outputs.get(sr_key)
+            last_output = queue.pop(0) if queue else None
+            if queue is not None and not queue:
+                last_outputs.pop(sr_key, None)
             if last_output is not None:
                 last_output_ts, last_tools, last_kind, last_session_for_output, last_request_for_output = last_output
             if last_output is not None and rec.ts >= last_output_ts:
-                cutoff = final_at.get(key)
+                cutoff = final_at.get(sr_key)
                 is_post_gap = _is_post_final(rec.session_id, rec.request_id, rec.ts)
                 gap_start = last_output_ts
                 if cutoff is not None and rec.ts >= cutoff and gap_start < cutoff:
@@ -281,7 +304,9 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
                         is_post_final=_is_post_final(rec.session_id, rec.request_id, rec.ts),
                     )
                 )
-                last_outputs[key] = (rec.ts, tools, "stream", rec.session_id, rec.request_id)
+                last_outputs.setdefault(sr_key, []).append(
+                    (rec.ts, tools, "stream", rec.session_id, rec.request_id)
+                )
                 continue
             rk, rch = pending_reasoning_batches.get(key, 0), pending_reasoning_chars.get(key, 0)
             pending_reasoning_batches[key] = 0
@@ -332,7 +357,9 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
             # Always bind gaps to the current output's own tool_calls.
             # Reusing previous non-empty tools causes phantom tool gaps
             # (e.g. a later round without spawn_subagent still shows it).
-            last_outputs[key] = (rec.ts, list(tools), "stream", rec.session_id, rec.request_id)
+            last_outputs.setdefault(sr_key, []).append(
+                (rec.ts, list(tools), "stream", rec.session_id, rec.request_id)
+            )
             continue
 
         if rec.event == "invoke_output":
@@ -381,7 +408,9 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
                         is_post_final=_is_post_final(rec.session_id, rec.request_id, rec.ts),
                     )
                 )
-                last_outputs[key] = (rec.ts, tools, "invoke", rec.session_id, rec.request_id)
+                last_outputs.setdefault(sr_key, []).append(
+                    (rec.ts, tools, "invoke", rec.session_id, rec.request_id)
+                )
                 continue
             rk_i = pending_reasoning_batches.pop(key, 0)
             rch_i = pending_reasoning_chars.pop(key, 0)
@@ -428,29 +457,32 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
                 )
             )
             # Keep only current output's tool_calls; do not inherit from prior output.
-            last_outputs[key] = (rec.ts, list(tools), "invoke", rec.session_id, rec.request_id)
+            last_outputs.setdefault(sr_key, []).append(
+                (rec.ts, list(tools), "invoke", rec.session_id, rec.request_id)
+            )
 
     # Handle terminal outputs that emitted tool_calls but have no following request.
     # We still surface these tool calls in the report as zero-duration tool gaps.
-    for (_, _), (out_ts, out_tools, out_kind, out_sid, out_rid) in last_outputs.items():
-        if not out_tools:
-            continue
-        is_child, label, path = _child_info(out_sid, root_session)
-        gaps.append(
-            ToolGap(
-                session_id=out_sid,
-                after_output_ts=out_ts,
-                next_request_ts=out_ts,
-                duration_sec=0.0,
-                tools_triggered=summarize_tools(out_tools),
-                detail_tools=list(out_tools),
-                from_kind=out_kind,
-                is_child_session=is_child,
-                child_label=label,
-                child_path=path,
-                is_post_final=_is_post_final(out_sid, out_rid, out_ts),
+    for _sr_key, queue in last_outputs.items():
+        for out_ts, out_tools, out_kind, out_sid, out_rid in queue:
+            if not out_tools:
+                continue
+            is_child, label, path = _child_info(out_sid, root_session)
+            gaps.append(
+                ToolGap(
+                    session_id=out_sid,
+                    after_output_ts=out_ts,
+                    next_request_ts=out_ts,
+                    duration_sec=0.0,
+                    tools_triggered=summarize_tools(out_tools),
+                    detail_tools=list(out_tools),
+                    from_kind=out_kind,
+                    is_child_session=is_child,
+                    child_label=label,
+                    child_path=path,
+                    is_post_final=_is_post_final(out_sid, out_rid, out_ts),
+                )
             )
-        )
 
     gaps.sort(key=lambda g: (g.after_output_ts, g.next_request_ts))
     return rounds, gaps

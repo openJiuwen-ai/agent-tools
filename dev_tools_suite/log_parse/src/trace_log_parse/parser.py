@@ -15,6 +15,10 @@ _TS_RE = re.compile(
 
 _HDR_RE = re.compile(
     r"\[LLM_IO_TRACE\]\s+event=(?P<event>[\w.]+)\s+"
+    # event_id 为可选字段：新版日志会在 event 之后、session_id 之前打印
+    # event_id='xxx'，用于在同一 (session_id, request_id) 下并发调用时唯一标识
+    # 一次 request/output 配对。旧日志不带该字段，仍走原有兜底逻辑。
+    r"(?:event_id=(?P<eid>(?:'[^']*'|\"[^\"]*\"))\s+)?"
     r"session_id=(?P<sid>(?:'[^']*'|\"[^\"]*\"))\s+"
     r"request_id=(?P<rid>(?:'[^']*'|\"[^\"]*\"))\s+"
     r"iteration=(?P<iter>\S+)\s+"
@@ -46,7 +50,8 @@ class TraceRecord:
     request_id: str
     iteration: str
     model_name: str
-    body: str
+    event_id: str | None = None  # 用于同一 (sid, rid) 下并发调用的唯一配对标记
+    body: str = ""
     reasoning_seq: int | None = None
     body_part: tuple[int, int] | None = None  # (i, total) if multipart line
     raw_line_no: int = 0
@@ -83,9 +88,11 @@ def parse_trace_line(line: str, line_no: int) -> TraceRecord | None:
     if not m:
         return None
     bp, rseq, body = _extract_body_segment(line)
+    eid_raw = m.group("eid")
     return TraceRecord(
         ts=ts,
         event=m.group("event"),
+        event_id=_strip_q(eid_raw) if eid_raw else None,
         session_id=_strip_q(m.group("sid")),
         request_id=_strip_q(m.group("rid")),
         iteration=m.group("iter"),
@@ -115,7 +122,7 @@ def assemble_records(raw_records: list[TraceRecord]) -> list[TraceRecord]:
             idx += 1
             continue
         pi, pt = rec.body_part
-        meta = (rec.session_id, rec.request_id, rec.iteration, rec.event, rec.model_name, pt)
+        meta = (rec.session_id, rec.request_id, rec.iteration, rec.event, rec.model_name, rec.event_id, pt)
         parts: dict[int, str] = {pi: rec.body}
         start_ts = rec.ts
         start_ln = rec.raw_line_no
@@ -125,7 +132,7 @@ def assemble_records(raw_records: list[TraceRecord]) -> list[TraceRecord]:
             if not nx.body_part:
                 break
             qi, qt = nx.body_part
-            nm = (nx.session_id, nx.request_id, nx.iteration, nx.event, nx.model_name, qt)
+            nm = (nx.session_id, nx.request_id, nx.iteration, nx.event, nx.model_name, nx.event_id, qt)
             if nm != meta or qt != pt:
                 break
             parts[qi] = nx.body
@@ -136,6 +143,7 @@ def assemble_records(raw_records: list[TraceRecord]) -> list[TraceRecord]:
                 TraceRecord(
                     ts=start_ts,
                     event=rec.event,
+                    event_id=rec.event_id,
                     session_id=rec.session_id,
                     request_id=rec.request_id,
                     iteration=rec.iteration,
@@ -152,6 +160,7 @@ def assemble_records(raw_records: list[TraceRecord]) -> list[TraceRecord]:
                 TraceRecord(
                     ts=start_ts,
                     event=rec.event,
+                    event_id=rec.event_id,
                     session_id=rec.session_id,
                     request_id=rec.request_id,
                     iteration=rec.iteration,
