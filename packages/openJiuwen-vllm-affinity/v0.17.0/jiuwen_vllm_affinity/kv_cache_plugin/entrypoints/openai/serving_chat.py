@@ -255,22 +255,27 @@ class OpenAIServingChatEx(OpenAIServingChat):
             if isinstance(full_render, ErrorResponse):
                 return full_render
 
-            # deep=True deepcopies pydantic internals (e.g. ValidatorIterator in
-            # validated messages) and raises TypeError; shallow copy + replaced
-            # messages/tools is sufficient for render_chat_request.
-            partial_req = request.model_copy(
-                update={
-                    "messages": ([] if message_begin == 0 else request.messages[:message_begin]),
-                    "tools": after_tool_dicts,
-                },
-                deep=False,
-            )
-            partial_render = await self.render_chat_request(partial_req)
-            if isinstance(partial_render, ErrorResponse):
-                return partial_render
-
             (_, before_engine_prompts) = full_render
-            (_, after_engine_prompts) = partial_render
+
+            # message_begin == 0 means release from the first message; the partial
+            # prefix is empty and must not go through chat template rendering.
+            if message_begin == 0:
+                after_engine_prompts: list = []
+            else:
+                # deep=True deepcopies pydantic internals (e.g. ValidatorIterator in
+                # validated messages) and raises TypeError; shallow copy + replaced
+                # messages/tools is sufficient for render_chat_request.
+                partial_req = request.model_copy(
+                    update={
+                        "messages": request.messages[:message_begin],
+                        "tools": after_tool_dicts,
+                    },
+                    deep=False,
+                )
+                partial_render = await self.render_chat_request(partial_req)
+                if isinstance(partial_render, ErrorResponse):
+                    return partial_render
+                (_, after_engine_prompts) = partial_render
         except (ValueError, TypeError, RuntimeError, jinja2.TemplateError) as e:
             logger.exception("Error in preprocessing prompt inputs")
             return self.create_error_response(f"{e} {e.__cause__}")
@@ -281,7 +286,9 @@ class OpenAIServingChatEx(OpenAIServingChat):
         if raw_request:
             raw_request.state.request_metadata = request_metadata
 
-        if len(before_engine_prompts) != 1 or len(after_engine_prompts) != 1:
+        if len(before_engine_prompts) != 1 or (
+            message_begin != 0 and len(after_engine_prompts) != 1
+        ):
             error_msg = (
                 f"engine prompts should be 1, while older is {len(before_engine_prompts)} "
                 f"and newer is {len(after_engine_prompts)}"

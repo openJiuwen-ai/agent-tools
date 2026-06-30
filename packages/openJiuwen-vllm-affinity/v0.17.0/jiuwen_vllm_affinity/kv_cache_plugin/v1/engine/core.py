@@ -23,7 +23,10 @@ class EngineCoreEx(EngineCore):
                 req.all_token_ids
             )
             released_blocks += self.scheduler.release_kv_cache(
-                session_id, req.block_hashes[release_block_index:]
+                session_id,
+                req.block_hashes[release_block_index:],
+                release_token_index=release_index,
+                num_tokens=len(req.all_token_ids),
             )
         return released_blocks
 

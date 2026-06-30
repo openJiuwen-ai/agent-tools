@@ -5,10 +5,22 @@ from vllm.v1.core.single_type_kv_cache_manager import CrossAttentionManager
 
 
 class KVCacheCoordinatorEx(KVCacheCoordinator):
-    def aging_block(self, session_id, block_hashes) -> int:
+    def aging_block(
+        self,
+        session_id,
+        block_hashes,
+        *,
+        release_token_index: int | None = None,
+        num_tokens: int | None = None,
+    ) -> int:
         num = 0
         for manager in self.single_type_managers:
-            num += manager.aging_block(session_id, block_hashes)
+            num += manager.aging_block(
+                session_id,
+                block_hashes,
+                release_token_index=release_token_index,
+                num_tokens=num_tokens,
+            )
         return num
 
     def save_new_computed_blocks_with_session(

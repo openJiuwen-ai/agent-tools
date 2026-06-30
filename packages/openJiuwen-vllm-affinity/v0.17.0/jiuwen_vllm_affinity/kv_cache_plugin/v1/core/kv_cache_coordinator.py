@@ -62,10 +62,22 @@ class KVCacheCoordinatorEx(KVCacheCoordinator):
     def clear_jiuwen_sharing_session_id(self) -> None:
         self.jiuwen_sharing_session_id = None
 
-    def aging_block(self, session_id, block_hashes) -> int:
+    def aging_block(
+        self,
+        session_id,
+        block_hashes,
+        *,
+        release_token_index: int | None = None,
+        num_tokens: int | None = None,
+    ) -> int:
         num = 0
         for manager in self.single_type_managers:
-            num += manager.aging_block(session_id, block_hashes)
+            num += manager.aging_block(
+                session_id,
+                block_hashes,
+                release_token_index=release_token_index,
+                num_tokens=num_tokens,
+            )
         return num
 
 

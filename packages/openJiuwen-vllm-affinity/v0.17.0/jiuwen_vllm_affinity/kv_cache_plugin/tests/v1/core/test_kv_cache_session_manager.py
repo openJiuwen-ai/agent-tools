@@ -54,3 +54,11 @@ def test_kv_cache_session_manager():
     assert len(released) == 0
     released = session_mgr.release_blocks(blocks, sessions[1])
     assert len(released) == block_count
+
+
+def test_collect_orphan_blocks_excludes_resolved():
+    blocks = [KVCacheBlock(idx) for idx in range(3)]
+    session_mgr = KvCacheSessionManager()
+    session_mgr.reset_blocks(blocks, "s1")
+    orphans = session_mgr.collect_orphan_blocks("s1", blocks, exclude_block_ids={0, 1, 2})
+    assert orphans == []

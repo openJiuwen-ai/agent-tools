@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright (C) 2026 Huawei Technologies Co., Ltd.
+# 本文件基于vLLM v0.13.0的KVCacheManager实现修改而来，用于实现双区缓存特性
+
 from jiuwen_vllm_affinity.kv_cache_plugin.v1.request import request_get_sharing_cache_salt
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
 from vllm.v1.core.kv_cache_utils import BlockHash
@@ -5,8 +10,20 @@ from vllm.v1.request import Request
 
 
 class KVCacheManagerEx(KVCacheManager):
-    def release_kv_cache(self, session_id: str, block_hashes: list[BlockHash]) -> int:
-        return self.coordinator.aging_block(session_id, block_hashes)
+    def release_kv_cache(
+        self,
+        session_id: str,
+        block_hashes: list[BlockHash],
+        *,
+        release_token_index: int | None = None,
+        num_tokens: int | None = None,
+    ) -> int:
+        return self.coordinator.aging_block(
+            session_id,
+            block_hashes,
+            release_token_index=release_token_index,
+            num_tokens=num_tokens,
+        )
 
     def allocate_slots(
         self,

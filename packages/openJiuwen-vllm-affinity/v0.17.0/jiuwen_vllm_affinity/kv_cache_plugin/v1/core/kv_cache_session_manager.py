@@ -61,3 +61,30 @@ class KvCacheSessionManager:
                     aging_blocks.append(blk)
 
         return aging_blocks
+
+    def collect_orphan_blocks(
+        self,
+        session_id: Optional[str],
+        pool_blocks: list[KVCacheBlock],
+        exclude_block_ids: set[int],
+        *,
+        only_idle: bool = True,
+    ) -> list[KVCacheBlock]:
+        """Session-bound blocks not in the hash-resolved set (e.g. partial tail)."""
+        if session_id is None:
+            return []
+        orphans: list[KVCacheBlock] = []
+        for block_id, sessions in enumerate(self.block_to_sessions):
+            if session_id not in sessions:
+                continue
+            if block_id in exclude_block_ids:
+                continue
+            if block_id < 0 or block_id >= len(pool_blocks):
+                continue
+            blk = pool_blocks[block_id]
+            if blk.is_null:
+                continue
+            if only_idle and blk.ref_cnt != 0:
+                continue
+            orphans.append(blk)
+        return orphans

@@ -7,14 +7,40 @@ from vllm.distributed.kv_events import KVCacheEvent
 from vllm.v1.core.block_pool import BlockHashToBlockMap, BlockPool
 from vllm.v1.core.kv_cache_metrics import KVCacheMetricsCollector
 from vllm.v1.core.kv_cache_utils import KVCacheBlock
+from vllm.logger import init_logger
 from jiuwen_vllm_affinity.kv_cache_plugin.v1.core.two_phase_block_queue import TwoPhaseBlockQueue
+
+logger = init_logger(__name__)
+
+_orig_free_blocks = BlockPool.free_blocks
+
+
+def mark_pending_aging(self, block_id: int) -> None:
+    if block_id >= 0:
+        self.pending_aging_block_ids.add(block_id)
+
+
+def free_blocks_jiuwen(self, ordered_blocks):
+    blocks_list = list(ordered_blocks)
+    _orig_free_blocks(self, blocks_list)
+    for block in blocks_list:
+        if block.ref_cnt != 0 or block.is_null:
+            continue
+        if block.block_id not in self.pending_aging_block_ids:
+            continue
+        self.pending_aging_block_ids.discard(block.block_id)
+        self.free_block_queue.aging_block(block)
 
 
 class BlockPoolEx(BlockPool):
     def aging_block(self, blocks: list[KVCacheBlock]) -> int:
         num = 0
         for i in range(len(blocks) - 1, -1, -1):
-            num += self.free_block_queue.aging_block(blocks[i])
+            blk = blocks[i]
+            if self.free_block_queue.aging_block(blk):
+                num += 1
+            else:
+                mark_pending_aging(self, blk.block_id)
         return num
 
 
@@ -47,8 +73,11 @@ def block_pool_init(
     self.enable_kv_cache_events = enable_kv_cache_events
     self.kv_event_queue: list[KVCacheEvent] = []
     self.metrics_collector = metrics_collector
+    self.pending_aging_block_ids: set[int] = set()
 
 
 def register_block_pool():
     BlockPool.__init__ = block_pool_init
     BlockPool.aging_block = BlockPoolEx.aging_block
+    BlockPool.free_blocks = free_blocks_jiuwen
+    BlockPool.mark_pending_aging = mark_pending_aging
