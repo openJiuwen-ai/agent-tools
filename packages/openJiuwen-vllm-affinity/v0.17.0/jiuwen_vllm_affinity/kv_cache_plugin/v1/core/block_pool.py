@@ -7,12 +7,11 @@ from vllm.distributed.kv_events import KVCacheEvent
 from vllm.v1.core.block_pool import BlockHashToBlockMap, BlockPool
 from vllm.v1.core.kv_cache_metrics import KVCacheMetricsCollector
 from vllm.v1.core.kv_cache_utils import KVCacheBlock
-from vllm.logger import init_logger
+from jiuwen_vllm_affinity.kv_cache_plugin.log import kv_log_info
 from jiuwen_vllm_affinity.kv_cache_plugin.v1.core.two_phase_block_queue import TwoPhaseBlockQueue
 
-logger = init_logger(__name__)
-
 _orig_free_blocks = BlockPool.free_blocks
+_orig_get_new_blocks = BlockPool.get_new_blocks
 
 
 def mark_pending_aging(self, block_id: int) -> None:
@@ -30,6 +29,26 @@ def free_blocks_jiuwen(self, ordered_blocks):
             continue
         self.pending_aging_block_ids.discard(block.block_id)
         self.free_block_queue.aging_block(block)
+
+
+def get_new_blocks_jiuwen(self, num_blocks: int) -> list[KVCacheBlock]:
+    ret = _orig_get_new_blocks(self, num_blocks)
+
+    reclaimed_ids = [
+        b.block_id for b in ret if getattr(b, "jiuwen_reclaimed", False)
+    ]
+    for b in ret:
+        if hasattr(b, "jiuwen_reclaimed"):
+            del b.jiuwen_reclaimed
+
+    if reclaimed_ids:
+        kv_log_info("[jiuwen-kv] 4-evict: block_ids=%s", reclaimed_ids)
+    if ret:
+        kv_log_info(
+            "[jiuwen-kv] 1-allocate: block_ids=%s",
+            [b.block_id for b in ret],
+        )
+    return ret
 
 
 class BlockPoolEx(BlockPool):
@@ -80,4 +99,5 @@ def register_block_pool():
     BlockPool.__init__ = block_pool_init
     BlockPool.aging_block = BlockPoolEx.aging_block
     BlockPool.free_blocks = free_blocks_jiuwen
+    BlockPool.get_new_blocks = get_new_blocks_jiuwen
     BlockPool.mark_pending_aging = mark_pending_aging

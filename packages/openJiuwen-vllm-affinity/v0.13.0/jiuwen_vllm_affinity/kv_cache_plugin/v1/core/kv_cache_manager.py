@@ -97,6 +97,18 @@ class KVCacheManagerEx(KVCacheManager):
             request_get_sharing_cache_salt(request),
         )
 
+        # Partial tail blocks (e.g. block 213 for 1000 tokens) are never prefix-cached
+        # but must be session-bound for release_kv_cache orphan collection.
+        sharing_salt = request_get_sharing_cache_salt(request)
+        if sharing_salt is not None:
+            for manager in self.coordinator.single_type_managers:
+                req_blocks = manager.req_to_blocks.get(request.request_id, [])
+                live_blocks = [b for b in req_blocks if not b.is_null]
+                if live_blocks:
+                    manager.kv_cache_session_manager.add_blocks(
+                        live_blocks, sharing_salt
+                    )
+
         # P/D: delay caching blocks if we have to recv from
         # remote. Update state for locally cached blocks.
         if not self.enable_caching or delay_cache_blocks:

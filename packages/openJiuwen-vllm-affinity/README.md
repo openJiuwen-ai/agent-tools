@@ -1,20 +1,36 @@
 # 简介
-openJiuwen-vllm-affinity提供了和vllm亲和的增强能力，这些能力将通过插件的形式集成到vllm中。openJiuwen可以利用这些能力增强vllm的功能和性能。
-# 特性1：Prefix双区缓存主动管理
+
+openJiuwen-vllm-affinity 提供了和 vLLM 亲和的增强能力，这些能力通过插件形式集成到 vLLM 中。openJiuwen 可以利用这些能力增强 vLLM 的功能和性能。
+
+# 特性1：Prefix 双区缓存主动管理
+
 ## 背景
-多轮对话总，上下文引擎会对部分历史对话进行总结压缩，或者对冗余的工具调用返回结果进行卸载，减少历史对话数据量，减少上下文的长度。
-上下文的变化回导致部分kv cache失效，当前vllm使用LRU的缓存更新策略，释放的cache处于缓存的尾部，无法快速清理空间，影响整体的缓存命中率和TTFT。
+
+多轮对话中，上下文引擎会对部分历史对话进行总结压缩，或者对冗余的工具调用返回结果进行卸载，减少历史对话数据量，缩短上下文长度。
+上下文的变化会导致部分 KV cache 失效。当前 vLLM 使用 LRU 缓存更新策略，被释放的 cache 处于队列尾部，无法快速清理空间，影响整体缓存命中率和 TTFT。
 
 ## 方案
+
 实现双区缓存和主动缓存管理。
-双区缓存：缓存划分为两个区，老化区和新鲜区，老化区位于队首，新鲜区位于队尾。缓存块释放的时候，如果明确后续不会再使用该缓存块，那么把该缓存块加入老化区尾部加速老化；如果是后续可能会用到的，那么加入新鲜区的尾部，避免过早失效。
+
+空闲块队列在逻辑上分为 **release 区**（主动释放、优先复用/淘汰）和 **normal 区**（普通归还、较低优先级）。从队首分配时，release 区的块会先于 normal 区的块被复用，从而使 `release_kv_cache` 标记的块更快腾出空间。
+
+> 实现上队列头部还存在仅在初始化时出现的 **free 段**（从未分配过的块），分配优先级为 free > release > normal。运行期不再产生新的 free 块，日常理解与排障主要关注 **release 与 normal 的相对优先级** 即可。
+
+主动释放（`release_kv_cache`）时，若明确后续不会再使用某缓存块，则将其移入 release 区尾部以加速老化；若仍可能被复用，则随请求正常归还至 normal 区尾部，避免过早失效。
+
+对于 prefix hash 未覆盖的 **partial tail 块**（例如满块 206–212 之后的尾部块 213），插件会通过 session 绑定与孤儿块收集一并纳入释放范围。
 
 ## 接口
-### chat接口
-chat修改如下：
-增加“cache_sharing",为true时启用缓存共享，cach_salt将作为缓存的客户端标识，但是不同cache_salt的客户端将可以共享缓存块。"cache_sharing"为false时，cach_salt将避免不同的客户端共享缓存块
+
+### chat 接口
+
+chat 修改如下：
+
+增加 `cache_sharing`：为 `true` 时启用缓存共享，`cache_salt` 作为客户端标识，不同 `cache_salt` 的客户端可以共享缓存块；为 `false` 时，`cache_salt` 用于隔离不同客户端的缓存块。
+
 ```RESTFul
-RESTFul./v1/chat/completions
+POST /v1/chat/completions
 {
     "cache_salt": "1234",
     "cache_sharing": true,
@@ -25,21 +41,51 @@ RESTFul./v1/chat/completions
 ```
 
 ### 释放缓存接口
-释放缓存接口如下：
+
 ```RESTFul
-RESTFul./release_kv_cache
+POST /release_kv_cache
 {
     "messages_released_index": 20,
     "tools_released_index": 100,
-    "cache_salt": 1234,
+    "cache_salt": "1234",
     "cache_sharing": true,
     "model": "Qwen3-32B",
     "messages": [],
-    "tools":[],
+    "tools": [],
     ...
 }
 ```
-接口各字段与v1/chat/completions接口的字段基本一致，含义也一致，额外增加了messages_released_index和tools_released_index。
-messages_released_index指定压缩的起始message index，也就是新的message相比旧的message从第几个message开始改变，如果没有改变，就传messages的长度。
-tools_released_index指定工具变化的起始index，也就是新的tools相比旧的tools从第几个tool开始改变，如果一样则可以传tools的最大长度，或者不传该字段。
 
+请求体各字段与 `/v1/chat/completions` 基本一致，额外增加：
+
+| 字段 | 说明 |
+|------|------|
+| `messages_released_index` | 压缩后 messages 开始变化的下标；若 messages 未变，传 `messages` 的长度 |
+| `tools_released_index` | tools 开始变化的下标；若 tools 未变，可传 tools 最大长度或不传 |
+
+**响应示例：**
+
+```json
+{
+    "cache_salt": "1234",
+    "block_released": 8
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `cache_salt` | 回显请求中的 `cache_salt` |
+| `block_released` | 本次从 session 解绑的 KV block 数量 |
+
+`block_released` 统计的是 session 解绑数，而非调用瞬间立即移入 release 区的数量。若对应 block 仍被进行中的请求持有（`ref_cnt > 0`），会先登记为 `pending_aging`，待请求结束、block 归还空闲队列后再移入 release 区——这在典型调用时序（chat 完成后立即 release）下是正常现象。
+
+## 可观测性
+
+设置环境变量 `JIUWEN_KV_DEBUG=1`（或 `true` / `yes` / `on`）可开启 `[jiuwen-kv]` 追踪日志，例如：
+
+| 日志阶段 | 含义 |
+|----------|------|
+| `1-allocate` | 新分配 block |
+| `2-prefix_hit` | prefix cache 命中复用 |
+| `3-release` | session 解绑；常态为 `pending_aging=N`，表示延后老化 |
+| `4-evict` | 从 release/normal 段复用分配 |
