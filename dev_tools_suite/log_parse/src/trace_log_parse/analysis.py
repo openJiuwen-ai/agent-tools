@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
@@ -193,6 +194,41 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
         list[tuple[datetime, list[dict[str, Any]], Literal["stream", "invoke"], str, str]],
     ] = {}
 
+    # tool_call_request / tool_call_output：执行侧成对事件，通过 event_id 严格配对。
+    # 它们独立于 LLM request↔output 配对流程：不入 pending_* 队列，不消费 last_outputs，
+    # 否则会破坏原本的 stream/invoke 配对节奏。处理完毕后再按 tool_call_id 把真实
+    # 执行耗时 / 结果体回填到 LLM gap 子项中。
+    tool_call_events: dict[str, dict[str, Any]] = {}
+
+    def _record_tool_call(rec: TraceRecord) -> None:
+        """Pair tool_call_request/output by event_id (mandatory for these events)."""
+        if not rec.event_id:
+            return
+        slot = tool_call_events.setdefault(
+            rec.event_id,
+            {
+                "tool_call_id": rec.tool_call_id,
+                "tool_name": rec.tool_name,
+                "agent": rec.agent,
+                "session_id": rec.session_id,
+                "request_id": rec.request_id,
+                "request_ts": None,
+                "request_body": "",
+                "output_ts": None,
+                "output_body": "",
+            },
+        )
+        # 后到的元数据若缺失，沿用首次写入；这里只在仍为 None/空时补充。
+        for k in ("tool_call_id", "tool_name", "agent"):
+            if not slot.get(k):
+                slot[k] = getattr(rec, k)
+        if rec.event == "tool_call_request":
+            slot["request_ts"] = rec.ts
+            slot["request_body"] = rec.body
+        elif rec.event == "tool_call_output":
+            slot["output_ts"] = rec.ts
+            slot["output_body"] = rec.body
+
     # Sort for safety
     recs = sorted(records, key=lambda r: (r.ts, r.raw_line_no))
     final_at: dict[tuple[str, str], datetime] = {}
@@ -206,6 +242,11 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
         return cutoff is not None and ts >= cutoff
 
     for rec in recs:
+        # tool_call_* 走独立通道，不影响 LLM 的 request/output 配对
+        if rec.event in ("tool_call_request", "tool_call_output"):
+            _record_tool_call(rec)
+            continue
+
         key = _pair_key(rec)
         sr_key = (rec.session_id, rec.request_id)
 
@@ -270,8 +311,6 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
                 assistant_text = ""
                 if rec.body.strip().startswith("{"):
                     try:
-                        import json
-
                         data = json.loads(rec.body)
                         assistant_text = str(data.get("content") or "")[:500]
                     except json.JSONDecodeError:
@@ -319,8 +358,6 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
             assistant_text = ""
             if rec.body.strip().startswith("{"):
                 try:
-                    import json
-
                     data = json.loads(rec.body)
                     assistant_text = str(data.get("content") or "")[:500]
                 except json.JSONDecodeError:
@@ -374,8 +411,6 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
                 assistant_text = ""
                 if rec.body.strip().startswith("{"):
                     try:
-                        import json
-
                         data = json.loads(rec.body)
                         assistant_text = str(data.get("content") or "")[:500]
                     except json.JSONDecodeError:
@@ -421,8 +456,6 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
             assistant_text = ""
             if rec.body.strip().startswith("{"):
                 try:
-                    import json
-
                     data = json.loads(rec.body)
                     assistant_text = str(data.get("content") or "")[:500]
                 except json.JSONDecodeError:
@@ -483,6 +516,200 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
                     is_post_final=_is_post_final(out_sid, out_rid, out_ts),
                 )
             )
+
+    # ── tool_call 注入通 ──────────────────────────────────────────
+    # 将 tool_call_request / tool_call_output 成对数据回填到 LLM gap
+    # 的 detail_tools 子项中，使报告能展示真实执行耗时与结果。
+    # 未命中任何 gap 的孤立 tool_call 对兜底为独立 ToolGap。
+    #
+    # Build index: tool_call_id → paired data
+    paired_tool_calls: dict[str, dict[str, Any]] = {}
+    for slot in tool_call_events.values():
+        tcid = slot.get("tool_call_id")
+        if not tcid or slot.get("request_ts") is None:
+            continue
+        paired_tool_calls[tcid] = slot
+
+    orphan_tcids: set[str] = set(paired_tool_calls.keys())
+
+    # Inject into existing gap detail_tools
+    for gap in gaps:
+        for dt in gap.detail_tools:
+            dt_id = dt.get("id")
+            if not dt_id or dt_id not in paired_tool_calls:
+                continue
+            pc = paired_tool_calls[dt_id]
+            # 注入额外元数据（不会破坏现有渲染，report.py 只会读取 name/arguments/id）
+            dt["_start_ts"] = pc["request_ts"].isoformat()
+            dt["_end_ts"] = pc.get("output_ts").isoformat() if pc.get("output_ts") else ""
+            dt["_duration_ms"] = round(
+                (
+                    (pc["output_ts"] - pc["request_ts"]).total_seconds() * 1000
+                )
+                if pc.get("output_ts") else 0,
+                1,
+            )
+            # 从 output body 解析状态与结果片段
+            out_body = pc.get("output_body", "")
+            if out_body.strip().startswith("{"):
+                try:
+                    od = json.loads(out_body)
+                    dt["_tool_status"] = od.get("status", "")
+                    dt["_tool_duration_ms"] = od.get("duration_ms")
+                    # 提取结果短摘要供报告展示（完整 body 有独立的可展开渲染）
+                    result = od.get("result") or od.get("error") or ""
+                    if isinstance(result, dict):
+                        result = json.dumps(result, ensure_ascii=False)[:500]
+                    dt["_tool_result"] = str(result) if result else ""
+                except json.JSONDecodeError:
+                    pass
+            orphan_tcids.discard(dt_id)
+
+    # 孤立 tool_call 对 → 兜底 ToolGap（日志中有 tool_call 但无 LLM gap 覆盖时可见）
+    # 每个 tool_call 独立为一个 gap，携带真实起止时间，并发调用在时间线上自然重叠。
+    for tcid in orphan_tcids:
+        pc = paired_tool_calls[tcid]
+        sk_sid = pc["session_id"]
+        sk_rid = pc["request_id"]
+        gap_is_child, gap_label, gap_path = _child_info(sk_sid, root_session)
+        out_ts = pc.get("output_ts") or pc["request_ts"]
+        duration = (out_ts - pc["request_ts"]).total_seconds()
+
+        item: dict[str, Any] = {
+            "name": pc.get("tool_name") or "?",
+            "tool_call_id": pc.get("tool_call_id"),
+            "request_body": pc.get("request_body", ""),
+            "_start_ts": pc["request_ts"].isoformat(),
+            "_end_ts": out_ts.isoformat(),
+        }
+        out_body = pc.get("output_body", "")
+        if out_body.strip().startswith("{"):
+            try:
+                od = json.loads(out_body)
+                item["_tool_status"] = od.get("status", "")
+                item["_tool_duration_ms"] = od.get("duration_ms")
+                result = od.get("result") or od.get("error") or ""
+                if isinstance(result, dict):
+                    result = json.dumps(result, ensure_ascii=False)[:500]
+                item["_tool_result"] = str(result) if result else ""
+            except json.JSONDecodeError:
+                pass
+
+        gaps.append(
+            ToolGap(
+                session_id=sk_sid,
+                after_output_ts=pc["request_ts"],
+                next_request_ts=out_ts,
+                duration_sec=duration,
+                tools_triggered=pc.get("tool_name") or "?",
+                detail_tools=[item],
+                from_kind="invoke",
+                is_child_session=gap_is_child,
+                child_label=gap_label,
+                child_path=gap_path,
+                is_post_final=_is_post_final(sk_sid, sk_rid, pc["request_ts"]),
+            )
+        )
+
+    # ── 流程间隙裁剪 ────────────────────────────────────────────
+    # LLM output→next_request 之间派生的"流程间隙" gap（detail_tools 为空）
+    # 本质上代表"LLM 输出后到下次请求前的等待"。当中间发生了工具调用 *或者
+    # 其它并发 LLM round* 时，原始时间窗会包住实际忙碌的区间，导致显示一段
+    # 假的"空闲"。这里用 "工具调用 + 其它 LLM round" 的并集对 idle gap 做减法，
+    # 仅保留真正未被任何活动覆盖的残段，过短残段直接丢弃。
+    busy_intervals: list[tuple[datetime, datetime]] = sorted(
+        [
+            (g.after_output_ts, g.next_request_ts)
+            for g in gaps
+            if g.detail_tools and (g.tools_triggered or "") not in ("(no tool_calls)", "(post-final)")
+        ]
+        + [
+            # 并发 LLM round 自身的活动区间，覆盖时也算"忙碌"，避免被误判为 idle
+            (r.request_ts, r.output_ts)
+            for r in rounds
+            if r.output_ts > r.request_ts
+        ]
+    )
+
+    def _subtract_intervals(
+        start: datetime, end: datetime, covers: list[tuple[datetime, datetime]]
+    ) -> list[tuple[datetime, datetime]]:
+        """Return parts of [start, end] not covered by any interval in covers."""
+        out_parts: list[tuple[datetime, datetime]] = []
+        cur = start
+        for cs, ce in covers:
+            if ce <= cur or cs >= end:
+                continue
+            if cs > cur:
+                out_parts.append((cur, cs))
+            if ce > cur:
+                cur = ce
+            if cur >= end:
+                break
+        if cur < end:
+            out_parts.append((cur, end))
+        return out_parts
+
+    idle_min_sec = 0.05  # 50ms：低于此值的残段视为日志抖动，丢弃
+
+    trimmed_gaps: list[ToolGap] = []
+    for g in gaps:
+        is_idle = (not g.detail_tools) or (g.tools_triggered or "") in ("(no tool_calls)", "(post-final)")
+        if not is_idle:
+            trimmed_gaps.append(g)
+            continue
+        # Find covering busy intervals (tool calls + concurrent LLM rounds) overlapping this idle gap
+        covers = [
+            (cs, ce) for cs, ce in busy_intervals
+            if ce > g.after_output_ts and cs < g.next_request_ts
+        ]
+        if not covers:
+            # 无忙碌覆盖：保留原间隙
+            if g.duration_sec >= idle_min_sec:
+                trimmed_gaps.append(g)
+            continue
+        residuals = _subtract_intervals(g.after_output_ts, g.next_request_ts, covers)
+        for r_start, r_end in residuals:
+            sec = (r_end - r_start).total_seconds()
+            if sec < idle_min_sec:
+                continue
+            trimmed_gaps.append(
+                ToolGap(
+                    session_id=g.session_id,
+                    after_output_ts=r_start,
+                    next_request_ts=r_end,
+                    duration_sec=sec,
+                    tools_triggered=g.tools_triggered,
+                    detail_tools=list(g.detail_tools),
+                    from_kind=g.from_kind,
+                    is_child_session=g.is_child_session,
+                    child_label=g.child_label,
+                    child_path=g.child_path,
+                    is_post_final=g.is_post_final,
+                )
+            )
+    gaps = trimmed_gaps
+
+    # ── idle gap 去重 ───────────────────────────────────────────
+    # 同一 (sid, rid) 下并发 LLM 调用时，多个 (output_i → request_j) 会派生
+    # 时间窗口完全相同的"流程间隙"。它们语义上是同一段等待，渲染时三连重复展示，
+    # 这里按 (child_path, session_id, after_output_ts, next_request_ts) 去重。
+    seen_idle_keys: set[tuple[Any, ...]] = set()
+    dedup_gaps: list[ToolGap] = []
+    for g in gaps:
+        is_idle = (not g.detail_tools) or (g.tools_triggered or "") in ("(no tool_calls)", "(post-final)")
+        if is_idle:
+            dedup_key = (
+                tuple(g.child_path),
+                g.session_id,
+                g.after_output_ts,
+                g.next_request_ts,
+            )
+            if dedup_key in seen_idle_keys:
+                continue
+            seen_idle_keys.add(dedup_key)
+        dedup_gaps.append(g)
+    gaps = dedup_gaps
 
     gaps.sort(key=lambda g: (g.after_output_ts, g.next_request_ts))
     return rounds, gaps

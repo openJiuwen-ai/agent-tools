@@ -21,8 +21,15 @@ _HDR_RE = re.compile(
     r"(?:event_id=(?P<eid>(?:'[^']*'|\"[^\"]*\"))\s+)?"
     r"session_id=(?P<sid>(?:'[^']*'|\"[^\"]*\"))\s+"
     r"request_id=(?P<rid>(?:'[^']*'|\"[^\"]*\"))\s+"
-    r"iteration=(?P<iter>\S+)\s+"
-    r"model_name=(?P<model>(?:'[^']*'|\"[^\"]*\"))"
+    # iteration 在 LLM 调用中是数字，在 tool_call_request/output 行中为空字符串。
+    # 用 \S* 容许两种情况；结尾的空白由后续 \s+ 吞掉。
+    r"iteration=(?P<iter>\S*)\s+"
+    # 下列字段均为可选，顺序固定为日志当前打印顺序：model_name → agent → tool_name → tool_call_id。
+    # LLM 调用行只携带 model_name；tool_call_* 行只携带 agent/tool_name/tool_call_id。
+    r"(?:model_name=(?P<model>(?:'[^']*'|\"[^\"]*\"))\s*)?"
+    r"(?:agent=(?P<agent>(?:'[^']*'|\"[^\"]*\"))\s*)?"
+    r"(?:tool_name=(?P<tool_name>(?:'[^']*'|\"[^\"]*\"))\s*)?"
+    r"(?:tool_call_id=(?P<tool_call_id>(?:'[^']*'|\"[^\"]*\"))\s*)?"
 )
 
 _REASON_SEQ = re.compile(r"reasoning_seq=(?P<seq>\d+)\s+")
@@ -51,6 +58,9 @@ class TraceRecord:
     iteration: str
     model_name: str
     event_id: str | None = None  # 用于同一 (sid, rid) 下并发调用的唯一配对标记
+    agent: str | None = None  # 仅 tool_call_request/output 携带：发起调用的 agent 名
+    tool_name: str | None = None  # 仅 tool_call_request/output 携带
+    tool_call_id: str | None = None  # 仅 tool_call_request/output 携带，用于回填到 LLM gap 子项
     body: str = ""
     reasoning_seq: int | None = None
     body_part: tuple[int, int] | None = None  # (i, total) if multipart line
@@ -89,6 +99,10 @@ def parse_trace_line(line: str, line_no: int) -> TraceRecord | None:
         return None
     bp, rseq, body = _extract_body_segment(line)
     eid_raw = m.group("eid")
+    model_raw = m.group("model")
+    agent_raw = m.group("agent")
+    tname_raw = m.group("tool_name")
+    tcid_raw = m.group("tool_call_id")
     return TraceRecord(
         ts=ts,
         event=m.group("event"),
@@ -96,7 +110,10 @@ def parse_trace_line(line: str, line_no: int) -> TraceRecord | None:
         session_id=_strip_q(m.group("sid")),
         request_id=_strip_q(m.group("rid")),
         iteration=m.group("iter"),
-        model_name=_strip_q(m.group("model")),
+        model_name=_strip_q(model_raw) if model_raw else "",
+        agent=_strip_q(agent_raw) if agent_raw else None,
+        tool_name=_strip_q(tname_raw) if tname_raw else None,
+        tool_call_id=_strip_q(tcid_raw) if tcid_raw else None,
         body=body,
         reasoning_seq=rseq,
         body_part=bp,
@@ -148,6 +165,9 @@ def assemble_records(raw_records: list[TraceRecord]) -> list[TraceRecord]:
                     request_id=rec.request_id,
                     iteration=rec.iteration,
                     model_name=rec.model_name,
+                    agent=rec.agent,
+                    tool_name=rec.tool_name,
+                    tool_call_id=rec.tool_call_id,
                     body=merged_body,
                     reasoning_seq=None,
                     body_part=None,
@@ -165,6 +185,9 @@ def assemble_records(raw_records: list[TraceRecord]) -> list[TraceRecord]:
                     request_id=rec.request_id,
                     iteration=rec.iteration,
                     model_name=rec.model_name,
+                    agent=rec.agent,
+                    tool_name=rec.tool_name,
+                    tool_call_id=rec.tool_call_id,
                     body=rec.body,
                     body_part=None,
                     raw_line_no=start_ln,

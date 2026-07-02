@@ -103,10 +103,36 @@ def merge_timeline_for_display(
         return taken
 
     out: list[tuple[Literal["llm", "gap"], Any]] = []
-    for r in sorted(rounds, key=lambda x: (x.output_ts, x.request_ts, x.session_id)):
+    sorted_rounds = sorted(rounds, key=lambda x: (x.output_ts, x.request_ts, x.session_id))
+    for idx, r in enumerate(sorted_rounds):
         out.append(("llm", r))
         for g in take_gaps_for_round(r):
             out.append(("gap", g))
+
+        # 兜底：take_gaps_for_round 只接受与本轮 output_ts 紧贴（< 1ms）的 gap。
+        # 但 tool_call_request/output 派生的"孤立工具调用 gap"时间戳取自执行侧，
+        # 不会与任何 LLM round 输出在毫秒级对齐，会被永久滞留在 remaining。
+        # 这里在每个 round 结束时，把剩余 gap 中「时间早于下一个 round.output_ts」
+        # 的部分按时间顺序插入，使其能正常呈现在时间线上。
+        next_ts = sorted_rounds[idx + 1].output_ts if idx + 1 < len(sorted_rounds) else None
+        leftover: list[ToolGap] = []
+        rest: list[ToolGap] = []
+        for g in remaining:
+            if next_ts is None or g.after_output_ts < next_ts:
+                leftover.append(g)
+            else:
+                rest.append(g)
+        leftover.sort(key=lambda x: x.after_output_ts)
+        for g in leftover:
+            out.append(("gap", g))
+        remaining[:] = rest
+
+    # 无 LLM round（极端场景，例如日志只含执行侧 tool_call_*）时，依旧把所有 gap 按时间序输出
+    if not sorted_rounds and remaining:
+        remaining.sort(key=lambda x: x.after_output_ts)
+        for g in remaining:
+            out.append(("gap", g))
+
     return out
 
 
@@ -127,7 +153,12 @@ def render_html(
     post_final_merged = merge_timeline_for_display(post_final_rounds, post_final_gaps)
     post_final_tot = aggregate_totals(post_final_rounds)
     post_final_gap_sec = interval_union_sec([(g.after_output_ts, g.next_request_ts) for g in post_final_gaps])
-    tool_calls_count = sum(len(r.tools) for r in rounds)
+    # 工具次数：优先统计真实执行的 tool_call（来自 tool_call_request/output 派生的
+    # ToolGap.detail_tools）；这才是真正发生过的工具调用数量。旧版日志里 LLM round
+    # 自报的 r.tools 也算进去，以兼容没有 tool_call_* 事件的历史日志。
+    tool_calls_from_gaps = sum(len(g.detail_tools) for g in gaps)
+    tool_calls_from_rounds = sum(len(r.tools) for r in rounds)
+    tool_calls_count = tool_calls_from_gaps or tool_calls_from_rounds
     input_tokens_sum = tot.get("input_tokens_sum") or 0
     output_tokens_sum = tot.get("output_tokens_sum") or 0
     total_tokens_sum = tot.get("total_tokens_sum") or 0
@@ -236,6 +267,108 @@ def render_html(
 </div>
 """
 
+    def _llm_compact_card(card_id: str, r: LLMRound) -> str:
+        """Compact LLM card used inside a cluster lane."""
+        child_badge = (
+            f'<span class="badge-pill badge-tool">{_esc(r.child_label or "child-session")}</span>'
+            if r.is_child_session else ""
+        )
+        tool_count = len(r.tools)
+        tool_chip = (
+            f'<span class="badge-pill badge-tool">tools×{tool_count}</span>'
+            if tool_count else ""
+        )
+        tokens_chip = (
+            f'<span class="badge-pill badge-time">tok {r.total_tokens or 0}</span>'
+            if (r.total_tokens or r.input_tokens or r.output_tokens) else ""
+        )
+        start_str = r.request_ts.strftime("%H:%M:%S.%f")[:-3]
+        end_str = r.output_ts.strftime("%H:%M:%S.%f")[:-3]
+        tools_block = ""
+        if r.tools:
+            tool_blocks = "".join(_copyable_pre(_json_pretty(item)) for item in r.tools)
+            tools_block = f"""
+    <div class="collapsible-header" onclick="toggleBlock('tools-{card_id}', this); event.stopPropagation();">
+      <span>本轮工具调用</span><span class="arrow">▼</span>
+    </div>
+    <div class="collapsible-content" id="tools-{card_id}">{tool_blocks}</div>
+"""
+        return f"""
+<div class="llm-compact-card" onclick="toggleBlock('{card_id}', this)">
+  <div class="compact-header">
+    <span class="badge-pill badge-time">{r.duration_sec:.3f}s</span>
+    <span class="badge-pill badge-type">模型</span>
+    {tool_chip}
+    {tokens_chip}
+    {child_badge}
+    <span class="compact-time">{start_str} → {end_str}</span>
+  </div>
+  <div class="collapsible-content" id="{card_id}">
+    <div class="collapsible-header" onclick="toggleBlock('in-{card_id}', this); event.stopPropagation();">
+      <span>模型输入</span><span class="arrow">▼</span>
+    </div>
+    <div class="collapsible-content" id="in-{card_id}">{_copyable_pre(_esc(r.request_body_full))}</div>
+    <div class="collapsible-header" onclick="toggleBlock('think-{card_id}', this); event.stopPropagation();">
+      <span>思考过程</span><span class="arrow">▼</span>
+    </div>
+    <div class="collapsible-content" id="think-{card_id}">{_copyable_pre(_esc(r.reasoning_full or ""))}</div>
+    <div class="collapsible-header" onclick="toggleBlock('reply-{card_id}', this); event.stopPropagation();">
+      <span>模型回复</span><span class="arrow">▼</span>
+    </div>
+    <div class="collapsible-content" id="reply-{card_id}">{_copyable_pre(_esc(r.output_body_excerpt))}</div>
+    {tools_block}
+  </div>
+</div>"""
+
+    def _gap_compact_card(card_id: str, tool_gap: ToolGap) -> str:
+        """Compact tool gap card used inside a cluster lane."""
+        item = tool_gap.detail_tools[0] if tool_gap.detail_tools else {}
+        tool_name = tool_gap.tools_triggered or "?"
+        status = item.get("_tool_status", "")
+        duration_ms = item.get("_tool_duration_ms", "")
+        if isinstance(duration_ms, (int, float)):
+            dur_str = f"{duration_ms:.0f}ms"
+        else:
+            dur_str = f"{tool_gap.duration_sec*1000:.0f}ms"
+        status_class = "ok" if status == "ok" else "error" if status == "error" else "unknown"
+        start_str = tool_gap.after_output_ts.strftime("%H:%M:%S.%f")[:-3]
+        end_str = tool_gap.next_request_ts.strftime("%H:%M:%S.%f")[:-3]
+        full_json = _json_pretty(item) if item else "(no tool_calls)"
+        return f"""
+<div class="gap-compact-card" onclick="toggleBlock('{card_id}', this)">
+  <div class="compact-header">
+    <span class="badge-pill badge-tool">{_esc(tool_name)}</span>
+    <span class="badge-pill badge-time">{dur_str}</span>
+    <span class="badge-status badge-{status_class}">{_esc(status or "?")}</span>
+    <span class="compact-time">{start_str} → {end_str}</span>
+  </div>
+  <div class="collapsible-content" id="{card_id}">
+    {_copyable_pre(full_json)}
+  </div>
+</div>"""
+
+    def _lane_cluster_block(start_idx: int, cluster_items: list[tuple[Literal["llm", "gap"], Any]]) -> str:
+        """Mixed lane: LLM rounds + tool gaps interleaved by start time inside a single cluster.
+
+        任意时间窗口重叠的连续事件（不论类型）都聚合到同一泳道，方便看出并发拓扑。
+        Cluster 内卡片按起始时间排序。
+        """
+        sorted_items = sorted(
+            cluster_items,
+            key=lambda it: (_item_start(it[0], it[1]), _item_end(it[0], it[1])),
+        )
+        cards: list[str] = []
+        for j, (k, obj) in enumerate(sorted_items):
+            card_id = f"cluster-mix-{start_idx}-{j}"
+            if k == "llm":
+                cards.append(_llm_compact_card(card_id, obj))
+            else:
+                cards.append(_gap_compact_card(card_id, obj))
+        return f"""
+<div class="lane-cluster">
+  {"".join(cards)}
+</div>"""
+
     def _append_timeline_items(items: list[tuple[Literal["llm", "gap"], Any]]) -> None:
         """Render as a tree by child_path.
 
@@ -302,13 +435,85 @@ def render_html(
 
             # Render items directly under this path; insert child block right after
             # the nearest parent event whose time reaches that child start time.
-            for kind, obj in path_items:
+            # 并发检测（混合类型）：相邻 LLM 与"实际有工具调用"的 gap 若时间区间重叠
+            # → 聚合为同一泳道；纵向兄弟卡片永远不出现时间重叠。
+            #
+            # idle gap（流程间隙 / no tool_calls / post-final）不参与泳道并排：
+            # 它语义上是一段等待，应作为独立分隔行单独纵向展示。
+            def _is_idle_gap(obj_: Any) -> bool:
+                if not isinstance(obj_, ToolGap):
+                    return False
+                if not obj_.detail_tools:
+                    return True
+                tt = (obj_.tools_triggered or "").strip()
+                return tt in ("", "(no tool_calls)", "(post-final)")
+
+            pi = 0
+            while pi < len(path_items):
+                kind, obj = path_items[pi]
+
+                # idle gap 永远不进入 cluster：直接纵向渲染。
+                if kind == "gap" and _is_idle_gap(obj):
+                    is_redundant_fork_gap = False
+                    is_fork_trigger_gap = False
+                    tools_text = (getattr(obj, "tools_triggered", "") or "").lower()
+                    if "fork_agent" in tools_text and pending_children:
+                        is_fork_trigger_gap = True
+                    if "fork_agent" in tools_text and not pending_children:
+                        is_redundant_fork_gap = True
+                    if not is_redundant_fork_gap:
+                        blocks.append(_gap_block(idx, obj))
+                    idx += 1
+                    pi += 1
+                    if is_fork_trigger_gap:
+                        while pending_children:
+                            _render_child_block(pending_children.pop(0))
+                        continue
+                    event_end = _item_end(kind, obj)
+                    while pending_children and path_start_ts.get(pending_children[0], datetime.max) <= event_end:
+                        _render_child_block(pending_children.pop(0))
+                    continue
+
+                # Scan forward to gather all consecutive items whose start_ts
+                # is earlier than the *running cluster end* — 经典区间合并算法。
+                # 跳过 idle gap：它不参与并排判定，遇到即终止扫描。
+                # 同时限制：LLM 与工具 gap 即使时间重叠也不并入同一泳道——
+                # 它们语义不同，分开纵向展示更清晰。
+                cluster_end_running = _item_end(kind, obj)
+                cluster_end_idx = pi + 1
+                while cluster_end_idx < len(path_items):
+                    nk, no = path_items[cluster_end_idx]
+                    if nk == "gap" and _is_idle_gap(no):
+                        break
+                    if nk != kind:
+                        break
+                    nstart = _item_start(nk, no)
+                    if nstart < cluster_end_running:
+                        nend = _item_end(nk, no)
+                        if nend > cluster_end_running:
+                            cluster_end_running = nend
+                        cluster_end_idx += 1
+                    else:
+                        break
+
+                if cluster_end_idx - pi >= 2:
+                    cluster_slice = path_items[pi:cluster_end_idx]
+                    blocks.append(_lane_cluster_block(idx, cluster_slice))
+                    idx += len(cluster_slice)
+                    # 把跨度内可挂载的 child sessions 全部插入
+                    while (
+                        pending_children
+                        and path_start_ts.get(pending_children[0], datetime.max) <= cluster_end_running
+                    ):
+                        _render_child_block(pending_children.pop(0))
+                    pi = cluster_end_idx
+                    continue
+
+                # Fall-through: 非重叠的孤立项 → 走原纵向渲染
                 is_redundant_fork_gap = False
                 is_fork_trigger_gap = False
                 if kind == "gap":
-                    tools_text = (obj.tools_triggered or "").lower()
-                    # 某些轮次会重复吐出 fork_agent tool_calls，但并未真正产生新的 fork session。
-                    # 当此处已没有待插入的 fork 子块时，隐藏该重复间隙，避免“fork_agent×3”重复噪声。
+                    tools_text = (getattr(obj, "tools_triggered", "") or "").lower()
                     if "fork_agent" in tools_text and pending_children:
                         is_fork_trigger_gap = True
                     if "fork_agent" in tools_text and not pending_children:
@@ -319,12 +524,10 @@ def render_html(
                 elif not is_redundant_fork_gap:
                     blocks.append(_gap_block(idx, obj))
                 else:
-                    # Skip duplicated fork-only gap without any new child sessions.
                     pass
                 idx += 1
+                pi += 1
 
-                # 当父层出现一次 fork_agent 触发时，将所有 fork 子块整体挂载在其后，
-                # 避免同批并行 fork 因首个输出时间不同被拆到后续重复 gap 之后。
                 if is_fork_trigger_gap:
                     while pending_children:
                         _render_child_block(pending_children.pop(0))
@@ -467,6 +670,26 @@ def render_html(
     .step-chart-wrapper {{ position:relative; height:520px; margin-bottom:12px; background:#fff; border:1px solid #e0e4ee; border-radius:8px; padding:10px; }}
     .timeline-item {{ border-left: 4px solid #667eea; padding-left: 14px; margin-bottom: 14px; }}
     .gap-item {{ border-left-color: #8e6bf2; }}
+    .gap-cluster {{ display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: nowrap; overflow-x: auto; padding-left: 14px; border-left: 4px solid #8e6bf2; }}
+    .gap-compact-card {{ flex: 1 1 0; min-width: 220px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fafbfc; cursor: pointer; overflow: hidden; }}
+    .lane-cluster {{ display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: nowrap; overflow-x: auto; padding-left: 14px; border-left: 4px solid #ffa726; background: linear-gradient(180deg, rgba(255,167,38,0.05), transparent 30%); border-radius: 4px; }}
+    .lane-cluster .llm-compact-card, .lane-cluster .gap-compact-card {{ flex: 1 1 0; min-width: 240px; }}
+    .gap-compact-card:hover {{ background: #f0f2f7; }}
+    .gap-compact-card .compact-header {{ display: flex; align-items: center; gap: 8px; padding: 8px 10px; flex-wrap: wrap; }}
+    .gap-compact-card .compact-time {{ font-size: 0.78em; color: #777; margin-left: auto; white-space: nowrap; }}
+    .gap-compact-card .collapsible-content {{ display: none; padding: 0 8px 8px; }}
+    .gap-compact-card .collapsible-content.active {{ display: block; }}
+    .llm-cluster {{ display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: nowrap; overflow-x: auto; padding-left: 14px; border-left: 4px solid #667eea; }}
+    .llm-compact-card {{ flex: 1 1 0; min-width: 260px; border: 1px solid #d8dcef; border-radius: 8px; background: #f7f8ff; cursor: pointer; overflow: hidden; }}
+    .llm-compact-card:hover {{ background: #eef0fc; }}
+    .llm-compact-card .compact-header {{ display: flex; align-items: center; gap: 8px; padding: 8px 10px; flex-wrap: wrap; }}
+    .llm-compact-card .compact-time {{ font-size: 0.78em; color: #777; margin-left: auto; white-space: nowrap; }}
+    .llm-compact-card > .collapsible-content {{ display: none; padding: 0 8px 8px; }}
+    .llm-compact-card > .collapsible-content.active {{ display: block; }}
+    .badge-status {{ display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.75em; font-weight: 600; text-transform: uppercase; }}
+    .badge-ok {{ background: #e8f5e9; color: #2e7d32; }}
+    .badge-error {{ background: #fdecea; color: #c62828; }}
+    .badge-unknown {{ background: #f5f5f5; color: #757575; }}
     .child-group {{ border-left: 6px solid #f57c00; background: #fff8ef; border-radius: 8px; padding: 10px 10px 4px; margin: 12px 0; }}
     .child-group .child-group {{ margin-left: 16px; margin-top: 10px; background: #fffaf5; border-left-color: #ff9800; }}
     .child-group .child-group .child-group {{ border-left-color: #fb8c00; background: #fffbf7; }}
