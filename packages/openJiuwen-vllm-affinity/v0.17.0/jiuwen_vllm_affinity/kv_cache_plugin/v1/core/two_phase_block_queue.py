@@ -33,8 +33,20 @@ class TwoPhaseBlockQueue:
 
     We do not track the free/release boundary at all: both are drained from the head
     in order, so ``released_tail`` (the reusable|normal divider) is the only structural
-    pointer. Whether a popped block is fresh or reused is recorded on the block itself
-    (``jiuwen_allocated``) purely to label the ``4-evict`` debug log.
+    pointer. Whether the head block is from the never-used *free* segment or from a
+    previously used *release/normal* segment is tracked with per-block markers (see
+    below).
+
+    Per-block allocation markers (set in ``_take_head`` / ``remove``):
+
+    - ``jiuwen_allocated`` (persistent): ``True`` once the block has ever been popped
+      from this queue or removed via ``remove`` (prefix-cache touch). Never cleared.
+      At the next ``popleft``, the pre-pop value distinguishes a virgin free block
+      (``False``) from a reused release/normal block (``True``).
+    - ``jiuwen_reclaimed`` (transient): set on each ``popleft`` to the pre-pop value
+      of ``jiuwen_allocated``. Consumed by ``bind_allocated_blocks`` to choose
+      ``reset_blocks`` (reused; clear stale ``block_to_sessions``) vs ``add_blocks``
+      (fresh). Also read by the ``4-evict`` debug log before bind clears it.
     """
 
     def __init__(self, blocks: list[KVCacheBlock]) -> None:
@@ -81,7 +93,9 @@ class TwoPhaseBlockQueue:
         if head is None or head is self.fake_free_list_tail:
             raise ValueError("No free blocks available")
 
-        # free if it was never popped before; release/normal otherwise.
+        # Snapshot whether this pop reuses a release/normal block (jiuwen_allocated
+        # was True) vs a never-used free block (False). Persist allocated=True and
+        # pass the snapshot to bind_allocated_blocks via jiuwen_reclaimed.
         reclaimed = getattr(head, "jiuwen_allocated", False)
         head.jiuwen_allocated = True
 
@@ -128,6 +142,8 @@ class TwoPhaseBlockQueue:
         if block.prev_free_block is None or block.next_free_block is None:
             raise RuntimeError(f"remove() called on an invalid block: {block}")
 
+        # Prefix-cache touch: block leaves the queue without jiuwen_reclaimed, but
+        # must be treated as previously allocated on any later popleft.
         block.jiuwen_allocated = True
         if block is self.released_tail:
             self.released_tail = block.prev_free_block

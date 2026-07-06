@@ -15,7 +15,6 @@ def kv_debug_enabled() -> bool:
     return os.environ.get(_KV_DEBUG_ENV, "").strip().lower() in _TRUTHY
 
 
-def kv_log_info(msg: str, *args) -> None:
-    """Emit [jiuwen-kv] trace logs when ``JIUWEN_KV_DEBUG=1`` (or true/yes/on)."""
-    if kv_debug_enabled():
-        logger.info(msg, *args)
+def kv_label_session(session_id: str | None) -> str:
+    """Compact label for cache_salt / session binding id in trace logs."""
+    return session_id if session_id else "-"

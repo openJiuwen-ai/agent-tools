@@ -11,8 +11,14 @@ from vllm.v1.core.single_type_kv_cache_manager import SingleTypeKVCacheManager
 from jiuwen_vllm_affinity.kv_cache_plugin.v1.core.kv_cache_session_manager import (
     KvCacheSessionManager,
 )
-from jiuwen_vllm_affinity.kv_cache_plugin.v1.request import request_get_sharing_cache_salt
-from jiuwen_vllm_affinity.kv_cache_plugin.log import kv_log_info
+from jiuwen_vllm_affinity.kv_cache_plugin.v1.request import (
+    request_get_session_binding_id,
+)
+from jiuwen_vllm_affinity.kv_cache_plugin.kv_debug import (
+    kv_debug_enabled,
+    kv_label_session,
+    logger,
+)
 
 _allocate_new_orig = SingleTypeKVCacheManager.allocate_new_blocks
 _cache_blocks_orig = SingleTypeKVCacheManager.cache_blocks
@@ -153,6 +159,55 @@ def collect_release_tail_orphans(
     return tail + orphans
 
 
+def _set_alloc_log_context(block_pool, session_id: str | None) -> None:
+    block_pool.jiuwen_alloc_session_id = session_id
+
+
+def _clear_alloc_log_context(block_pool) -> None:
+    block_pool.jiuwen_alloc_session_id = None
+
+
+def _sessions_on_block(
+    session_manager: KvCacheSessionManager, block_id: int
+) -> list[str]:
+    sessions = session_manager.block_to_sessions
+    if block_id < 0 or block_id >= len(sessions):
+        return []
+    return list(sessions[block_id])
+
+
+def bind_allocated_blocks(
+    session_manager: KvCacheSessionManager,
+    blocks: Sequence[KVCacheBlock],
+    session_id: str | None,
+) -> None:
+    """Bind newly allocated blocks to a session.
+
+    Fresh blocks use append semantics (``add_blocks``). Blocks reclaimed from the
+    free queue (``jiuwen_reclaimed``) replace any stale ``block_to_sessions``
+    entries via ``reset_blocks`` before the new owner is recorded (or cleared
+    when ``session_id`` is None).
+    """
+    if not blocks:
+        return
+
+    fresh: list[KVCacheBlock] = []
+    reclaimed: list[KVCacheBlock] = []
+    for blk in blocks:
+        if blk.is_null or blk.block_id < 0:
+            continue
+        if getattr(blk, "jiuwen_reclaimed", False):
+            reclaimed.append(blk)
+            del blk.jiuwen_reclaimed
+        else:
+            fresh.append(blk)
+
+    if reclaimed:
+        session_manager.reset_blocks(reclaimed, session_id)
+    if fresh and session_id is not None:
+        session_manager.add_blocks(fresh, session_id)
+
+
 def allocate_new_computed_blocks_jiuwen(
     self,
     request_id: str,
@@ -195,40 +250,71 @@ def allocate_new_computed_blocks_jiuwen(
     req_blocks.extend(new_computed_blocks)
     self.num_cached_block[request_id] = len(req_blocks)
 
-    reused_block_ids = [
-        b.block_id for b in new_computed_blocks if not b.is_null
-    ]
-    if reused_block_ids:
-        kv_log_info(
-            "[jiuwen-kv] 2-prefix_hit: block_ids=%s",
-            reused_block_ids,
-        )
+    if kv_debug_enabled():
+        reused_block_ids = [
+            b.block_id for b in new_computed_blocks if not b.is_null
+        ]
+        if reused_block_ids:
+            owners_sample: list[str] = []
+            if session_id is not None:
+                for bid in reused_block_ids[:3]:
+                    owners = _sessions_on_block(
+                        self.kv_cache_session_manager, bid
+                    )
+                    owners_sample.append(f"{bid}:{owners}")
+            logger.info(
+                "[jiuwen-kv] 2-prefix_hit: session=%s block_ids=%s "
+                "owners_before_bind=%s",
+                kv_label_session(session_id),
+                reused_block_ids,
+                owners_sample,
+            )
 
     if session_id is not None and len(new_computed_blocks) > 0:
         self.kv_cache_session_manager.add_blocks(new_computed_blocks, session_id)
 
     if num_external_computed_tokens > 0:
-        allocated_blocks = self.block_pool.get_new_blocks(
-            cdiv(num_total_computed_tokens, self.block_size) - len(req_blocks)
-        )
+        if kv_debug_enabled():
+            try:
+                _set_alloc_log_context(self.block_pool, session_id)
+                allocated_blocks = self.block_pool.get_new_blocks(
+                    cdiv(num_total_computed_tokens, self.block_size) - len(req_blocks)
+                )
+            finally:
+                _clear_alloc_log_context(self.block_pool)
+        else:
+            allocated_blocks = self.block_pool.get_new_blocks(
+                cdiv(num_total_computed_tokens, self.block_size) - len(req_blocks)
+            )
         req_blocks.extend(allocated_blocks)
-        if session_id is not None and allocated_blocks:
-            self.kv_cache_session_manager.add_blocks(allocated_blocks, session_id)
+        bind_allocated_blocks(
+            self.kv_cache_session_manager, allocated_blocks, session_id
+        )
 
 
 def allocate_new_blocks_jiuwen(
     self, request_id: str, num_tokens: int, num_tokens_main_model: int
 ):
     session_id = self.get_jiuwen_sharing_session_id()
-    blocks = _allocate_new_orig(self, request_id, num_tokens, num_tokens_main_model)
-    if len(blocks) > 0 and session_id is not None:
-        self.kv_cache_session_manager.add_blocks(blocks, session_id)
+    if kv_debug_enabled():
+        try:
+            _set_alloc_log_context(self.block_pool, session_id)
+            blocks = _allocate_new_orig(
+                self, request_id, num_tokens, num_tokens_main_model
+            )
+        finally:
+            _clear_alloc_log_context(self.block_pool)
+    else:
+        blocks = _allocate_new_orig(
+            self, request_id, num_tokens, num_tokens_main_model
+        )
+    bind_allocated_blocks(self.kv_cache_session_manager, blocks, session_id)
     return blocks
 
 
 def cache_blocks_jiuwen(self, request, num_tokens: int) -> None:
     _cache_blocks_orig(self, request, num_tokens)
-    session_id = request_get_sharing_cache_salt(request)
+    session_id = request_get_session_binding_id(request)
     if session_id is None:
         return
     req_blocks = self.req_to_blocks.get(request.request_id, [])
@@ -295,38 +381,53 @@ class SingleTypeKVCacheManagerEx(SingleTypeKVCacheManager):
                 resolved_blocks.append(blk)
                 seen_ids.add(blk.block_id)
 
+        debug_kv = kv_debug_enabled()
+        owned_count = 0
+        owned_block_ids: set[int] = set()
+        if debug_kv and session_id is not None:
+            sessions = self.kv_cache_session_manager.block_to_sessions
+            for blk in resolved_blocks:
+                bid = blk.block_id
+                if bid >= 0 and bid < len(sessions) and session_id in sessions[bid]:
+                    owned_count += 1
+                    owned_block_ids.add(bid)
+
         session_released = self.kv_cache_session_manager.release_blocks(
             resolved_blocks, session_id
         )
         aged_count = self.block_pool.aging_block(session_released)
-        if session_released:
-            block_ids = [b.block_id for b in session_released]
+
+        if not debug_kv or session_id is None or owned_count == 0:
+            return len(session_released)
+
+        shared_remain = 0
+        sessions = self.kv_cache_session_manager.block_to_sessions
+        for bid in owned_block_ids:
+            if bid < len(sessions) and len(sessions[bid]) > 0:
+                shared_remain += 1
+
+        freed_ids = [b.block_id for b in session_released]
+        if freed_ids:
             pending = len(session_released) - aged_count
-            if aged_count > 0:
-                if pending > 0:
-                    kv_log_info(
-                        "[jiuwen-kv] 3-release: session_unbound block_ids=%s, "
-                        "aged_immediately=%d, pending_aging=%d",
-                        block_ids,
-                        aged_count,
-                        pending,
-                    )
-                else:
-                    kv_log_info(
-                        "[jiuwen-kv] 3-release: session_unbound block_ids=%s, "
-                        "aged_immediately=%d",
-                        block_ids,
-                        aged_count,
-                    )
-            else:
-                kv_log_info(
-                    "[jiuwen-kv] 3-release: session_unbound block_ids=%s, "
-                    "pending_aging=%d",
-                    block_ids,
-                    pending,
-                )
-        # Return session-unbound count: blocks still referenced (ref_cnt>0) or
-        # not yet in the free queue are deferred via pending_aging on free.
+            logger.info(
+                "[jiuwen-kv] 3-release: session=%s unbound=%d freed=%d "
+                "shared_remain=%d block_ids_freed=%s aged=%d pending=%d",
+                kv_label_session(session_id),
+                owned_count,
+                len(session_released),
+                shared_remain,
+                freed_ids,
+                aged_count,
+                pending,
+            )
+        else:
+            logger.info(
+                "[jiuwen-kv] 3-release: session=%s unbound=%d freed=0 "
+                "shared_remain=%d",
+                kv_label_session(session_id),
+                owned_count,
+                shared_remain,
+            )
         return len(session_released)
 
 

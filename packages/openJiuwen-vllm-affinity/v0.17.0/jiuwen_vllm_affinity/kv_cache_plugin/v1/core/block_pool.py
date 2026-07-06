@@ -7,7 +7,11 @@ from vllm.distributed.kv_events import KVCacheEvent
 from vllm.v1.core.block_pool import BlockHashToBlockMap, BlockPool
 from vllm.v1.core.kv_cache_metrics import KVCacheMetricsCollector
 from vllm.v1.core.kv_cache_utils import KVCacheBlock
-from jiuwen_vllm_affinity.kv_cache_plugin.log import kv_log_info
+from jiuwen_vllm_affinity.kv_cache_plugin.kv_debug import (
+    kv_debug_enabled,
+    kv_label_session,
+    logger,
+)
 from jiuwen_vllm_affinity.kv_cache_plugin.v1.core.two_phase_block_queue import TwoPhaseBlockQueue
 
 _orig_free_blocks = BlockPool.free_blocks
@@ -34,19 +38,22 @@ def free_blocks_jiuwen(self, ordered_blocks):
 def get_new_blocks_jiuwen(self, num_blocks: int) -> list[KVCacheBlock]:
     ret = _orig_get_new_blocks(self, num_blocks)
 
+    if not kv_debug_enabled():
+        return ret
+
+    session_id = getattr(self, "jiuwen_alloc_session_id", None)
     reclaimed_ids = [
         b.block_id for b in ret if getattr(b, "jiuwen_reclaimed", False)
     ]
-    for b in ret:
-        if hasattr(b, "jiuwen_reclaimed"):
-            del b.jiuwen_reclaimed
+    allocated_ids = [b.block_id for b in ret]
 
     if reclaimed_ids:
-        kv_log_info("[jiuwen-kv] 4-evict: block_ids=%s", reclaimed_ids)
-    if ret:
-        kv_log_info(
-            "[jiuwen-kv] 1-allocate: block_ids=%s",
-            [b.block_id for b in ret],
+        logger.info("[jiuwen-kv] 4-evict: block_ids=%s", reclaimed_ids)
+    if allocated_ids:
+        logger.info(
+            "[jiuwen-kv] 1-allocate: session=%s block_ids=%s",
+            kv_label_session(session_id),
+            allocated_ids,
         )
     return ret
 

@@ -3,7 +3,9 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 Huawei Technologies Co., Ltd.
 # 本文件基于vLLM v0.17.0的KVCacheManager实现修改而来，用于实现双区缓存特性
 
-from jiuwen_vllm_affinity.kv_cache_plugin.v1.request import request_get_sharing_cache_salt
+from jiuwen_vllm_affinity.kv_cache_plugin.v1.request import (
+    request_get_session_binding_id,
+)
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
 from vllm.v1.core.kv_cache_utils import BlockHash
 from vllm.v1.request import Request
@@ -77,8 +79,8 @@ class KVCacheManagerEx(KVCacheManager):
         if num_blocks_to_allocate > self.block_pool.get_num_free_blocks():
             return None
 
-        sharing_salt = request_get_sharing_cache_salt(request)
-        self.coordinator.set_jiuwen_sharing_session_id(sharing_salt)
+        session_binding_id = request_get_session_binding_id(request)
+        self.coordinator.set_jiuwen_sharing_session_id(session_binding_id)
         try:
             if (
                 new_computed_block_list is not self.empty_kv_cache_blocks.blocks
@@ -102,13 +104,13 @@ class KVCacheManagerEx(KVCacheManager):
 
         # Partial tail blocks (e.g. block 213 for 1000 tokens) are never prefix-cached
         # but must be session-bound for release_kv_cache orphan collection.
-        if sharing_salt is not None:
+        if session_binding_id is not None:
             for manager in self.coordinator.single_type_managers:
                 req_blocks = manager.req_to_blocks.get(request.request_id, [])
                 live_blocks = [b for b in req_blocks if not b.is_null]
                 if live_blocks:
                     manager.kv_cache_session_manager.add_blocks(
-                        live_blocks, sharing_salt
+                        live_blocks, session_binding_id
                     )
 
         if not self.enable_caching or delay_cache_blocks:

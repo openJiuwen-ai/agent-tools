@@ -75,9 +75,13 @@ POST /release_kv_cache
 | 字段 | 说明 |
 |------|------|
 | `cache_salt` | 回显请求中的 `cache_salt` |
-| `block_released` | 本次从 session 解绑的 KV block 数量 |
+| `block_released` | 本次释放后可进入 aging 的 KV block 数量（见下方说明） |
 
-`block_released` 统计的是 session 解绑数，而非调用瞬间立即移入 release 区的数量。若对应 block 仍被进行中的请求持有（`ref_cnt > 0`），会先登记为 `pending_aging`，待请求结束、block 归还空闲队列后再移入 release 区——这在典型调用时序（chat 完成后立即 release）下是正常现象。
+`block_released` 统计的是：当前 session 解绑后，该 block 上**已无任何 session 占用**、可立即进入 aging 流程的块数（debug 日志中的 `freed`），**不是**「从当前 session 解绑的块总数」。
+
+在 `cache_sharing=true` 且多个 session 共享同一物理 block 时，release 会解绑当前 session，但若其他 session 仍占用该 block，则不计入 `block_released`（debug 日志中体现为 `unbound > 0` 且 `shared_remain > 0`、`freed = 0`）。若需按客户端隔离释放计数，应设 `cache_sharing=false`。
+
+此外，`block_released` 也不等于调用瞬间立即移入 release 区的数量：若对应 block 仍被进行中的请求持有（`ref_cnt > 0`），会先登记为 `pending_aging`，待请求结束、block 归还空闲队列后再移入 release 区——这在典型调用时序（chat 完成后立即 release）下是正常现象。
 
 ## 可观测性
 
@@ -85,7 +89,7 @@ POST /release_kv_cache
 
 | 日志阶段 | 含义 |
 |----------|------|
-| `1-allocate` | 新分配 block |
-| `2-prefix_hit` | prefix cache 命中复用 |
-| `3-release` | session 解绑；常态为 `pending_aging=N`，表示延后老化 |
-| `4-evict` | 从 release/normal 段复用分配 |
+| `1-allocate` | 本次 `get_new_blocks` 分配的全部 block；含 `session`（cache_salt） |
+| `2-prefix_hit` | prefix cache 命中复用；`block_ids` 为全部命中块，`owners_before_bind` 为绑定前**前 3 个** block 的 session 采样（格式 `block_id:[owner,…]`） |
+| `3-release` | session 解绑；`unbound`=解绑 block 数，`freed`=可 aging 数，`shared_remain`=解绑后仍被其他 session 占用的 block 数 |
+| `4-evict` | 从 release/normal 段复用弹出（仅 `block_ids`） |

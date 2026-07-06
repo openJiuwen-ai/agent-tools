@@ -49,5 +49,20 @@ def request_get_sharing_cache_salt(request) -> str | None:
     )
 
 
+def request_get_session_binding_id(request) -> str | None:
+    """Session id used for block_to_sessions binding and release_kv_cache.
+
+    - cache_sharing=true: sharing_cache_salt packed in request_id
+    - cache_sharing=false: cache_salt on the request (prefix isolation per client)
+    """
+    sharing_salt = request_get_sharing_cache_salt(request)
+    if sharing_salt:
+        return sharing_salt
+    cache_salt = getattr(request, "cache_salt", None)
+    if cache_salt:
+        return cache_salt
+    return None
+
+
 def register_request():
     Request.from_engine_core_request = from_engine_core_request_v2

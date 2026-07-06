@@ -1,4 +1,4 @@
-from jiuwen_vllm_affinity.kv_cache_plugin.log import logger
+from jiuwen_vllm_affinity.kv_cache_plugin.kv_debug import logger
 from jiuwen_vllm_affinity.kv_cache_plugin.patcher import apply_patches
 
 
