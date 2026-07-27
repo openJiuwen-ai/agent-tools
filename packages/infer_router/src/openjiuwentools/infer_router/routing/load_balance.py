@@ -668,15 +668,22 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
 
         is_same_group = last_group is not None and worker.group == last_group
 
-        # 3.7 亲和性奖励（group 级别）
+        # 3.7 亲和性奖励：KV 缓存重叠对*每个*请求都生效，不再要求同组复用。
+        # 命中前缀缓存的 worker 直接按重叠比例获得加分（affinity_base * overlap）；
+        # 若同时是同组复用，再叠加历史复用/间隔加成。这样冷启动请求也能被路由到
+        # 已缓存其前缀的 worker，而不是被未学习的 LinTS 噪声淹没。
+        affinity_bonus = self.affinity_base * overlap
         if is_same_group and reuse_after > 0:
-            affinity_bonus = (
-                self.affinity_base
-                + self.affinity_reuse_weight * float(reuse_after)
+            affinity_bonus += (
+                self.affinity_reuse_weight * float(reuse_after)
                 + self.affinity_iat_weight * iat_factor
             ) * (0.5 + 0.5 * overlap)
+        if affinity_bonus:
             val += affinity_bonus
-            logger.debug(f"[ALGO: CTS] {worker.worker_id}: affinity_bonus={affinity_bonus:.3f} (group={worker.group})")
+            logger.debug(
+                f"[ALGO: CTS] {worker.worker_id}: affinity_bonus={affinity_bonus:.3f} "
+                f"(overlap={overlap:.3f}, group={worker.group})"
+            )
 
         # 3.8 切换惩罚（group 级别）
         if last_group is not None and not is_same_group and reuse_after > 0:
@@ -798,7 +805,12 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
             chosen_worker = top_overlap_workers[chosen_idx]
             selection_reason = "load_tiebreak"
         else:
-            chosen_worker = max(workers, key=lambda w: worker_scores.get(w.worker_id, {}).get("score", 0.0))
+            # Exactly one worker is the clear cache-overlap winner (all others are
+            # >10% of the prompt behind it): route to it. Previously this picked
+            # max score over ALL workers, so a lone overlap winner could be
+            # discarded in favour of a higher-scoring but cache-cold worker,
+            # defeating prefix-cache routing.
+            chosen_worker = top_overlap_workers[0]
             selection_reason = "overlap_affinity"
 
         t_scoring = time.perf_counter()
