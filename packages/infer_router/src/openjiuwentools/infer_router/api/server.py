@@ -515,10 +515,16 @@ def register_routes(app: FastAPI):
                 if not scheduled:
                     raise RuntimeError("No request available from scheduler")
                 logger.debug("[STEP 7] Routing request to worker pair")
-                prefill_id, decode_id = router.route_to_workers(scheduled.route_hint)
-                return scheduled, prefill_id, decode_id
+                # Route for THIS handler's own route_hint, not the scheduler-popped
+                # one. get_next_request() may return a different queued request
+                # (WSPT/LCFS, or FCFS under concurrent coroutine interleaving), but
+                # this handler forwards its own request below, so routing must use
+                # its own route_hint or the worker's KV-cache prefix affinity is lost.
+                # The pop is kept only for queue-drain / metrics side effects.
+                prefill_id, decode_id = router.route_to_workers(route_hint)
+                return prefill_id, decode_id
 
-            scheduled_request, prefill_id, decode_id = dispatch_request()
+            prefill_id, decode_id = dispatch_request()
             router_dispatch_end_time = time.time()
             logger.debug(
                 f"[STEP 8] Request {request_id} dispatched to prefill={prefill_id}, decode={decode_id}"
@@ -726,10 +732,15 @@ def register_routes(app: FastAPI):
                 scheduled = scheduler.get_next_request()
                 if not scheduled:
                     raise RuntimeError("No request available from scheduler")
-                prefill_id, decode_id = router.route_to_workers(scheduled.route_hint)
-                return scheduled, prefill_id, decode_id
+                # Route for THIS handler's own route_hint, not the scheduler-popped
+                # one (which may be a different queued request under WSPT/LCFS or
+                # concurrent FCFS interleaving). This handler forwards its own request
+                # below, so routing must use its own route_hint or KV-cache prefix
+                # affinity is lost. The pop is kept only for queue-drain / metrics.
+                prefill_id, decode_id = router.route_to_workers(route_hint)
+                return prefill_id, decode_id
 
-            scheduled_request, prefill_id, decode_id = dispatch_request()
+            prefill_id, decode_id = dispatch_request()
             router_dispatch_end_time = time.time()
 
             max_tokens = comp_request.max_tokens or 128
