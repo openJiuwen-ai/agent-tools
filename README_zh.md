@@ -197,3 +197,6 @@ pre-commit run --files file1.py file2.md
 - 项目主页：<https://gitcode.com/openJiuwen/agent-tools>
 - 问题反馈：<https://gitcode.com/openJiuwen/agent-tools/issues>
 - 讨论区：<https://gitcode.com/openJiuwen/agent-tools/discussions>
+
+本产品仅作为流程编排工具，不包含 AI 模型能力；用户在连接 AI 模型用于特定业务场景时，需自行承担欧盟 AI 法案等相关合规义务。
+
