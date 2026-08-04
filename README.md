@@ -47,7 +47,7 @@ pip install openjiuwentools-core
 #### Option 3: Development mode install (from source)
 
 ```bash
-git clone https://gitcode.com/openJiuwen/agent-tools.git
+git clone https://github.com/openJiuwen-ai/agent-tools.git
 cd agent-tools
 
 # Install with uv (recommended)
@@ -68,7 +68,7 @@ pip install -e ".[top]"
 ### 2. Clone the Repository
 
 ```bash
-git clone https://gitcode.com/openJiuwen/agent-tools.git
+git clone https://github.com/openJiuwen-ai/agent-tools.git
 cd agent-tools
 ```
 
@@ -194,8 +194,7 @@ pre-commit run --files file1.py file2.md
 
 If you have questions or suggestions, please reach out via:
 
-- Project homepage: <https://gitcode.com/openJiuwen/agent-tools>
-- Issue tracker: <https://gitcode.com/openJiuwen/agent-tools/issues>
-- Discussions: <https://gitcode.com/openJiuwen/agent-tools/discussions>
+- Project homepage: <https://github.com/openJiuwen-ai/agent-tools>
+- Issue tracker: <https://github.com/openJiuwen-ai/agent-tools/issues>
 
 This product serves solely as a workflow orchestration tool and does not embed any AI model capabilities. When users integrate AI models for specific business scenarios, they shall bear full responsibility for compliance obligations under the EU AI Act and other relevant regulatory frameworks.
