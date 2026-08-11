@@ -1,8 +1,9 @@
 import time
 from collections.abc import AsyncGenerator, Sequence
-from typing import Union
+from typing import Any, Union
 
 import jinja2
+import pydantic
 from fastapi import Request
 
 from jiuwen_vllm_affinity.kv_cache_plugin.v1.engine.core import (
@@ -36,6 +37,38 @@ def _cache_sharing_on(request: ChatCompletionRequest) -> bool:
         return bool(request.cache_sharing)
     extra = request.model_extra or {}
     return bool(extra.get("cache_sharing"))
+
+
+def _tool_to_dict(tool: Any) -> dict:
+    """Coerce a tool entry to a plain dict regardless of how pydantic parsed it.
+
+    vLLM's ChatCompletionRequest.tools field may end up holding raw dicts
+    (instead of pydantic BaseModel instances) depending on the vLLM version,
+    the tool field's annotation, and whether extra="allow" skipped validation.
+    Calling tool.model_dump() on a dict raises AttributeError; this helper
+    makes release_kv_cache robust to both shapes.
+    """
+    if tool is None:
+        return {}
+    if isinstance(tool, pydantic.BaseModel):
+        return tool.model_dump()
+    if isinstance(tool, dict):
+        return tool
+    # Fall back: best-effort coercion for Mapping-like or other objects.
+    try:
+        return dict(tool)
+    except (TypeError, ValueError):
+        return {"tool": str(tool)}
+
+
+def _tools_to_dicts(tools: Any) -> list[dict] | None:
+    """Normalize request.tools into a list of plain dicts (or None)."""
+    if tools is None:
+        return None
+    if isinstance(tools, list):
+        return [_tool_to_dict(t) for t in tools]
+    # Single tool object instead of a list — handle gracefully.
+    return [_tool_to_dict(tools)]
 
 
 class OpenAIServingChatEx(OpenAIServingChat):
@@ -208,6 +241,23 @@ class OpenAIServingChatEx(OpenAIServingChat):
     async def release_kv_cache(
         self, request: ReleaseKvCacheRequest, raw_request: Request
     ) -> Union[ReleaseKvCacheResponse, ErrorResponse]:
+        logger.info(
+            "release_kv_cache enter: cache_salt=%s, messages_released_index=%s, "
+            "tools_released_index=%s, cache_sharing=%s, message_count=%d, "
+            "tool_count=%s",
+            request.cache_salt,
+            request.messages_released_index,
+            request.tools_released_index,
+            getattr(request, "cache_sharing", None),
+            len(request.messages) if request.messages else 0,
+            len(request.tools) if request.tools is not None else None,
+        )
+        if request.tools is not None and len(request.tools) > 0:
+            tool_types = [type(t).__name__ for t in request.tools]
+            logger.info(
+                "release_kv_cache request.tools element types: %s", tool_types
+            )
+
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             logger.error("Error with model %s", error_check_ret)
@@ -221,11 +271,12 @@ class OpenAIServingChatEx(OpenAIServingChat):
                 request, supports_default_mm_loras=True
             )
 
-            tool_dicts = (
-                None
-                if request.tools is None
-                else [tool.model_dump() for tool in request.tools]
-            )
+            tool_dicts = _tools_to_dicts(request.tools)
+            if tool_dicts is not None:
+                logger.info(
+                    "release_kv_cache normalized tools to dicts: count=%d",
+                    len(tool_dicts),
+                )
 
             message_length = len(request.messages)
             message_begin = (
@@ -241,8 +292,21 @@ class OpenAIServingChatEx(OpenAIServingChat):
             tool_changed = after_tool_dicts is not None and tool_dicts is not None and (
                 len(tool_dicts) != len(after_tool_dicts)
             )
+            logger.info(
+                "release_kv_cache diff: message_begin=%d, message_length=%d, "
+                "tool_changed=%s, full_tool_count=%s, partial_tool_count=%s",
+                message_begin,
+                message_length,
+                tool_changed,
+                len(tool_dicts) if tool_dicts is not None else None,
+                len(after_tool_dicts) if after_tool_dicts is not None else None,
+            )
 
             if message_begin >= message_length and not tool_changed:
+                logger.info(
+                    "release_kv_cache no-op: nothing to release "
+                    "(message_begin>=length and no tool change)."
+                )
                 return ReleaseKvCacheResponse(
                     cache_salt=request.cache_salt, block_released=0
                 )
@@ -253,9 +317,16 @@ class OpenAIServingChatEx(OpenAIServingChat):
 
             full_render = await self.render_chat_request(request)
             if isinstance(full_render, ErrorResponse):
+                logger.error(
+                    "release_kv_cache full render failed: %s", full_render
+                )
                 return full_render
 
             (_, before_engine_prompts) = full_render
+            logger.info(
+                "release_kv_cache full render ok: before_engine_prompts=%d",
+                len(before_engine_prompts),
+            )
 
             # message_begin == 0 means release from the first message; the partial
             # prefix is empty and must not go through chat template rendering.
@@ -274,8 +345,17 @@ class OpenAIServingChatEx(OpenAIServingChat):
                 )
                 partial_render = await self.render_chat_request(partial_req)
                 if isinstance(partial_render, ErrorResponse):
+                    logger.error(
+                        "release_kv_cache partial render failed: %s",
+                        partial_render,
+                    )
                     return partial_render
                 (_, after_engine_prompts) = partial_render
+                logger.info(
+                    "release_kv_cache partial render ok: "
+                    "after_engine_prompts=%d",
+                    len(after_engine_prompts),
+                )
         except (ValueError, TypeError, RuntimeError, jinja2.TemplateError) as e:
             logger.exception("Error in preprocessing prompt inputs")
             return self.create_error_response(f"{e} {e.__cause__}")
@@ -312,6 +392,12 @@ class OpenAIServingChatEx(OpenAIServingChat):
             ):
                 after_token_ids.extend(engine_prompt[_PROMPT_TOKEN_IDS_KEY])
 
+        logger.info(
+            "release_kv_cache token diff: before=%d, after=%d",
+            len(before_token_ids),
+            len(after_token_ids),
+        )
+
         if len(before_token_ids) <= len(after_token_ids):
             raise ValueError(
                 f"before_token_ids length ({len(before_token_ids)}) must be "
@@ -337,6 +423,11 @@ class OpenAIServingChatEx(OpenAIServingChat):
                     if last_match_index_after >= match_count:
                         break
             released_token_index = last_match_index_before + 1
+        logger.info(
+            "release_kv_cache resolved released_token_index=%d, tool_changed=%s",
+            released_token_index,
+            tool_changed,
+        )
 
         supported_tasks = await self.engine_client.get_supported_tasks()
         request_params: list[tuple[Sequence[bytestr], int]] = []
@@ -395,8 +486,19 @@ class OpenAIServingChatEx(OpenAIServingChat):
         except ValueError as e:
             return self.create_error_response(str(e))
 
+        logger.info(
+            "release_kv_cache dispatching to engine_client.release_kv_cache: "
+            "cache_salt=%s, request_params=%d",
+            request.cache_salt,
+            len(request_params),
+        )
         released_num = await self.engine_client.release_kv_cache(
             request.cache_salt or "", request_params
+        )
+        logger.info(
+            "release_kv_cache done: cache_salt=%s, block_released=%d",
+            request.cache_salt,
+            released_num,
         )
         return ReleaseKvCacheResponse(
             cache_salt=request.cache_salt, block_released=released_num
