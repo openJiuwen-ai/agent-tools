@@ -5,6 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
+*.dll
 
 # Distribution / packaging
 dist/
@@ -95,3 +96,19 @@ uv.lock
 # Claude
 CLAUDE.md
 .claude/
+
+# AscendC operator build artifacts (openjiuwen_ascend_ops)
+kernel_meta/
+**/csrc/*/build_*/
+**/csrc/*/autogen/
+**/csrc/build/
+**/csrc/output/
+
+# Dynamically generated OPP install directory
+**/pysrc/**/_cann_ops_custom/
+
+# Build output and install directories for debug/perf
+ztmp/
+
+# CANN custom-op self-installing package
+**/*.run
