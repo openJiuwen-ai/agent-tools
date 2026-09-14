@@ -9,6 +9,7 @@ This is a code repository for building and managing intelligent agent tools, con
 | `packages/` | Python package directory, containing all installable sub-packages |
 | `packages/openjiuwentools_core/` | Core package, providing foundational functionality |
 | `packages/openjiuwentools_infer_router/` | Inference routing package, providing a KV Cache-aware routing system |
+| `packages/openjiuwen_ascend_ops/` | Ascend NPU operator package (CANN custom ops, currently `bit_residual_pack_k8v4`) |
 | `openJiuwen-vllm-affinity/` | Integration project between OpenJiuwen and vLLM, supporting affinity scheduling |
 | `Agent Innovation Challenge/` | Code and resources related to the Agent Innovation Challenge |
 
@@ -20,6 +21,7 @@ This project adopts a modular package management mechanism, where each sub-packa
 |------------------|---------------------|
 | `packages/openjiuwentools_core` | `openjiuwentools-core-{version}-py3-none-any.whl` |
 | `packages/openjiuwentools_infer_router` | `openjiuwentools-infer-router-{version}-py3-none-any.whl` |
+| `packages/openjiuwen_ascend_ops` | `openjiuwentools-openjiuwen-ascend-ops` (requires Ascend NPU + CANN to build; see `docs/20-build/`) |
 
 ### Installation
 
@@ -183,6 +185,13 @@ pre-commit run --files file1.py file2.md
 - Supports multiple load balancing algorithms and scheduling strategies
 - Includes a complete API service layer and monitoring system
 - KV Cache-aware routing, supporting vLLM and SGLang
+
+### openjiuwen-ascend-ops package
+
+- AscendC custom operators for Ascend NPU, built as a CANN custom-op project + PyTorch extension
+- Currently provides `bit_residual_pack_k8v4` (K8V4 uniform-quantization KV cache pack op) under `torch.ops.openjiuwen.*`
+- Requires an aarch64 Linux machine with Ascend NPU, CANN toolkit, PyTorch and torch_npu to build
+- Build instructions: `docs/20-build/01-build-guide.md`; operator docs under `docs/10-architecture/` through `docs/60-profiling/`
 
 ### openJiuwen-vllm-affinity project
 
