@@ -556,7 +556,14 @@ class WorkerManager:
             old_status = self.worker_statuses.get(worker_id)
             old_consecutive_failures = old_status.consecutive_failures if old_status else 0
 
-            base_url = worker.url.rstrip("/v1").rstrip("/v")
+            # 去掉 API 版本后缀本身，而不是按字符集 strip：worker 端口常以 1
+            # 结尾（默认 8001），rstrip("/v1") 会把端口末位也剥掉，健康检查
+            # 就会打到 http://host:800/health。
+            base_url = worker.url.rstrip("/")
+            for suffix in ("/v1", "/v"):
+                if base_url.endswith(suffix):
+                    base_url = base_url[: -len(suffix)]
+                    break
             health_url = f"{base_url}/health"
 
             headers = {}
