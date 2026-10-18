@@ -35,14 +35,28 @@ class Preprocessor:
         iat = self.default_iat
 
         if agent_hints:
-            priority = agent_hints.priority or self.default_priority
-            estimated_output_tokens = (
-                agent_hints.estimated_output_tokens or self.default_estimated_output_tokens
+            priority = (
+                self.default_priority
+                if agent_hints.priority is None
+                else agent_hints.priority
             )
-            next_turn_prefill = agent_hints.next_turn_prefill or self.default_next_turn_prefill
+            estimated_output_tokens = (
+                self.default_estimated_output_tokens
+                if agent_hints.estimated_output_tokens is None
+                else agent_hints.estimated_output_tokens
+            )
+            next_turn_prefill = (
+                self.default_next_turn_prefill
+                if agent_hints.next_turn_prefill is None
+                else agent_hints.next_turn_prefill
+            )
             prefix_id = agent_hints.prefix_id
-            total_requests = agent_hints.total_requests or self.default_total_requests
-            iat = agent_hints.iat or self.default_iat
+            total_requests = (
+                self.default_total_requests
+                if agent_hints.total_requests is None
+                else agent_hints.total_requests
+            )
+            iat = self.default_iat if agent_hints.iat is None else agent_hints.iat
 
         priority = max(0, min(10, priority))
         estimated_output_tokens = max(1, estimated_output_tokens)
@@ -83,14 +97,28 @@ class Preprocessor:
         iat = self.default_iat
 
         if agent_hints:
-            priority = agent_hints.priority or self.default_priority
-            estimated_output_tokens = (
-                agent_hints.estimated_output_tokens or self.default_estimated_output_tokens
+            priority = (
+                self.default_priority
+                if agent_hints.priority is None
+                else agent_hints.priority
             )
-            next_turn_prefill = agent_hints.next_turn_prefill or self.default_next_turn_prefill
+            estimated_output_tokens = (
+                self.default_estimated_output_tokens
+                if agent_hints.estimated_output_tokens is None
+                else agent_hints.estimated_output_tokens
+            )
+            next_turn_prefill = (
+                self.default_next_turn_prefill
+                if agent_hints.next_turn_prefill is None
+                else agent_hints.next_turn_prefill
+            )
             prefix_id = agent_hints.prefix_id
-            total_requests = agent_hints.total_requests or self.default_total_requests
-            iat = agent_hints.iat or self.default_iat
+            total_requests = (
+                self.default_total_requests
+                if agent_hints.total_requests is None
+                else agent_hints.total_requests
+            )
+            iat = self.default_iat if agent_hints.iat is None else agent_hints.iat
 
         priority = max(0, min(10, priority))
         estimated_output_tokens = max(1, estimated_output_tokens)
