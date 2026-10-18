@@ -279,7 +279,7 @@ class CircuitBreaker:
         self.state_transitions = 0
 
     def check_state(self) -> bool:
-        """检查断路器状态
+        """检查断路器状态并登记一次尝试
 
         Returns:
             是否允许调用
@@ -287,7 +287,11 @@ class CircuitBreaker:
         Raises:
             Exception: 断路器拒绝请求
 
+        ``retry``/``retry_async`` 的生产调用链只经过本方法，不经过
+        :meth:`call`，因此尝试计数与 HALF_OPEN 配额必须在这里登记；否则
+        半开状态的 ``half_open_max_calls`` 永远不会生效。
         """
+        self.total_calls += 1
         if self.state == "OPEN":
             if time.time() - self.last_failure_time > self.recovery_timeout:
                 logger.info("Circuit breaker transitioning from OPEN to HALF_OPEN")
@@ -298,9 +302,11 @@ class CircuitBreaker:
                 logger.warning("Circuit breaker is OPEN, rejecting request")
                 raise Exception("Circuit breaker is OPEN")
 
-        if self.state == "HALF_OPEN" and self.half_open_calls >= self.half_open_max_calls:
-            logger.warning("Circuit breaker is HALF_OPEN with max calls, rejecting request")
-            raise Exception("Circuit breaker is HALF_OPEN with max calls")
+        if self.state == "HALF_OPEN":
+            if self.half_open_calls >= self.half_open_max_calls:
+                logger.warning("Circuit breaker is HALF_OPEN with max calls, rejecting request")
+                raise Exception("Circuit breaker is HALF_OPEN with max calls")
+            self.half_open_calls += 1
 
         return True
 
@@ -356,13 +362,9 @@ class CircuitBreaker:
             Exception: 断路器处于OPEN状态或函数执行失败
 
         """
-        self.total_calls += 1
         self.check_state()
 
         try:
-            if self.state == "HALF_OPEN":
-                self.half_open_calls += 1
-
             result = await func(*args, **kwargs)
             self.handle_success()
             return result
