@@ -1,4 +1,5 @@
 import asyncio
+import math
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -118,7 +119,7 @@ class PerformanceStats:
         self._cleanup_old_requests()
 
     @staticmethod
-    def _calculate_percentiles(values: list[float]) -> dict:
+    def calculate_percentiles(values: list[float]) -> dict:
         """计算分位数"""
         if not values:
             return {}
@@ -128,9 +129,10 @@ class PerformanceStats:
 
         percentiles = {}
         for p in [50, 70, 90, 95, 99, 100]:
-            idx = int((p / 100) * (n - 1))
-            if idx >= n:
-                idx = n - 1
+            # Nearest-rank percentile: floor((p/100)*(n-1)) makes every
+            # percentile below 100 collapse to the minimum for n=2 (and
+            # understates n=3), which misreports the latency dashboard.
+            idx = max(0, min(n - 1, math.ceil((p / 100) * n) - 1))
             percentiles[p] = sorted_values[idx]
 
         return percentiles
@@ -149,11 +151,11 @@ class PerformanceStats:
         decode_durations = [req.decode_duration for req in self.requests]
         response_return_durations = [req.response_return_duration for req in self.requests]
 
-        e2e_percentiles = self._calculate_percentiles(e2e_durations)
-        router_dispatch_percentiles = self._calculate_percentiles(router_dispatch_durations)
-        prefill_percentiles = self._calculate_percentiles(prefill_durations)
-        decode_percentiles = self._calculate_percentiles(decode_durations)
-        response_return_percentiles = self._calculate_percentiles(response_return_durations)
+        e2e_percentiles = self.calculate_percentiles(e2e_durations)
+        router_dispatch_percentiles = self.calculate_percentiles(router_dispatch_durations)
+        prefill_percentiles = self.calculate_percentiles(prefill_durations)
+        decode_percentiles = self.calculate_percentiles(decode_durations)
+        response_return_percentiles = self.calculate_percentiles(response_return_durations)
 
         total_requests = len(self.requests)
 
@@ -220,7 +222,7 @@ class PerformanceStats:
             prompt_sum = sum(prompt_tokens_list)
             prompt_min = min(prompt_tokens_list)
             prompt_max = max(prompt_tokens_list)
-            prompt_percentiles = self._calculate_percentiles([float(x) for x in prompt_tokens_list])
+            prompt_percentiles = self.calculate_percentiles([float(x) for x in prompt_tokens_list])
             logger.info(
                 f"[TOKEN STATS] Prompt Tokens: count={len(prompt_tokens_list)}, "
                 f"sum={prompt_sum}, avg={prompt_avg:.1f}, min={prompt_min}, max={prompt_max}, "
@@ -233,7 +235,7 @@ class PerformanceStats:
             completion_sum = sum(completion_tokens_list)
             completion_min = min(completion_tokens_list)
             completion_max = max(completion_tokens_list)
-            completion_percentiles = self._calculate_percentiles(
+            completion_percentiles = self.calculate_percentiles(
                 [float(x) for x in completion_tokens_list]
             )
             logger.info(
@@ -248,7 +250,7 @@ class PerformanceStats:
             total_sum = sum(total_tokens_list)
             total_min = min(total_tokens_list)
             total_max = max(total_tokens_list)
-            total_percentiles = self._calculate_percentiles([float(x) for x in total_tokens_list])
+            total_percentiles = self.calculate_percentiles([float(x) for x in total_tokens_list])
             logger.info(
                 f"[TOKEN STATS] Total Tokens: count={len(total_tokens_list)}, "
                 f"sum={total_sum}, avg={total_avg:.1f}, min={total_min}, max={total_max}, "
@@ -269,7 +271,7 @@ class PerformanceStats:
             diff_avg = sum(osl_diff_list) / len(osl_diff_list)
             diff_min = min(osl_diff_list)
             diff_max = max(osl_diff_list)
-            diff_percentiles = self._calculate_percentiles(osl_diff_list)
+            diff_percentiles = self.calculate_percentiles(osl_diff_list)
             logger.info(
                 f"[OSL DIFF STATS] OSL vs CompletionTokens Abs Diff: "
                 f"count={len(osl_diff_list)}, avg={diff_avg:.1f}, min={diff_min:.1f}, max={diff_max:.1f}, "
@@ -282,7 +284,7 @@ class PerformanceStats:
             ratio_avg = sum(osl_diff_ratio_list) / len(osl_diff_ratio_list)
             ratio_min = min(osl_diff_ratio_list)
             ratio_max = max(osl_diff_ratio_list)
-            ratio_percentiles = self._calculate_percentiles(osl_diff_ratio_list)
+            ratio_percentiles = self.calculate_percentiles(osl_diff_ratio_list)
             logger.info(
                 f"[OSL DIFF STATS] OSL vs CompletionTokens Diff Ratio: "
                 f"count={len(osl_diff_ratio_list)}, avg={ratio_avg:.3f}, min={ratio_min:.3f}, max={ratio_max:.3f}, "
