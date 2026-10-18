@@ -37,6 +37,9 @@ class EtcdDiscovery(WorkerDiscovery):
         """
         self.etcd_hosts = etcd_hosts or ["localhost"]
         self.etcd_port = etcd_port
+        self._endpoints = [
+            f"http://{host}:{self.etcd_port}" for host in self.etcd_hosts
+        ]
         self.etcd_prefix = etcd_prefix
         self.etcd_user = etcd_user
         self.etcd_password = etcd_password
@@ -52,7 +55,7 @@ class EtcdDiscovery(WorkerDiscovery):
         if self.client is None:
             try:
                 # 构建etcd HTTP客户端
-                endpoints = [f"http://{host}:{self.etcd_port}" for host in self.etcd_hosts]
+                endpoints = list(self._endpoints)
 
                 # 创建带有认证信息的客户端
                 auth = None
@@ -82,9 +85,24 @@ class EtcdDiscovery(WorkerDiscovery):
             key_prefix = f"/v2/keys{self.etcd_prefix}"
             url = f"{key_prefix}?recursive=true"
 
-            # 发送HTTP GET请求
-            response = await client.get(url)
-            response.raise_for_status()
+            # 依次尝试配置的 etcd 节点；base_url 只固化了第一个，不能因此放弃其余节点。
+            response = None
+            last_error: Exception | None = None
+            for endpoint in self._endpoints:
+                try:
+                    response = await client.get(f"{endpoint}{url}")
+                    response.raise_for_status()
+                    break
+                except httpx.HTTPError as exc:
+                    last_error = exc
+                    logger.warning(
+                        "Failed to discover workers from etcd endpoint %s: %s",
+                        endpoint,
+                        exc,
+                    )
+            if response is None:
+                assert last_error is not None
+                raise last_error
 
             workers = []
             result = response.json()
