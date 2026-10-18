@@ -19,3 +19,4 @@ jiuwen_vllm_affinity_kv_cache_plugin = "jiuwen_vllm_affinity.kv_cache_plugin.plu
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["jiuwen_vllm_affinity*"]
