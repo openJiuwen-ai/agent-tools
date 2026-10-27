@@ -1,0 +1,4 @@
+[submodule "packages/openjiuwen_ascend_ops/csrc/third_party/catlass"]
+	path = packages/openjiuwen_ascend_ops/csrc/third_party/catlass
+	url = https://gitcode.com/cann/catlass.git
+	branch = catlass-v1-stable
