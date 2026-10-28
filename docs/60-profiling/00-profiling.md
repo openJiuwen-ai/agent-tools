@@ -21,7 +21,7 @@ msprof op \
   --dump=on --launch-count=1 --warm-up=0 --kill=off
 ```
 
-- `--aic-metrics`：可选 `Source`（源码行级，需内核带 `.debug_line`，即构建时设 `BIT_RESIDUAL_PACK_K8V4_DEBUG_LINE=ON`）、`PipeUtilization`、`TimelineDetail`。
+- `--aic-metrics`：可选 `Source`（源码行级，需内核带 `.debug_line`，即构建时设 `RQ_UNIFORM_PACK_K8V4_DEBUG_LINE=ON`）、`PipeUtilization`、`TimelineDetail`。
 - 前置：`ASCEND_CUSTOM_OPP_PATH` 指向 `ztmp/cann_ops_install/vendors/vllm-ascend`，并 source 其 `bin/set_env.bash`。
 
 ## 2. OPPROF 数据格式
@@ -49,7 +49,7 @@ OPPROF_xxx/
 
 表头：`Op Name, Op Type, Task Duration(us), Block Dim, Mix Block Dim, Device Id, Pid, Current Freq, Rated Freq,`。
 
-- `Op Name`：算子调度名（含 hash 和 mix 后缀，如 `BitResidualPackK8v4_..._1_mix_aic`）
+- `Op Name`：算子调度名（含 hash 和 mix 后缀，如 `RqUniformPackK8v4_..._1_mix_aic`）
 - `Op Type`：`mix` / `aic` / `aiv`
 - `Task Duration(us)`：算子任务总时长
 - `Block Dim` / `Mix Block Dim`：核数与混合核数

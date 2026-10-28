@@ -30,7 +30,7 @@ _openjiuwen_ascend_ops.register_ops()
 
 | 算子 | Torch schema | 返回 |
 | --- | --- | --- |
-| `bit_residual_pack_k8v4` | `(Tensor key, Tensor value, Tensor slot_mapping, Tensor query_start_loc, Tensor rotation_t, Tensor key_cache, Tensor value_cache, int num_reqs, int block_size) -> ()` | in-place 写 `key_cache`/`value_cache` |
+| `rq_uniform_pack_k8v4` | `(Tensor key, Tensor value, Tensor slot_mapping, Tensor query_start_loc, Tensor rotation_t, Tensor key_cache, Tensor value_cache, int num_reqs, int block_size) -> ()` | in-place 写 `key_cache`/`value_cache` |
 
 > 算子的完整张量 dtype/shape 约束与标量约束，见 [30-specifications](../30-specifications/00-operators.md)。
 
@@ -44,15 +44,15 @@ _openjiuwen_ascend_ops.register_ops()
 2. 必要时做 `.contiguous()` 兜底（`def.cpp` 中标 `IgnoreContiguous()`，允许非连续 stride）。
 3. 通过 `EXEC_NPU_CMD(aclnn<Op>, ...)` 宏把任务下发到 ACLNN。
 
-例如 `bit_residual_pack_k8v4_adapter.cpp` 调用：
+例如 `rq_uniform_pack_k8v4_adapter.cpp` 调用：
 
 ```cpp
-EXEC_NPU_CMD(aclnnBitResidualPackK8v4, key_work, value_work, rotation_work,
+EXEC_NPU_CMD(aclnnRqUniformPackK8v4, key_work, value_work, rotation_work,
              slot_work, query_start_work, n_vec, vec_per_core_i64, ...,
              key_cache, value_cache);
 ```
 
-参数列表与 `op_host/bit_residual_pack_k8v4_def.cpp` 的 `Attr` 声明一一对应（`n_vec`、`vec_per_core`、`num_heads`、`block_size`、`num_blocks`、`num_reqs`、`key_stride_token/head`、`value_stride_token/head`、`key/value_storage_offset` 等）。
+参数列表与 `op_host/rq_uniform_pack_k8v4_def.cpp` 的 `Attr` 声明一一对应（`n_vec`、`vec_per_core`、`num_heads`、`block_size`、`num_blocks`、`num_reqs`、`key_stride_token/head`、`value_stride_token/head`、`key/value_storage_offset` 等）。
 
 ### 3.1 `EXEC_NPU_CMD` 工作原理
 
@@ -84,13 +84,13 @@ CMake 阶段的 `opbuild_gen_default` 目标调用 CANN 的 `op_build` 工具，
 
 ## 5. Python 侧分发
 
-`pysrc/.../ops/<op>.py`（如 `bit_residual_pack_k8v4.py`）是 thin wrapper：转发到 `torch.ops.openjiuwen.<op>(...)`，并整理返回值（如 pack 算子返回 `(key_cache, value_cache)` 元组）便于 Python 调用。
+`pysrc/.../ops/<op>.py`（如 `rq_uniform_pack_k8v4.py`）是 thin wrapper：转发到 `torch.ops.openjiuwen.<op>(...)`，并整理返回值（如 pack 算子返回 `(key_cache, value_cache)` 元组）便于 Python 调用。
 
 `__init__.py` 在 import `_openjiuwen_ascend_ops` 后立即 `register_ops()`，再导出各算子函数，用户即可：
 
 ```python
-from openjiuwentools.openjiuwen_ascend_ops import bit_residual_pack_k8v4
-bit_residual_pack_k8v4(key, value, slot_mapping, query_start_loc, rotation_t,
+from openjiuwentools.openjiuwen_ascend_ops import rq_uniform_pack_k8v4
+rq_uniform_pack_k8v4(key, value, slot_mapping, query_start_loc, rotation_t,
                        key_cache, value_cache, num_reqs, block_size)
 ```
 

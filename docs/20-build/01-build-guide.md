@@ -22,7 +22,7 @@
    ```bash
    cmake csrc/ -DBUILD_OPEN_PROJECT=ON \
      -DASCEND_COMPUTE_UNIT=ascend910b \
-     -DASCEND_OP_NAME="bit_residual_pack_k8v4" \
+     -DASCEND_OP_NAME="rq_uniform_pack_k8v4" \
      -DVENDOR_NAME=vllm-ascend \
      -DCUSTOM_ASCEND_CANN_PACKAGE_PATH=<CANN> \
      -DCHECK_COMPATIBLE=true
@@ -143,7 +143,7 @@ pip install -e .                         # 阶段 B（开发模式）
 
 | 环境变量 / CMake 变量 | 追加选项 | 说明 |
 | --- | --- | --- |
-| `BIT_RESIDUAL_PACK_K8V4_DEBUG_LINE` | `-g` | 给 BitResidualPackK8v4 内核生成 `.debug_line` |
+| `RQ_UNIFORM_PACK_K8V4_DEBUG_LINE` | `-g` | 给 RqUniformPackK8v4 内核生成 `.debug_line` |
 
 `-g` 生成 `.debug_line` 以支持源码行调用栈。若需 msSanitizer 全量插桩，可手动在 `add_ops_compile_options` 的 `OPTIONS` 里追加 `--cce-enable-sanitizer`。生产构建保持 unset 即可输出干净二进制。详细 sanitizer 编译选项见 [Sanitizer](../50-debugging/00-sanitizer.md)。
 
