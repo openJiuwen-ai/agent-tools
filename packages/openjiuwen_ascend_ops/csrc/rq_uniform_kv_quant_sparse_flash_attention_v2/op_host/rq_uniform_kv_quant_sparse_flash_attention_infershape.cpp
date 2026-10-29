@@ -11,48 +11,48 @@ using namespace ge;
 
 namespace ops {
 // Inputs Index
-constexpr size_t QUERY_INPUT_INDEX = 0;
+constexpr size_t kInQueryIdx = 0;
 // Attributes Index
-constexpr uint32_t LAYOUT_QUERY_ATTR_INDEX = 4;
-constexpr uint32_t ROPE_HEAD_DIM_ATTR_INDEX = 12;
+constexpr uint32_t kAttrLayoutQuery = 4;
+constexpr uint32_t kAttrRopeHeadDim = 12;
 // Dim Index
-constexpr uint32_t DIM_INDEX_0 = 0;
-constexpr uint32_t DIM_INDEX_1 = 1;
-constexpr uint32_t DIM_INDEX_2 = 2;
-constexpr uint32_t DIM_INDEX_3 = 3;
-constexpr uint32_t DIM_NUM_3 = 3;
-constexpr uint32_t DIM_NUM_4 = 4;
+constexpr uint32_t kDim0 = 0;
+constexpr uint32_t kDim1 = 1;
+constexpr uint32_t kDim2 = 2;
+constexpr uint32_t kDim3 = 3;
+constexpr uint32_t kRank3 = 3;
+constexpr uint32_t kRank4 = 4;
 
 ge::graphStatus InferShapeRqUniformKvQuantSparseFlashAttention(gert::InferShapeContext *context)
 {
     OP_CHECK_IF(context == nullptr, OP_LOGE("RqUniformKvQuantSparseFlashAttention", "InferShapeContext is nullptr"),
                 return ge::GRAPH_FAILED);
-    const gert::Shape *queryShape = context->GetInputShape(QUERY_INPUT_INDEX);
-    OP_CHECK_NULL_WITH_CONTEXT(context, queryShape);
-    gert::Shape *attentionOutShape = context->GetOutputShape(0);
-    OP_CHECK_NULL_WITH_CONTEXT(context, attentionOutShape);
+    const gert::Shape *qShape = context->GetInputShape(kInQueryIdx);
+    OP_CHECK_NULL_WITH_CONTEXT(context, qShape);
+    gert::Shape *attnOutShape = context->GetOutputShape(0);
+    OP_CHECK_NULL_WITH_CONTEXT(context, attnOutShape);
     auto attrs = context->GetAttrs();
     OP_CHECK_NULL_WITH_CONTEXT(context, attrs);
-    const char *inputLayoutQueryPtr = attrs->GetAttrPointer<char>(LAYOUT_QUERY_ATTR_INDEX);
-    OP_CHECK_NULL_WITH_CONTEXT(context, inputLayoutQueryPtr);
-    std::string inputLayoutQueryPtrStr = std::string(inputLayoutQueryPtr);
-    const int64_t ropeHeadDim = *attrs->GetAttrPointer<int64_t>(ROPE_HEAD_DIM_ATTR_INDEX);
+    const char *layoutQueryAttr = attrs->GetAttrPointer<char>(kAttrLayoutQuery);
+    OP_CHECK_NULL_WITH_CONTEXT(context, layoutQueryAttr);
+    std::string layoutQueryStr = std::string(layoutQueryAttr);
+    const int64_t ropeDim = *attrs->GetAttrPointer<int64_t>(kAttrRopeHeadDim);
 
-    *attentionOutShape = *queryShape;
-    if (inputLayoutQueryPtrStr == "BSND") {
-        attentionOutShape->SetDimNum(DIM_NUM_4);
-        attentionOutShape->SetDim(DIM_INDEX_0, queryShape->GetDim(DIM_INDEX_0));
-        attentionOutShape->SetDim(DIM_INDEX_1, queryShape->GetDim(DIM_INDEX_1));
-        attentionOutShape->SetDim(DIM_INDEX_2, queryShape->GetDim(DIM_INDEX_2));
-        if (queryShape->GetDim(DIM_INDEX_3) != -1) {
-            attentionOutShape->SetDim(DIM_INDEX_3, queryShape->GetDim(DIM_INDEX_3) - ropeHeadDim);
+    *attnOutShape = *qShape;
+    if (layoutQueryStr == "BSND") {
+        attnOutShape->SetDimNum(kRank4);
+        attnOutShape->SetDim(kDim0, qShape->GetDim(kDim0));
+        attnOutShape->SetDim(kDim1, qShape->GetDim(kDim1));
+        attnOutShape->SetDim(kDim2, qShape->GetDim(kDim2));
+        if (qShape->GetDim(kDim3) != -1) {
+            attnOutShape->SetDim(kDim3, qShape->GetDim(kDim3) - ropeDim);
         }
     } else { // TND
-        attentionOutShape->SetDimNum(DIM_NUM_3);
-        attentionOutShape->SetDim(DIM_INDEX_0, queryShape->GetDim(DIM_INDEX_0));
-        attentionOutShape->SetDim(DIM_INDEX_1, queryShape->GetDim(DIM_INDEX_1));
-        if (queryShape->GetDim(DIM_INDEX_2) != -1) {
-            attentionOutShape->SetDim(DIM_INDEX_2, queryShape->GetDim(DIM_INDEX_2) - ropeHeadDim);
+        attnOutShape->SetDimNum(kRank3);
+        attnOutShape->SetDim(kDim0, qShape->GetDim(kDim0));
+        attnOutShape->SetDim(kDim1, qShape->GetDim(kDim1));
+        if (qShape->GetDim(kDim2) != -1) {
+            attnOutShape->SetDim(kDim2, qShape->GetDim(kDim2) - ropeDim);
         }
     }
     return GRAPH_SUCCESS;
@@ -62,8 +62,8 @@ ge::graphStatus InferDataTypeRqUniformKvQuantSparseFlashAttention(gert::InferDat
 {
     OP_CHECK_IF(context == nullptr, OP_LOGE("RqUniformKvQuantSparseFlashAttention", "InferShapeContext is nullptr"),
                 return ge::GRAPH_FAILED);
-    const auto inputDataType = context->GetInputDataType(QUERY_INPUT_INDEX);
-    context->SetOutputDataType(0, inputDataType);
+    const auto qDtype = context->GetInputDataType(kInQueryIdx);
+    context->SetOutputDataType(0, qDtype);
     return ge::GRAPH_SUCCESS;
 }
 

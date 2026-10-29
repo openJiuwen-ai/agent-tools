@@ -16,10 +16,10 @@
 namespace openjiuwen_ascend_ops {
 
 namespace {
-constexpr int64_t kQueryHeadDim = 576;
-constexpr int64_t kOutHeadDim = 512;
-constexpr int64_t kSlotBytes = 388;
-constexpr int64_t kSchemaAQuantMode = 4;
+constexpr int64_t kAbsorbQDim = 576;
+constexpr int64_t kAbsorbOutDim = 512;
+constexpr int64_t kSchemaASlotBytes = 388;
+constexpr int64_t kSchemaAMode = 4;
 }  // namespace
 
 at::Tensor rq_uniform_kv_quant_sparse_flash_attention_v2(
@@ -43,7 +43,7 @@ at::Tensor rq_uniform_kv_quant_sparse_flash_attention_v2(
     int64_t rope_head_dim,
     const c10::optional<at::Tensor>& out)
 {
-    TORCH_CHECK(query.dim() == 3 && query.size(-1) == kQueryHeadDim,
+    TORCH_CHECK(query.dim() == 3 && query.size(-1) == kAbsorbQDim,
                 "query must be TND/BSND with last dim 576");
     TORCH_CHECK(query.scalar_type() == at::kHalf || query.scalar_type() == at::kBFloat16,
                 "query must be fp16 or bf16");
@@ -51,23 +51,23 @@ at::Tensor rq_uniform_kv_quant_sparse_flash_attention_v2(
                 "key must be int8/uint8 byte container");
     TORCH_CHECK(value.is_same(key) || value.sizes() == key.sizes(),
                 "value must alias key or match key shape for fused Schema A cache");
-    TORCH_CHECK(key.dim() == 4 && key.size(2) == 1 && key.size(3) == kSlotBytes,
+    TORCH_CHECK(key.dim() == 4 && key.size(2) == 1 && key.size(3) == kSchemaASlotBytes,
                 "key/value must be PA_BSND [Bn, Bs, 1, 388]");
-    TORCH_CHECK(key_quant_mode == kSchemaAQuantMode && value_quant_mode == kSchemaAQuantMode,
+    TORCH_CHECK(key_quant_mode == kSchemaAMode && value_quant_mode == kSchemaAMode,
                 "quant_mode must be 4 (Schema A); TQ4/386 is rejected");
     TORCH_CHECK(attention_mode == 2, "attention_mode must be 2 (MLA absorb)");
     TORCH_CHECK(rope_head_dim == 64, "rope_head_dim must be 64");
     TORCH_CHECK(layout_query == "TND" || layout_query == "BSND", "layout_query must be TND or BSND");
     TORCH_CHECK(layout_kv == "PA_BSND", "layout_kv must be PA_BSND");
 
-    at::Tensor attention_out;
+    at::Tensor attnOut;
     if (out.has_value() && out->defined()) {
-        attention_out = out.value();
-        TORCH_CHECK(attention_out.sizes().vec() ==
-                        std::vector<int64_t>({query.size(0), query.size(1), kOutHeadDim}),
+        attnOut = out.value();
+        TORCH_CHECK(attnOut.sizes().vec() ==
+                        std::vector<int64_t>({query.size(0), query.size(1), kAbsorbOutDim}),
                     "out must be [T, Nq, 512] matching query batch/heads");
     } else {
-        attention_out = at::empty({query.size(0), query.size(1), kOutHeadDim}, query.options());
+        attnOut = at::empty({query.size(0), query.size(1), kAbsorbOutDim}, query.options());
     }
 
     at::Tensor q = query.is_contiguous() ? query : query.contiguous();
@@ -76,54 +76,54 @@ at::Tensor rq_uniform_kv_quant_sparse_flash_attention_v2(
     at::Tensor idx = sparse_indices.is_contiguous() ? sparse_indices : sparse_indices.contiguous();
 
     c10::optional<at::Tensor> bt = block_table;
-    c10::optional<at::Tensor> act_q = actual_seq_lengths_query;
-    c10::optional<at::Tensor> act_kv = actual_seq_lengths_kv;
+    c10::optional<at::Tensor> actualQLens = actual_seq_lengths_query;
+    c10::optional<at::Tensor> actualKvLens = actual_seq_lengths_kv;
     if (bt.has_value() && bt->defined() && !bt->is_contiguous()) {
         bt = bt->contiguous();
     }
-    if (act_q.has_value() && act_q->defined() && !act_q->is_contiguous()) {
-        act_q = act_q->contiguous();
+    if (actualQLens.has_value() && actualQLens->defined() && !actualQLens->is_contiguous()) {
+        actualQLens = actualQLens->contiguous();
     }
-    if (act_kv.has_value() && act_kv->defined() && !act_kv->is_contiguous()) {
-        act_kv = act_kv->contiguous();
+    if (actualKvLens.has_value() && actualKvLens->defined() && !actualKvLens->is_contiguous()) {
+        actualKvLens = actualKvLens->contiguous();
     }
 
-    const c10_npu::OptionalNPUGuard npuGuard(q.device());
-    const int64_t pre_tokens = std::numeric_limits<int64_t>::max();
-    const int64_t next_tokens = std::numeric_limits<int64_t>::max();
-    const std::string layout_q(layout_query);
-    const std::string layout_k(layout_kv);
-    const char* layout_q_cstr = layout_q.c_str();
-    const char* layout_k_cstr = layout_k.c_str();
+    const c10_npu::OptionalNPUGuard deviceGuard(q.device());
+    const int64_t preTokenLimit = std::numeric_limits<int64_t>::max();
+    const int64_t nextTokenLimit = std::numeric_limits<int64_t>::max();
+    const std::string layoutQueryStr(layout_query);
+    const std::string layoutKvStr(layout_kv);
+    const char* layoutQueryCStr = layoutQueryStr.c_str();
+    const char* layoutKvCStr = layoutKvStr.c_str();
 
-    const c10::optional<at::Tensor> no_scale = c10::nullopt;
+    const c10::optional<at::Tensor> absentScale = c10::nullopt;
     EXEC_NPU_CMD(
         aclnnRqUniformKvQuantSparseFlashAttentionV2,
         q,
         k,
         v,
         idx,
-        no_scale,
-        no_scale,
+        absentScale,
+        absentScale,
         bt,
-        act_q,
-        act_kv,
+        actualQLens,
+        actualKvLens,
         scale_value,
         key_quant_mode,
         value_quant_mode,
         sparse_block_size,
-        layout_q_cstr,
-        layout_k_cstr,
+        layoutQueryCStr,
+        layoutKvCStr,
         sparse_mode,
-        pre_tokens,
-        next_tokens,
+        preTokenLimit,
+        nextTokenLimit,
         attention_mode,
         quant_scale_repo_mode,
         tile_size,
         rope_head_dim,
-        attention_out);
+        attnOut);
 
-    return attention_out;
+    return attnOut;
 }
 
 }  // namespace openjiuwen_ascend_ops

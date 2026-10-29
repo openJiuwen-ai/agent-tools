@@ -28,53 +28,43 @@
 namespace optiling {
 namespace {
 
-constexpr uint32_t kByteBlock = 32;
-constexpr uint32_t kMsdIterNum = 2;
-constexpr uint32_t kSInnerAntiqGqa = 1024;
-constexpr uint32_t kMaxCoreNum = 50;
-constexpr uint32_t kMaxMatmulBase = 512;
-constexpr uint32_t kMaxMatmulBaseM = 128;
-constexpr uint32_t kL0cSize = 128 * 1024;
-constexpr uint32_t kL0bSize = 64 * 1024;
-constexpr uint32_t kPaCallbackBytes = 64;
-constexpr uint32_t kLibApiWorkspaceFallback = 16 * 1024 * 1024;
-constexpr uint32_t kFdMinKvPerSplit = 512;
-constexpr uint32_t kPaNoFdMaxKv = 1024;
-constexpr uint32_t kFdGqaMinKv = 2048;
+constexpr uint32_t kUbBlockBytes = 32;
+constexpr uint32_t kMsdIters = 2;
+constexpr uint32_t kAntiqSInnerGqa = 1024;
+constexpr uint32_t kCoreCap = 50;
+constexpr uint32_t kMmBaseCap = 512;
+constexpr uint32_t kMmBaseMCap = 128;
+constexpr uint32_t kL0cBytes = 128 * 1024;
+constexpr uint32_t kL0bBytes = 64 * 1024;
+constexpr uint32_t kPaCbBytes = 64;
+constexpr uint32_t kLibApiWsFallback = 16 * 1024 * 1024;
+constexpr uint32_t kFdKvMinSplit = 512;
+constexpr uint32_t kPaNoFdKvMax = 1024;
+constexpr uint32_t kFdGqaKvMin = 2048;
 constexpr uint32_t kBrBlockRows = 16;
-constexpr float kFdBnRatio = 0.4F;
+constexpr float kFdBnRatioTh = 0.4F;
 #if BR_MSD_US2_PACK_GATHER
-constexpr uint64_t kTilingKeyPaged =
+constexpr uint64_t kKeyPaged =
     QF16_KVINT8_OUTF16_ANTIPERTOKEN_PAGEDCACHE_C1V2_TILING;
-constexpr uint64_t kTilingKeyPagedC1V1 =
+constexpr uint64_t kKeyPagedC1V1 =
     QF16_KVINT8_OUTF16_ANTIPERTOKEN_PAGEDCACHE_C1V1_TILING;
-constexpr uint64_t kTilingKeyPagedFd =
+constexpr uint64_t kKeyPagedFd =
     QF16_KVINT8_OUTF16_ANTIPERTOKEN_PAGEDCACHE_FLASHDECODING_C1V2_TILING;
 #else
-constexpr uint64_t kTilingKeyPaged =
+constexpr uint64_t kKeyPaged =
     QF16_KVINT8_OUTF16_ANTIPERCHANNEL_PAGEDCACHE_C1V2_TILING;
-constexpr uint64_t kTilingKeyPagedC1V1 =
+constexpr uint64_t kKeyPagedC1V1 =
     QF16_KVINT8_OUTF16_ANTIPERCHANNEL_PAGEDCACHE_C1V1_TILING;
-constexpr uint64_t kTilingKeyPagedFd =
+constexpr uint64_t kKeyPagedFd =
     QF16_KVINT8_OUTF16_ANTIPERCHANNEL_PAGEDCACHE_FLASHDECODING_C1V2_TILING;
 #endif
-
-inline uint32_t AlignUp(uint32_t a, uint32_t align)
-{
-    return align == 0 ? a : ((a + align - 1) / align) * align;
-}
-
-inline uint32_t TqKeyTileBytes(int64_t headSize)
-{
-    return kBrBlockRows * static_cast<uint32_t>(headSize + 4);
-}
 
 inline uint32_t TqValTileBytes(int64_t headSize)
 {
     return kBrBlockRows * static_cast<uint32_t>(headSize / 2 + 4);
 }
 
-inline uint32_t Gcd(uint32_t a, uint32_t b)
+inline uint32_t GreatestCommonDiv(uint32_t a, uint32_t b)
 {
     while (b != 0U) {
         const uint32_t t = b;
@@ -84,7 +74,7 @@ inline uint32_t Gcd(uint32_t a, uint32_t b)
     return a;
 }
 
-bool FillBmm1Tiling(const platform_ascendc::PlatformAscendC& platform, uint32_t m, uint32_t sInner,
+bool SetupBmm1Tiling(const platform_ascendc::PlatformAscendC& platform, uint32_t m, uint32_t sInner,
                     uint32_t seqSize, uint32_t headDim, uint32_t headDimAlign, uint32_t blockSize,
                     IncreFlashAttentionTilingData& tiling)
 {
@@ -99,13 +89,13 @@ bool FillBmm1Tiling(const platform_ascendc::PlatformAscendC& platform, uint32_t 
     bmm1.SetOrgShape(m, seqSize, headDimAlign, headDim);
     bmm1.SetBias(false);
 
-    uint32_t bmm1BaseN = std::min(AlignUp(sInner, 16U), kMaxMatmulBase);
+    uint32_t bmm1BaseN = std::min(RoundUpU32(sInner, 16U), kMmBaseCap);
     if (bmm1BaseN < blockSize) {
         while (blockSize % bmm1BaseN != 0U && bmm1BaseN >= 16U) {
             bmm1BaseN /= 2U;
         }
     } else if (bmm1BaseN > blockSize) {
-        bmm1BaseN = Gcd(bmm1BaseN, blockSize);
+        bmm1BaseN = GreatestCommonDiv(bmm1BaseN, blockSize);
     }
     if (bmm1BaseN == 0U) {
         bmm1BaseN = 16U;
@@ -114,18 +104,18 @@ bool FillBmm1Tiling(const platform_ascendc::PlatformAscendC& platform, uint32_t 
     // CeilAlign(baseN,32)*C0, but PA callback writes one fused [useN,K]
     // NZ and L1 B is sized to useN*K (kv=32/bs=16: 4096, not 2*4096).
     // Callback rewrite of independent tiles OOB'd L1 (cosine 0.48/0.81).
-    // Prefer baseN=sInner (stepN=1) instead of Gcd-down to 16. Product
+    // Prefer baseN=sInner (stepN=1) instead of GreatestCommonDiv-down to 16. Product
     // blockSize=128 already %32==0, this branch does not fire.
     constexpr uint32_t kInt8NzC0 = 32U;
     if ((bmm1BaseN % kInt8NzC0) != 0U) {
-        const uint32_t singleN = std::min(AlignUp(sInner, 16U), kMaxMatmulBase);
+        const uint32_t singleN = std::min(RoundUpU32(sInner, 16U), kMmBaseCap);
         if (singleN > 0U) {
             bmm1BaseN = singleN;
         }
     }
     const uint32_t bmm1MaxBaseM =
-        AlignUp(static_cast<uint32_t>(kL0cSize / sizeof(float) / bmm1BaseN) - 16U, 16U);
-    if (bmm1.SetFixSplit(std::min(AlignUp(m, 16U), bmm1MaxBaseM), bmm1BaseN) == -1) {
+        RoundUpU32(static_cast<uint32_t>(kL0cBytes / sizeof(float) / bmm1BaseN) - 16U, 16U);
+    if (bmm1.SetFixSplit(std::min(RoundUpU32(m, 16U), bmm1MaxBaseM), bmm1BaseN) == -1) {
         return false;
     }
     if (bmm1.SetTraverse(matmul_tiling::MatrixTraverse::FIRSTN) == -1) {
@@ -139,7 +129,7 @@ bool FillBmm1Tiling(const platform_ascendc::PlatformAscendC& platform, uint32_t 
     return true;
 }
 
-bool FillBmm2Tiling(const platform_ascendc::PlatformAscendC& platform, uint32_t m, uint32_t sInner,
+bool SetupBmm2Tiling(const platform_ascendc::PlatformAscendC& platform, uint32_t m, uint32_t sInner,
                     uint32_t sInnerAlign, uint32_t seqSize, uint32_t headDim, uint32_t blockSize,
                     IncreFlashAttentionTilingData& tiling)
 {
@@ -160,7 +150,7 @@ bool FillBmm2Tiling(const platform_ascendc::PlatformAscendC& platform, uint32_t 
     bmm2.SetShape(m, headDim, sInner);
     bmm2.SetOrgShape(m, headDim, sInnerAlign, seqSize);
     bmm2.SetBias(false);
-    if (bmm2.SetFixSplit(std::min(AlignUp(m, 16U), kMaxMatmulBaseM)) == -1) {
+    if (bmm2.SetFixSplit(std::min(RoundUpU32(m, 16U), kMmBaseMCap)) == -1) {
         return false;
     }
     if (bmm2.GetTiling(tiling.bmm2TilingData) == -1) {
@@ -169,15 +159,15 @@ bool FillBmm2Tiling(const platform_ascendc::PlatformAscendC& platform, uint32_t 
     uint32_t targetBaseK = 128U;
     if (targetBaseK < blockSize) {
         while ((blockSize % targetBaseK != 0U) ||
-               (targetBaseK * tiling.bmm2TilingData.get_baseN() * sizeof(float) > kL0bSize)) {
+               (targetBaseK * tiling.bmm2TilingData.get_baseN() * sizeof(float) > kL0bBytes)) {
             targetBaseK /= 2U;
             if (targetBaseK < 16U) {
                 break;
             }
         }
     } else {
-        uint32_t tmpBaseK = Gcd(targetBaseK, blockSize);
-        while (tmpBaseK * tiling.bmm2TilingData.get_baseN() * sizeof(float) > kL0bSize &&
+        uint32_t tmpBaseK = GreatestCommonDiv(targetBaseK, blockSize);
+        while (tmpBaseK * tiling.bmm2TilingData.get_baseN() * sizeof(float) > kL0bBytes &&
                tmpBaseK >= 16U) {
             tmpBaseK /= 2U;
         }
@@ -186,13 +176,7 @@ bool FillBmm2Tiling(const platform_ascendc::PlatformAscendC& platform, uint32_t 
     tiling.bmm2TilingData.set_baseK(targetBaseK);
     return true;
 }
-
-// Haar Q@Π / O@Π: Q_T[M,D] × Q_T[D,D] → fp32[M,D] (Q_T = query dtype,
-// fp16/bf16; both 2B so shapes/align are identical — only the declared
-// Cube dtype must match the Q_T Matmul instantiation).
-// M = max BN per core * G (batched prologue/epilogue). Always fill so
-// REGIST_MATMUL_OBJ(mmPi) is valid when APPLY_PI=0.
-bool FillBmmPiTiling(const platform_ascendc::PlatformAscendC& platform, uint32_t m,
+bool SetupBmmPiTiling(const platform_ascendc::PlatformAscendC& platform, uint32_t m,
                      uint32_t headDim, matmul_tiling::DataType qDtype,
                      IncreFlashAttentionTilingDataV2& tilingV2)
 {
@@ -206,9 +190,9 @@ bool FillBmmPiTiling(const platform_ascendc::PlatformAscendC& platform, uint32_t
     bmmPi.SetShape(m, headDim, headDim);
     bmmPi.SetOrgShape(m, headDim, headDim);
     bmmPi.SetBias(false);
-    const uint32_t baseM = std::min(AlignUp(m, 16U), kMaxMatmulBaseM);
+    const uint32_t baseM = std::min(RoundUpU32(m, 16U), kMmBaseMCap);
     // Cube Haar / L0B tile is 128; D=256 N-splits via KFC (same as FIA cube).
-    const uint32_t baseN = std::min(AlignUp(headDim, 16U), 128U);
+    const uint32_t baseN = std::min(RoundUpU32(headDim, 16U), 128U);
     if (bmmPi.SetFixSplit(baseM, baseN) == -1) {
         return false;
     }
@@ -217,8 +201,6 @@ bool FillBmmPiTiling(const platform_ascendc::PlatformAscendC& platform, uint32_t
     }
     return true;
 }
-
-}  // namespace
 
 static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext* context)
 {
@@ -243,7 +225,7 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
     const uint32_t cvRatio = aivNum / aicNum;
     size_t libapiSize = ascendcPlatform.GetLibApiWorkSpaceSize();
     if (libapiSize == 0) {
-        libapiSize = kLibApiWorkspaceFallback;
+        libapiSize = kLibApiWsFallback;
     }
 
     const int64_t* numHeadsPtr = attrs->GetAttrPointer<int64_t>(0);
@@ -271,7 +253,7 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
     }
     const uint32_t gSize = static_cast<uint32_t>(numHeads / numKvHeads);
     const uint32_t headDim = static_cast<uint32_t>(headSize);
-    const uint32_t headDimAlign = AlignUp(headDim, 16U);
+    const uint32_t headDimAlign = RoundUpU32(headDim, 16U);
     const uint32_t blockSizeU = static_cast<uint32_t>(blockSize);
 
     auto qShapePtr = context->GetInputShape(0);
@@ -380,23 +362,23 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
 
     // FD decision stays AIC-oriented (open-source IsFlashDecode uses aicNum).
     bool enableFd = false;
-    if (!(seqSize <= kPaNoFdMaxKv) &&
-        (static_cast<float>(bn) < kFdBnRatio * static_cast<float>(aicNum)) &&
-        (gSize == 1U || seqSize >= kFdGqaMinKv)) {
+    if (!(seqSize <= kPaNoFdKvMax) &&
+        (static_cast<float>(bn) < kFdBnRatioTh * static_cast<float>(aicNum)) &&
+        (gSize == 1U || seqSize >= kFdGqaKvMin)) {
         enableFd = true;
     }
     // Open-source NORMAL: coreNum_ = aivNum_ (both AIVs enter Process).
-    // FD / cube-view keep aicNum. Cap at kMaxCoreNum-1 (coreSidxEnd[tmp+1]).
+    // FD / cube-view keep aicNum. Cap at kCoreCap-1 (coreSidxEnd[tmp+1]).
     const uint32_t coreNum =
-        enableFd ? aicNum : std::min(aivNum, kMaxCoreNum - 1U);
+        enableFd ? aicNum : std::min(aivNum, kCoreCap - 1U);
 
     uint32_t usedCoreNum = 0;
     uint32_t formerCoreNum = 0;
     uint32_t blockSplitBn2Range = 1;
     uint32_t tailSplitedBatchRange = 1;
     uint32_t kvSplitPart = 0;
-    uint32_t coreSidxEnd[kMaxCoreNum];
-    for (uint32_t i = 0; i < kMaxCoreNum; ++i) {
+    uint32_t coreSidxEnd[kCoreCap];
+    for (uint32_t i = 0; i < kCoreCap; ++i) {
         coreSidxEnd[i] = bn;
     }
 
@@ -406,11 +388,11 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
         if (kvSplitPart == 0U) {
             kvSplitPart = 1U;
         }
-        while (((seqSize / kvSplitPart) < kFdMinKvPerSplit) && (kvSplitPart > 1U)) {
+        while (((seqSize / kvSplitPart) < kFdKvMinSplit) && (kvSplitPart > 1U)) {
             kvSplitPart--;
         }
         usedCoreNum = bn * kvSplitPart;
-        innerSeq = AlignUp((seqSize + kvSplitPart - 1U) / kvSplitPart, blockSizeU);
+        innerSeq = RoundUpU32((seqSize + kvSplitPart - 1U) / kvSplitPart, blockSizeU);
         formerCoreNum = 0U;
         blockSplitBn2Range = 1U;
         tailSplitedBatchRange = 1U;
@@ -424,14 +406,14 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
             tailSplitedBatchRange = blockSplitBn2Range - 1U;
         }
         usedCoreNum = bn > coreNum ? coreNum : bn;
-        for (uint32_t i = 0; i < formerCoreNum && i < kMaxCoreNum; ++i) {
+        for (uint32_t i = 0; i < formerCoreNum && i < kCoreCap; ++i) {
             coreSidxEnd[i] = blockSplitBn2Range * i;
         }
         const uint32_t formerBase = formerCoreNum * blockSplitBn2Range;
-        for (uint32_t i = formerCoreNum; i < usedCoreNum && i < kMaxCoreNum; ++i) {
+        for (uint32_t i = formerCoreNum; i < usedCoreNum && i < kCoreCap; ++i) {
             coreSidxEnd[i] = formerBase + tailSplitedBatchRange * (i - formerCoreNum);
         }
-        if (usedCoreNum < kMaxCoreNum) {
+        if (usedCoreNum < kCoreCap) {
             coreSidxEnd[usedCoreNum] = bn;
         }
     }
@@ -459,7 +441,7 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
     // one cube and the kernel writes all-zero (WaitFlag never completes).
     // Keep an idle second cube so the even-AIV / dummy-odd-AIV pair exists.
     // C1V1 launches aiv=aic=usedCoreNum; do not pad.
-    if (!enableC1V1 && !enableFd && usedCoreNum == 1U && usedCoreNum + 1U < kMaxCoreNum) {
+    if (!enableC1V1 && !enableFd && usedCoreNum == 1U && usedCoreNum + 1U < kCoreCap) {
         usedCoreNum = 2U;
         coreSidxEnd[0] = 0U;
         coreSidxEnd[1] = bn;
@@ -471,7 +453,7 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
 
     // Open-source antiquant: sInner=1024, floor to blockSize so Cube baseN can
     // equal one PA page. Across pages is callback / N-iterate, not softmax=16.
-    uint32_t sInnerSize = kSInnerAntiqGqa;
+    uint32_t sInnerSize = kAntiqSInnerGqa;
     if (blockSizeU != 0U && sInnerSize % blockSizeU != 0U) {
         sInnerSize = (sInnerSize / blockSizeU) * blockSizeU;
     }
@@ -484,7 +466,7 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
     }
 #endif
     if (sInnerSize == 0U) {
-        sInnerSize = (blockSizeU != 0U) ? blockSizeU : kSInnerAntiqGqa;
+        sInnerSize = (blockSizeU != 0U) ? blockSizeU : kAntiqSInnerGqa;
     }
     if (sInnerSize > innerSeq && !enableFd) {
         sInnerSize = innerSeq;
@@ -497,13 +479,13 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
     }
     const uint32_t sInnerSizeAlign =
 #if BR_MSD_US2_PACK_GATHER
-        AlignUp(sInnerSize, 64U);
+        RoundUpU32(sInnerSize, 64U);
 #else
-        AlignUp(sInnerSize, kByteBlock);
+        RoundUpU32(sInnerSize, kUbBlockBytes);
 #endif
 
-    const uint32_t mmM = kMsdIterNum * gSize;
-    const uint32_t cubeMAlign = AlignUp(mmM, 16U);
+    const uint32_t mmM = kMsdIters * gSize;
+    const uint32_t cubeMAlign = RoundUpU32(mmM, 16U);
     const uint32_t mmResUbSize = cubeMAlign * sInnerSizeAlign;
     const uint32_t bmm2ResUbSize = cubeMAlign * headDimAlign;
 
@@ -511,11 +493,11 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
     IncreFlashAttentionTilingDataV2& tilingV2 = *tilingV2Ptr;
     auto& tiling = tilingV2.tilingBase;
 
-    if (!FillBmm1Tiling(ascendcPlatform, mmM, sInnerSize, seqSize, headDim, headDimAlign, blockSizeU,
+    if (!SetupBmm1Tiling(ascendcPlatform, mmM, sInnerSize, seqSize, headDim, headDimAlign, blockSizeU,
                         tiling) ||
-        !FillBmm2Tiling(ascendcPlatform, mmM, sInnerSize, sInnerSizeAlign, seqSize, headDim,
+        !SetupBmm2Tiling(ascendcPlatform, mmM, sInnerSize, sInnerSizeAlign, seqSize, headDim,
                         blockSizeU, tiling) ||
-        !FillBmmPiTiling(ascendcPlatform, blockSplitBn2Range * gSize, headDim, qDtype, tilingV2)) {
+        !SetupBmmPiTiling(ascendcPlatform, blockSplitBn2Range * gSize, headDim, qDtype, tilingV2)) {
         OPS_LOG_E(nodeName, "Us2 bmm1/bmm2/bmmPi GetTiling failed");
         delete tilingV2Ptr;
         return ge::GRAPH_FAILED;
@@ -539,7 +521,7 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
     tiling.baseParams.set_batchContinuousFlag(1U);
     tiling.baseParams.set_actualLenQDims(static_cast<uint32_t>(batchSize));
     tiling.baseParams.set_actualLenDims(static_cast<uint32_t>(batchSize));
-    tiling.baseParams.set_msdIterNum(kMsdIterNum);
+    tiling.baseParams.set_msdIterNum(kMsdIters);
     tiling.baseParams.set_antiquantPerTensorFlag(0U);
 #if BR_MSD_US2_PACK_GATHER
     // Pack meta is per token × kv-head; same offset as open Mode5 PA gather.
@@ -565,20 +547,20 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
 
     if (enableFd) {
         tiling.splitKVParams.set_s2(kvSplitPart);
-        uint32_t sInnerLoopSize = AlignUp((seqSize + kvSplitPart - 1U) / kvSplitPart, blockSizeU);
+        uint32_t sInnerLoopSize = RoundUpU32((seqSize + kvSplitPart - 1U) / kvSplitPart, blockSizeU);
         tiling.splitKVParams.set_sInnerLoopSize(sInnerLoopSize);
         tiling.splitKVParams.set_accumOutSize(static_cast<uint32_t>(batchSize) *
                                               static_cast<uint32_t>(numHeads) * kvSplitPart *
                                               headDimAlign);
         tiling.splitKVParams.set_logSumExpSize(2U * static_cast<uint32_t>(batchSize) *
                                                static_cast<uint32_t>(numHeads) * kvSplitPart *
-                                               (kByteBlock / 4U));
+                                               (kUbBlockBytes / 4U));
     } else {
         tiling.splitKVParams.set_s2(0);
     }
 
     uint32_t* coreStartIdx = tiling.increFlashAttentionCoreParams.get_coreSidxEnd();
-    std::memcpy(coreStartIdx, coreSidxEnd, kMaxCoreNum * sizeof(uint32_t));
+    std::memcpy(coreStartIdx, coreSidxEnd, kCoreCap * sizeof(uint32_t));
 
     tiling.increFlashAttentionSingleCoreParams.set_sInnerLoopTimes(sInnerLoopTimes);
     tiling.increFlashAttentionSingleCoreParams.set_singleProcessSInnerSize(sInnerSize);
@@ -620,11 +602,11 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
         workspaceSize += static_cast<uint64_t>(tiling.splitKVParams.get_accumOutSize()) * 4ULL;
         workspaceSize += static_cast<uint64_t>(tiling.splitKVParams.get_logSumExpSize()) * 4ULL;
     }
-    workspaceSize += static_cast<uint64_t>(actCoreNum) * kPaCallbackBytes * 2ULL;
+    workspaceSize += static_cast<uint64_t>(actCoreNum) * kPaCbBytes * 2ULL;
     // Cube Π: small Q_T A (fp16/bf16, 2B; FD per-head ApplyPiCube) + fp32 C/qRot
     // (batched prologue/epilogue, M = max BN per core * G).
-    const uint32_t piAAlign = AlignUp(gSize, 16U);
-    const uint32_t piMAlign = AlignUp(blockSplitBn2Range * gSize, 16U);
+    const uint32_t piAAlign = RoundUpU32(gSize, 16U);
+    const uint32_t piMAlign = RoundUpU32(blockSplitBn2Range * gSize, 16U);
     workspaceSize += static_cast<uint64_t>(actCoreNum) * piAAlign * headDimAlign * 2ULL;
     workspaceSize += static_cast<uint64_t>(actCoreNum) * piMAlign * headDimAlign * 4ULL;
 
@@ -641,11 +623,11 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
     //   *launched* aiv count, NOT full-chip aivNum. Wrong 3rd arg desyncs
     //   GetBlockNum()/GetTaskRation() so odd remap skips while usedCoreNum
     //   still splits work across aivNum slots → missing BN heads → cosine~0.
-    uint64_t tilingKey = kTilingKeyPaged;
+    uint64_t tilingKey = kKeyPaged;
     if (enableFd) {
-        tilingKey = kTilingKeyPagedFd;
+        tilingKey = kKeyPagedFd;
     } else if (enableC1V1) {
-        tilingKey = kTilingKeyPagedC1V1;
+        tilingKey = kKeyPagedC1V1;
     }
     uint32_t aivLaunch = usedCoreNum;
     uint32_t aicLaunch = usedCoreNum;
@@ -669,6 +651,24 @@ static ge::graphStatus RqUniformFiaPagedK8v4MsdUs2TilingFunc(gert::TilingContext
               static_cast<unsigned long>(tilingKey));
     delete tilingV2Ptr;
     return ge::GRAPH_SUCCESS;
+}
+
+// Haar Q@Π / O@Π: Q_T[M,D] × Q_T[D,D] → fp32[M,D] (Q_T = query dtype,
+// fp16/bf16; both 2B so shapes/align are identical — only the declared
+// Cube dtype must match the Q_T Matmul instantiation).
+// M = max BN per core * G (batched prologue/epilogue). Always fill so
+// REGIST_MATMUL_OBJ(mmPi) is valid when APPLY_PI=0.
+
+inline uint32_t RoundUpU32(uint32_t a, uint32_t align)
+{
+    return align == 0 ? a : ((a + align - 1) / align) * align;
+}
+
+}  // namespace
+
+inline uint32_t TqKeyTileBytes(int64_t headSize)
+{
+    return kBrBlockRows * static_cast<uint32_t>(headSize + 4);
 }
 
 IMPL_OP_OPTILING(RqUniformFiaPagedK8v4Msd)
