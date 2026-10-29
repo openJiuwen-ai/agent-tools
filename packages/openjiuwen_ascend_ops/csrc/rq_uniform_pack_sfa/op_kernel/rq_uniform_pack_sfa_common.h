@@ -1,14 +1,3 @@
-/**
- * Copyright (c) 2026 Jiuwen.
- * SFA fused KV slot constants (P0) — shared by pack + kv_quant.
- *
- * Layout PA_BSND [Bn, Bs, 1, 388] (uint8/int8 byte container):
- *   [0, 256)   4-bit nope codes (512 dims)
- *   [256, 384) rope BF16/FP16 × 64
- *   [384, 388) FP16 scale + FP16 offset
- *
- * Dequant: y = offset + uint4(code) * scale  (no codebook LUT)
- */
 #ifndef RQ_UNIFORM_PACK_SFA_COMMON_H
 #define RQ_UNIFORM_PACK_SFA_COMMON_H
 

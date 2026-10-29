@@ -1,7 +1,3 @@
-/**
- * Copyright (c) 2026 Jiuwen.
- * SFA fused 388B slot constants for kv_quant read (must match pack).
- */
 #ifndef SFA_KV_COMMON_H
 #define SFA_KV_COMMON_H
 
