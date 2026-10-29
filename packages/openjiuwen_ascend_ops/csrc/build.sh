@@ -123,16 +123,16 @@ VENDOR_DIR="${INSTALL_PATH}/vendors/vllm-ascend"
 
 # Copy .so libraries to csrc/ for setup.py linking
 echo "Copying .so libraries to csrc/..."
-cp -f "${VENDOR_DIR}/op_api/lib/libcust_opapi.so" "${CSRC_DIR}/"
+cp -f "${VENDOR_DIR}/op_api/lib/libcust_opapi_jw.so" "${CSRC_DIR}/"
 cp -f "${VENDOR_DIR}/op_impl/ai_core/tbe/op_tiling/lib/linux/${HOST_ARCH}/libcust_opmaster_rt2.0.so" "${CSRC_DIR}/"
 cp -f "${VENDOR_DIR}/op_proto/lib/linux/${HOST_ARCH}/libcust_opsproto_rt2.0.so" "${CSRC_DIR}/"
 
 # Also copy them into the package dir: the binding .so has RUNPATH $ORIGIN and
-# the adapter resolves aclnn symbols via dlopen("libcust_opapi.so"), so the
+# the adapter resolves aclnn symbols via dlopen("libcust_opapi_jw.so"), so the
 # libs must sit next to _openjiuwen_ascend_ops*.so for the package to work without
 # a manual ctypes preload (wheel package_data picks them up from here too).
 echo "Copying .so libraries to pysrc/ package dir..."
-cp -f "${CSRC_DIR}/libcust_opapi.so" "${PYSRC_DIR}/"
+cp -f "${CSRC_DIR}/libcust_opapi_jw.so" "${PYSRC_DIR}/"
 cp -f "${CSRC_DIR}/libcust_opmaster_rt2.0.so" "${PYSRC_DIR}/"
 cp -f "${CSRC_DIR}/libcust_opsproto_rt2.0.so" "${PYSRC_DIR}/"
 
@@ -151,4 +151,4 @@ cp -r "${VENDOR_DIR}" "${PYSRC_DIR}/_cann_ops_custom/vendors/"
 echo "CANN custom ops build and install completed successfully!"
 echo "  Install path: ${INSTALL_PATH}"
 echo "  Vendor dir: ${VENDOR_DIR}"
-echo "  .so in csrc/: libcust_opapi.so, libcust_opmaster_rt2.0.so, libcust_opsproto_rt2.0.so"
+echo "  .so in csrc/: libcust_opapi_jw.so, libcust_opmaster_rt2.0.so, libcust_opsproto_rt2.0.so"

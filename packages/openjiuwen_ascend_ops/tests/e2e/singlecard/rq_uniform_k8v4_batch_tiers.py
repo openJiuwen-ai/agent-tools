@@ -49,17 +49,17 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[5]
 sys.path.append(str(REPO_ROOT / "packages" / "openjiuwen_ascend_ops" / "pysrc"))
 
-# Set ASCEND_CUSTOM_OPP_PATH and preload libcust_opapi.so before importing
+# Set ASCEND_CUSTOM_OPP_PATH and preload libcust_opapi_jw.so before importing
 # torch/torch_npu. Otherwise CANN may only search the system opapi library
-# and miss this repo's custom ops (libcust_opapi.so with aclnnRqUniform*).
+# and miss this repo's custom ops (libcust_opapi_jw.so with aclnnRqUniform*).
 # NOTE: LD_LIBRARY_PATH is read by the dynamic linker at process start, so
 # changing os.environ inside Python has no effect on dlopen(). We must
 # preload the .so by absolute path via ctypes so that subsequent
-# dlopen("libcust_opapi.so") returns our already-loaded handle.
+# dlopen("libcust_opapi_jw.so") returns our already-loaded handle.
 _CANN_OPP = REPO_ROOT / "ztmp" / "cann_ops_install" / "vendors" / "vllm-ascend"
 if _CANN_OPP.is_dir():
     import ctypes as _ctypes  # noqa: PLC0415
-    _opapi_lib = _CANN_OPP / "op_api" / "lib" / "libcust_opapi.so"
+    _opapi_lib = _CANN_OPP / "op_api" / "lib" / "libcust_opapi_jw.so"
     if _opapi_lib.is_file():
         _ctypes.CDLL(str(_opapi_lib), mode=_ctypes.RTLD_GLOBAL)
     existing_opp = os.environ.get("ASCEND_CUSTOM_OPP_PATH", "")

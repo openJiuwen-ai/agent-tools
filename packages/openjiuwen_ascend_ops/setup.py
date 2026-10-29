@@ -58,7 +58,7 @@ ext_modules.append(
         extra_compile_args=["-std=c++17"],
         extra_link_args=[
             "-L{}".format(CSRC_DIR),
-            "-lcust_opapi",
+            "-lcust_opapi_jw",
             "-L{}/aarch64-linux/lib64".format(CANN_HOME),
             "-lacl_rt",
             "-L{}".format(os.path.join(torch_npu_include_dir, "..", "lib")),
@@ -95,7 +95,7 @@ setup(
     ],
     package_data={
         "openjiuwentools.openjiuwen_ascend_ops": [
-            "libcust_opapi.so",
+            "libcust_opapi_jw.so",
             "libcust_opmaster_rt2.0.so",
             "libcust_opsproto_rt2.0.so",
             # Tiling adapters live under the OPP tree (ASCEND_CUSTOM_OPP_PATH).

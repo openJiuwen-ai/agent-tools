@@ -24,7 +24,7 @@ def _bootstrap_opp() -> Path | None:
     for opp in _OPP_CANDIDATES:
         if not opp.is_dir():
             continue
-        opapi = opp / "op_api" / "lib" / "libcust_opapi.so"
+        opapi = opp / "op_api" / "lib" / "libcust_opapi_jw.so"
         if opapi.is_file():
             try:
                 ctypes.CDLL(str(opapi), mode=ctypes.RTLD_GLOBAL)
