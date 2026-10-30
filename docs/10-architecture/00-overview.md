@@ -21,7 +21,7 @@
 | --- | --- | --- |
 | `csrc/` | C++/AscendC 源码与 CANN 自定义算子工程 | `csrc/CMakeLists.txt`、`csrc/build.sh`、`csrc/cmake/`、`csrc/<op>/op_host/`、`csrc/<op>/op_kernel/` |
 | `pysrc/openjiuwentools/openjiuwen_ascend_ops/` | Python 包源码（wheel 来源） | `__init__.py`、`ops/*.py`、构建产物 `_openjiuwen_ascend_ops.*.so` |
-| `tests/e2e/singlecard/` | E2E 测试 | `xrx_bit_residual_k8v4_batch_tiers.py` |
+| `tests/e2e/singlecard/` | E2E 测试 | `xrx_rq_uniform_k8v4_batch_tiers.py` |
 | `pyproject.toml` | PEP 517 构建后端声明 | 仅声明 `setuptools>=61.0 + wheel` |
 | `setup.py` | wheel 构建入口 | 见 [构建指南](../20-build/01-build-guide.md) |
 
@@ -42,7 +42,7 @@ csrc/<op_name>/
     └── <op_name>.cpp (+ _aic.h/_aiv.h/_common.h)  # AscendC 设备内核
 ```
 
-当前注册的算子见 `csrc/build.sh` 的 `CUSTOM_OPS` 与 `csrc/registration/all_ops.cpp`（快照：仅 `bit_residual_pack_k8v4`，随版本演进可能增减）。逐个算子的接口契约见 [规格总览](../30-specifications/00-operators.md)，功能/用法/设计见 [量化方案](../40-features/00-kv-cache-quantization.md) 下各子文件。
+当前注册的算子见 `csrc/build.sh` 的 `CUSTOM_OPS` 与 `csrc/registration/all_ops.cpp`（快照：仅 `rq_uniform_pack_k8v4`，随版本演进可能增减）。逐个算子的接口契约见 [规格总览](../30-specifications/00-operators.md)，功能/用法/设计见 [量化方案](../40-features/00-kv-cache-quantization.md) 下各子文件。
 
 ### 公共代码
 

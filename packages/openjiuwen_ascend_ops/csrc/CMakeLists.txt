@@ -94,8 +94,12 @@ if (BUILD_OPEN_PROJECT)
             ascendalog
             dl
     )
+    # Unique SONAME: vllm-ascend's own custom opp ships a libcust_opapi.so;
+    # the dynamic loader dedups by SONAME, so a shared name would make
+    # dlopen resolve to whichever vendor lib loaded first and break symbol
+    # lookup for the other side.
     set_target_properties(opapi PROPERTIES OUTPUT_NAME
-            cust_opapi
+            cust_opapi_jw
     )
     install(TARGETS opapi
             LIBRARY DESTINATION packages/vendors/${VENDOR_NAME}/op_api/lib

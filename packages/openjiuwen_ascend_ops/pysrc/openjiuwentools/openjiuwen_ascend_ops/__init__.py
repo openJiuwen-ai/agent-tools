@@ -1,8 +1,4 @@
-import importlib
 import os
-import sys
-
-import torch
 
 try:
     import torch_npu
@@ -46,8 +42,7 @@ except ImportError as e:
         f"Original error: {e}"
     ) from e
 
-from .ops import bit_residual_pack_k8v4
+# Public API: import this package for registration + OPP wiring, then call
+# torch.ops.openjiuwen.<op_name>(...). No Python thin wrappers under ops/.
 
-__all__ = [
-    "bit_residual_pack_k8v4",
-]
+__all__: list[str] = []

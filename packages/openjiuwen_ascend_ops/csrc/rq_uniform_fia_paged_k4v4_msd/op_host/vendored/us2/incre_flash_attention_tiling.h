@@ -1,0 +1,163 @@
+/*
+ * Vendored IncreFlashAttention tiling structs for RqUniformFiaPagedK4v4Msd Us2 path.
+ * Trimmed from ops-transformer incre_flash_attention_tiling.h (no PromptFlashAttention deps).
+ */
+#ifndef BR_MSD_US2_INCRE_FLASH_ATTENTION_TILING_H
+#define BR_MSD_US2_INCRE_FLASH_ATTENTION_TILING_H
+
+#include "register/tilingdata_base.h"
+#include "tiling/tiling_api.h"
+#include "exe_graph/runtime/tiling_context.h"
+#include "register/op_def_registry.h"
+
+namespace optiling {
+
+BEGIN_TILING_DATA_DEF(IncreFlashAttentionInitOutputParams)
+TILING_DATA_FIELD_DEF(uint32_t, isPerChnOut)
+TILING_DATA_FIELD_DEF(uint32_t, isOutQuantTypeBf16)
+TILING_DATA_FIELD_DEF(uint32_t, singleCoreSize)
+TILING_DATA_FIELD_DEF(uint32_t, singleCoreLseSize)
+TILING_DATA_FIELD_DEF(int64_t, totalOutputSize)
+TILING_DATA_FIELD_DEF(int64_t, totalLseOutputSize)
+TILING_DATA_FIELD_DEF(uint32_t, needInit)
+TILING_DATA_FIELD_DEF(uint32_t, isBSNDOut)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(IncreFlashAttentionInitOutputParamsOp, IncreFlashAttentionInitOutputParams)
+
+BEGIN_TILING_DATA_DEF(IncreFlashAttentionBaseParams)
+TILING_DATA_FIELD_DEF(uint32_t, batchSize)
+TILING_DATA_FIELD_DEF(uint32_t, seqSize)
+TILING_DATA_FIELD_DEF(uint32_t, qSeqSize)
+TILING_DATA_FIELD_DEF(uint32_t, headSize)
+TILING_DATA_FIELD_DEF(uint32_t, headSizeV)
+TILING_DATA_FIELD_DEF(uint32_t, blockSize)
+TILING_DATA_FIELD_DEF(uint32_t, maxBlockNumPerBatch)
+TILING_DATA_FIELD_DEF(uint32_t, maxBlockNumPerSeq)
+TILING_DATA_FIELD_DEF(float, scaleValue)
+TILING_DATA_FIELD_DEF(uint32_t, kvHeadNum)
+TILING_DATA_FIELD_DEF(uint32_t, headNumRatio)
+TILING_DATA_FIELD_DEF(uint32_t, qHeadNum)
+TILING_DATA_FIELD_DEF(uint32_t, nNumOfQInOneGroup)
+TILING_DATA_FIELD_DEF(uint32_t, batchContinuousFlag)
+TILING_DATA_FIELD_DEF(uint32_t, pseShiftFlag)
+TILING_DATA_FIELD_DEF(uint32_t, pseShiftB)
+TILING_DATA_FIELD_DEF(uint32_t, pseShiftS)
+TILING_DATA_FIELD_DEF(uint32_t, pseShiftS0)
+TILING_DATA_FIELD_DEF(uint32_t, selectWithByteMaskTmpMinSize)
+TILING_DATA_FIELD_DEF(uint32_t, actualLenQDims)
+TILING_DATA_FIELD_DEF(uint32_t, actualLenDims)
+TILING_DATA_FIELD_DEF(uint32_t, qPaddingFlag)
+TILING_DATA_FIELD_DEF(uint32_t, kvPaddingFlag)
+TILING_DATA_FIELD_DEF(uint32_t, msdIterNum)
+TILING_DATA_FIELD_DEF(uint32_t, l2CacheOffFlag)
+TILING_DATA_FIELD_DEF(uint32_t, antiquantPerTensorFlag)
+TILING_DATA_FIELD_DEF(uint32_t, antiquantPerHeadFlag)
+TILING_DATA_FIELD_DEF(uint32_t, antiquantParamsInPagedAttentionFlag)
+TILING_DATA_FIELD_DEF(uint32_t, attenMaskFlag)
+TILING_DATA_FIELD_DEF(uint32_t, attenMaskBatch)
+TILING_DATA_FIELD_DEF(uint32_t, attenMaskQSize)
+TILING_DATA_FIELD_DEF(uint32_t, attenMaskSize)
+TILING_DATA_FIELD_DEF(uint32_t, softmaxLseFlag)
+TILING_DATA_FIELD_DEF(uint32_t, totalBlockNum)
+TILING_DATA_FIELD_DEF(uint32_t, paKvShapeType)
+TILING_DATA_FIELD_DEF(uint32_t, antiqSeqSize)
+TILING_DATA_FIELD_DEF(int32_t, preToken)
+TILING_DATA_FIELD_DEF(int32_t, nextToken)
+TILING_DATA_FIELD_DEF(uint32_t, isRowInvalid)
+TILING_DATA_FIELD_DEF(uint32_t, sparseMode)
+TILING_DATA_FIELD_DEF(uint32_t, slidingFlag)
+TILING_DATA_FIELD_DEF(int64_t, windowSize)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(IncreFlashAttentionBaseParamsOp, IncreFlashAttentionBaseParams)
+
+BEGIN_TILING_DATA_DEF(IncreFlashAttentionCoreParams)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, 50, coreSidxEnd)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, 66, coreSidxEndRegbase)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, 66, coreSposStartRegbase)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(IncreFlashAttentionCoreParamsOp, IncreFlashAttentionCoreParams)
+
+BEGIN_TILING_DATA_DEF(IncreFlashAttentionSplitCoreParams)
+TILING_DATA_FIELD_DEF(uint32_t, headSplit)
+TILING_DATA_FIELD_DEF(uint32_t, maskHeadStride)
+TILING_DATA_FIELD_DEF(uint32_t, maskBatchStride)
+TILING_DATA_FIELD_DEF(uint32_t, qTokens)
+TILING_DATA_FIELD_DEF(uint32_t, isTriu)
+TILING_DATA_FIELD_DEF(uint32_t, maxSeqlen)
+TILING_DATA_FIELD_DEF(uint32_t, totalQBlockNum)
+TILING_DATA_FIELD_DEF(uint32_t, seqStepQ)
+TILING_DATA_FIELD_DEF(uint32_t, seqStepKv)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, 50, startBlk)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, 50, endBlk)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, 50, startBatch)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, 50, endBatch)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(IncreFlashAttentionSplitCoreParamsOp, IncreFlashAttentionSplitCoreParams)
+
+BEGIN_TILING_DATA_DEF(IncreFlashAttentionSingleCoreParams)
+TILING_DATA_FIELD_DEF(uint32_t, sInnerLoopTimes)
+TILING_DATA_FIELD_DEF(uint32_t, singleProcessSInnerSize)
+TILING_DATA_FIELD_DEF(uint32_t, singleProcessSInnerSizeTail)
+TILING_DATA_FIELD_DEF(uint32_t, usedCoreNum)
+TILING_DATA_FIELD_DEF(uint32_t, formerCoreNum)
+TILING_DATA_FIELD_DEF(uint32_t, blockSplitBn2Range)
+TILING_DATA_FIELD_DEF(uint32_t, tailSplitedBatchRange)
+TILING_DATA_FIELD_DEF(uint32_t, groupSplitSize)
+TILING_DATA_FIELD_DEF(uint32_t, s1SplitSize)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(IncreFlashAttentionSingleCoreParamsOp, IncreFlashAttentionSingleCoreParams)
+
+BEGIN_TILING_DATA_DEF(IncreFlashAttentionSingleCoreTensorSize)
+TILING_DATA_FIELD_DEF(uint32_t, mmResUbSize)
+TILING_DATA_FIELD_DEF(uint32_t, bmm2ResUbSize)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(IncreFlashAttentionSingleCoreTensorSizeOp, IncreFlashAttentionSingleCoreTensorSize)
+
+BEGIN_TILING_DATA_DEF(IncreFlashAttentionSplitKVParams)
+TILING_DATA_FIELD_DEF(uint32_t, s2)
+TILING_DATA_FIELD_DEF(uint32_t, sInnerLoopSize)
+TILING_DATA_FIELD_DEF(uint32_t, accumOutSize)
+TILING_DATA_FIELD_DEF(uint32_t, logSumExpSize)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(IncreFlashAttentionSplitKVParamsOp, IncreFlashAttentionSplitKVParams)
+
+BEGIN_TILING_DATA_DEF(IncreFlashAttentionTilingData)
+TILING_DATA_FIELD_DEF_STRUCT(TCubeTiling, bmm1TilingData)
+TILING_DATA_FIELD_DEF_STRUCT(TCubeTiling, bmm2TilingData)
+TILING_DATA_FIELD_DEF_STRUCT(IncreFlashAttentionBaseParams, baseParams)
+TILING_DATA_FIELD_DEF_STRUCT(IncreFlashAttentionSplitKVParams, splitKVParams)
+TILING_DATA_FIELD_DEF_STRUCT(IncreFlashAttentionCoreParams, increFlashAttentionCoreParams)
+TILING_DATA_FIELD_DEF_STRUCT(IncreFlashAttentionSingleCoreParams, increFlashAttentionSingleCoreParams)
+TILING_DATA_FIELD_DEF_STRUCT(IncreFlashAttentionSingleCoreTensorSize, increFlashAttentionSingleCoreTensorSize)
+TILING_DATA_FIELD_DEF_STRUCT(SoftMaxTiling, softmaxFlashTilingData)
+TILING_DATA_FIELD_DEF_STRUCT(IncreFlashAttentionInitOutputParams, outputParams)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(IncreFlashAttentionTilingDataOp, IncreFlashAttentionTilingData)
+
+BEGIN_TILING_DATA_DEF(IncreFlashAttentionTilingDataPrefix)
+TILING_DATA_FIELD_DEF_STRUCT(IncreFlashAttentionTilingData, base)
+TILING_DATA_FIELD_DEF(uint64_t, prefixAttenOutOffset)
+TILING_DATA_FIELD_DEF(uint64_t, userPromptAttenOutOffset)
+TILING_DATA_FIELD_DEF(uint64_t, tmpLseOffset)
+TILING_DATA_FIELD_DEF(uint64_t, prefixLen)
+TILING_DATA_FIELD_DEF(uint32_t, formerCoreNum)
+TILING_DATA_FIELD_DEF(uint32_t, blockSplitBn2Range)
+TILING_DATA_FIELD_DEF(uint32_t, tailSplitedBatchRange)
+TILING_DATA_FIELD_DEF(uint32_t, usedCoreNum)
+TILING_DATA_FIELD_DEF(uint32_t, batchSizeQ)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(IncreFlashAttentionTilingDataPrefixOp, IncreFlashAttentionTilingDataPrefix)
+
+BEGIN_TILING_DATA_DEF(IncreFlashAttentionTilingDataV2)
+TILING_DATA_FIELD_DEF_STRUCT(IncreFlashAttentionTilingData, tilingBase)
+TILING_DATA_FIELD_DEF_STRUCT(IncreFlashAttentionTilingDataPrefix, tilingPrefix)
+// Append-only: Haar Q@Π / O@Π Cube GEMM (fp16×fp16→fp32). Not inside
+// tilingBase — that struct is nested twice (base + prefix) and would
+// double the extra TCubeTiling bytes.
+TILING_DATA_FIELD_DEF_STRUCT(TCubeTiling, bmmPiTilingData)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(IncreFlashAttentionTilingDataV2Op, IncreFlashAttentionTilingDataV2)
+
+}  // namespace optiling
+
+#endif  // BR_MSD_US2_INCRE_FLASH_ATTENTION_TILING_H

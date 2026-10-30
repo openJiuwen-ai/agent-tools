@@ -1,0 +1,125 @@
+#pragma once
+
+#include "register/tilingdata_base.h"
+
+namespace optiling {
+
+constexpr uint32_t MLA_ABS_MAX_AIC_CORE_NUM = 26;
+
+BEGIN_TILING_DATA_DEF(MlaAbsBaseParams)
+TILING_DATA_FIELD_DEF(uint32_t, bSize)
+TILING_DATA_FIELD_DEF(uint32_t, n2Size)
+TILING_DATA_FIELD_DEF(uint32_t, gSize)
+TILING_DATA_FIELD_DEF(uint32_t, s1Size)
+TILING_DATA_FIELD_DEF(uint32_t, s2Size)
+TILING_DATA_FIELD_DEF(uint32_t, headDim)
+TILING_DATA_FIELD_DEF(uint32_t, headDimRope)
+TILING_DATA_FIELD_DEF(uint32_t, actualSeqS1Dims)
+TILING_DATA_FIELD_DEF(uint32_t, actualSeqS2Dims)
+TILING_DATA_FIELD_DEF(uint32_t, accumQSeqFlag)
+TILING_DATA_FIELD_DEF(uint32_t, accumKVSeqFlag)
+TILING_DATA_FIELD_DEF(float, scaleValue)
+TILING_DATA_FIELD_DEF(uint32_t, usedCoreNum)
+TILING_DATA_FIELD_DEF(uint32_t, outputLayout)
+TILING_DATA_FIELD_DEF(uint32_t, batchContinuous)
+TILING_DATA_FIELD_DEF(uint32_t, softmaxLseFlag)
+TILING_DATA_FIELD_DEF(uint32_t, needInit)
+TILING_DATA_FIELD_DEF(uint32_t, slidingFlag)
+TILING_DATA_FIELD_DEF(uint32_t, l2CacheOffFlag)
+TILING_DATA_FIELD_DEF(uint32_t, isLegacyIfa)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(MlaAbsBaseParamsOp, MlaAbsBaseParams)
+
+BEGIN_TILING_DATA_DEF(MlaAbsPageAttentionParams)
+TILING_DATA_FIELD_DEF(uint32_t, blockSize)
+TILING_DATA_FIELD_DEF(uint32_t, maxBlockNumPerBatch)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(MlaAbsPageAttentionParamsOp, MlaAbsPageAttentionParams)
+
+BEGIN_TILING_DATA_DEF(MlaAbsMaskParams)
+TILING_DATA_FIELD_DEF(uint32_t, attenMaskFlag)
+TILING_DATA_FIELD_DEF(uint32_t, attenMaskBatchStride)
+TILING_DATA_FIELD_DEF(uint32_t, attenMaskStride)
+TILING_DATA_FIELD_DEF(int32_t, preToken)
+TILING_DATA_FIELD_DEF(int32_t, nextToken)
+TILING_DATA_FIELD_DEF(uint32_t, isRowInvalid)
+TILING_DATA_FIELD_DEF(uint32_t, isExistRowInvalid)
+TILING_DATA_FIELD_DEF(uint32_t, sparseMode)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(MlaAbsMaskParamsOp, MlaAbsMaskParams)
+
+BEGIN_TILING_DATA_DEF(MlaAbsWorkspaceParams)
+TILING_DATA_FIELD_DEF(uint32_t, mm1ResSize)
+TILING_DATA_FIELD_DEF(uint32_t, mm2ResSize)
+TILING_DATA_FIELD_DEF(uint32_t, fdAccumOutSize)
+TILING_DATA_FIELD_DEF(uint32_t, fdLogSumExpSize)
+TILING_DATA_FIELD_DEF(uint32_t, dequantWsSlots)
+TILING_DATA_FIELD_DEF(uint32_t, dequantS2Cache)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(MlaAbsWorkspaceParamsOp, MlaAbsWorkspaceParams)
+
+BEGIN_TILING_DATA_DEF(MlaAbsInnerSplitParams)
+TILING_DATA_FIELD_DEF(uint32_t, mBaseSize)
+TILING_DATA_FIELD_DEF(uint32_t, s2BaseSize)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(MlaAbsInnerSplitParamsOp, MlaAbsInnerSplitParams)
+
+BEGIN_TILING_DATA_DEF(MlaAbsOuterSplitParams)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, MLA_ABS_MAX_AIC_CORE_NUM, bN2End)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, MLA_ABS_MAX_AIC_CORE_NUM, gS1End)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, MLA_ABS_MAX_AIC_CORE_NUM, s2End)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(MlaAbsOuterSplitParamsOp, MlaAbsOuterSplitParams)
+
+BEGIN_TILING_DATA_DEF(MlaAbsFlashDecodeParams)
+TILING_DATA_FIELD_DEF(uint32_t, numOfFdHead)
+TILING_DATA_FIELD_DEF(uint32_t, reserved)
+TILING_DATA_FIELD_DEF(uint32_t, gS1BaseSizeOfFd)
+TILING_DATA_FIELD_DEF(uint32_t, usedVecNumOfFd)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, MLA_ABS_MAX_AIC_CORE_NUM, bN2IdxOfFdHead)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, MLA_ABS_MAX_AIC_CORE_NUM, gS1IdxOfFdHead)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, MLA_ABS_MAX_AIC_CORE_NUM, s2SplitNumOfFdHead)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, MLA_ABS_MAX_AIC_CORE_NUM, s2SplitStartIdxOfCore)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, MLA_ABS_MAX_AIC_CORE_NUM, gS1SplitNumOfFdHead)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, MLA_ABS_MAX_AIC_CORE_NUM, gS1LastPartSizeOfFdHead)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, MLA_ABS_MAX_AIC_CORE_NUM * 2, gS1IdxEndOfFdHead)
+TILING_DATA_FIELD_DEF_ARR(uint32_t, MLA_ABS_MAX_AIC_CORE_NUM * 2, gS1IdxEndOfFdHeadSplit)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(MlaAbsFlashDecodeParamsOp, MlaAbsFlashDecodeParams)
+
+BEGIN_TILING_DATA_DEF(MlaAbsPrefixParams)
+TILING_DATA_FIELD_DEF(uint64_t, prefixMaxLen)
+TILING_DATA_FIELD_DEF(uint64_t, prefixLen)
+TILING_DATA_FIELD_DEF(bool, prefixFlag)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(MlaAbsPrefixParamsOp, MlaAbsPrefixParams)
+
+BEGIN_TILING_DATA_DEF(MlaAbsPseParams)
+TILING_DATA_FIELD_DEF(uint32_t, pseShiftFlag)
+TILING_DATA_FIELD_DEF(uint32_t, pseShiftByBatch)
+TILING_DATA_FIELD_DEF(uint32_t, pseShiftS1)
+TILING_DATA_FIELD_DEF(uint32_t, pseShiftS2)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(MlaAbsPseParamsOp, MlaAbsPseParams)
+
+BEGIN_TILING_DATA_DEF(MlaAbsLeftPaddingParams)
+TILING_DATA_FIELD_DEF(uint32_t, qPaddingFlag)
+TILING_DATA_FIELD_DEF(uint32_t, kvPaddingFlag)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(MlaAbsLeftPaddingParamsOp, MlaAbsLeftPaddingParams)
+
+BEGIN_TILING_DATA_DEF(RqUniformFiaMlaLatentTilingData)
+TILING_DATA_FIELD_DEF_STRUCT(MlaAbsBaseParams, baseParams)
+TILING_DATA_FIELD_DEF_STRUCT(MlaAbsPageAttentionParams, pageAttenParams)
+TILING_DATA_FIELD_DEF_STRUCT(MlaAbsMaskParams, maskParams)
+TILING_DATA_FIELD_DEF_STRUCT(MlaAbsWorkspaceParams, workspaceParams)
+TILING_DATA_FIELD_DEF_STRUCT(MlaAbsInnerSplitParams, innerSplitParams)
+TILING_DATA_FIELD_DEF_STRUCT(MlaAbsOuterSplitParams, outerSplitParams)
+TILING_DATA_FIELD_DEF_STRUCT(MlaAbsFlashDecodeParams, fdParams)
+TILING_DATA_FIELD_DEF_STRUCT(MlaAbsPrefixParams, prefixParams)
+TILING_DATA_FIELD_DEF_STRUCT(MlaAbsPseParams, pseParams)
+TILING_DATA_FIELD_DEF_STRUCT(MlaAbsLeftPaddingParams, leftPaddingParams)
+END_TILING_DATA_DEF
+REGISTER_TILING_DATA_CLASS(RqUniformFiaMlaLatent, RqUniformFiaMlaLatentTilingData)
+
+}  // namespace optiling

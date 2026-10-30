@@ -9,7 +9,7 @@ This is a code repository for building and managing intelligent agent tools, con
 | `packages/` | Python package directory, containing all installable sub-packages |
 | `packages/openjiuwentools_core/` | Core package, providing foundational functionality |
 | `packages/openjiuwentools_infer_router/` | Inference routing package, providing a KV Cache-aware routing system |
-| `packages/openjiuwen_ascend_ops/` | Ascend NPU operator package (CANN custom ops, currently `bit_residual_pack_k8v4`) |
+| `packages/openjiuwen_ascend_ops/` | Ascend NPU operator package (CANN custom ops, currently `rq_uniform_pack_k8v4`) |
 | `openJiuwen-vllm-affinity/` | Integration project between OpenJiuwen and vLLM, supporting affinity scheduling |
 | `Agent Innovation Challenge/` | Code and resources related to the Agent Innovation Challenge |
 
@@ -189,7 +189,7 @@ pre-commit run --files file1.py file2.md
 ### openjiuwen-ascend-ops package
 
 - AscendC custom operators for Ascend NPU, built as a CANN custom-op project + PyTorch extension
-- Currently provides `bit_residual_pack_k8v4` (K8V4 uniform-quantization KV cache pack op) under `torch.ops.openjiuwen.*`
+- Currently provides `rq_uniform_pack_k8v4` (K8V4 uniform-quantization KV cache pack op) under `torch.ops.openjiuwen.*`
 - Requires an aarch64 Linux machine with Ascend NPU, CANN toolkit, PyTorch and torch_npu to build
 - Build instructions: `docs/20-build/01-build-guide.md`; operator docs under `docs/10-architecture/` through `docs/60-profiling/`
 
