@@ -71,11 +71,15 @@ class Metrics:
         )
 
         self.priority_distribution = Histogram(
-            "router_request_priority_distribution", "Distribution of request priorities"
+            "router_request_priority_distribution",
+            "Distribution of request priorities",
+            buckets=tuple(range(0, 11)),
         )
 
         self.estimated_output_tokens_distribution = Histogram(
-            "router_estimated_output_tokens_distribution", "Distribution of estimated output tokens"
+            "router_estimated_output_tokens_distribution",
+            "Distribution of estimated output tokens",
+            buckets=(1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768),
         )
 
         # 事件相关指标
