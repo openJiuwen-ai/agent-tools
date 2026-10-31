@@ -1,4 +1,5 @@
 import asyncio
+import math
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -128,9 +129,10 @@ class PerformanceStats:
 
         percentiles = {}
         for p in [50, 70, 90, 95, 99, 100]:
-            idx = int((p / 100) * (n - 1))
-            if idx >= n:
-                idx = n - 1
+            # Nearest-rank percentile: floor((p/100)*(n-1)) makes every
+            # percentile below 100 collapse to the minimum for n=2 (and
+            # understates n=3), which misreports the latency dashboard.
+            idx = max(0, min(n - 1, math.ceil((p / 100) * n) - 1))
             percentiles[p] = sorted_values[idx]
 
         return percentiles
