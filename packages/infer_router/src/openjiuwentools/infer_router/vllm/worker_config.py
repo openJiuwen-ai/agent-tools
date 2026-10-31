@@ -66,6 +66,9 @@ def load_worker_config(config_path: str) -> argparse.Namespace:
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
 
+    if not isinstance(raw, dict):
+        raise ValueError("Worker config must be a YAML mapping")
+
     merged = dict(_DEFAULTS)
     for key, value in raw.items():
         norm_key = key.replace("-", "_")
