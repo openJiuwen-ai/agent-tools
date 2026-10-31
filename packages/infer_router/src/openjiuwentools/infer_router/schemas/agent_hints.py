@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CacheControl(BaseModel):
@@ -102,6 +102,16 @@ class WorkerInfo(BaseModel):
     group: str = "default"
     kv_addr: str = Field(default="", description="KV存储地址，用于P2P disagg connector")
     publisher_endpoint: str = Field(default="", description="ZMQ PUB endpoint for KV cache events from worker")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _available_memory_alias(cls, data):
+        """Accept the legacy available_memory constructor keyword."""
+        if isinstance(data, dict) and data.get("available_memory") is not None:
+            data = dict(data)
+            memory = data.pop("available_memory")
+            data.setdefault("total_tokens", memory)
+        return data
 
     @property
     def available_memory(self) -> int:
