@@ -2,8 +2,8 @@
 | --- | --- |
 | 标题 | msSanitizer 调试 |
 | 修改日期 | 2026-09-14 |
-| 关联模块 | packages/openjiuwen_ascend_ops/csrc/bit_residual_pack_k8v4/op_host/CMakeLists.txt |
-| 关联文档 | 20-build/01-build-guide.md, 60-profiling/00-profiling.md, 40-features/01-bit-residual-pack-k8v4.md |
+| 关联模块 | packages/openjiuwen_ascend_ops/csrc/rq_uniform_pack_k8v4/op_host/CMakeLists.txt |
+| 关联文档 | 20-build/01-build-guide.md, 60-profiling/00-profiling.md, 40-features/rq_uniform/01-pack-k8v4.md |
 
 # msSanitizer 调试
 
@@ -57,14 +57,14 @@ memcheck 专属：
 
 | 环境变量 / CMake 变量 | 追加选项 | 说明 |
 | --- | --- | --- |
-| `BIT_RESIDUAL_PACK_K8V4_DEBUG_LINE` | `-g` | 给 BitResidualPackK8v4 内核生成 `.debug_line` |
+| `RQ_UNIFORM_PACK_K8V4_DEBUG_LINE` | `-g` | 给 RqUniformPackK8v4 内核生成 `.debug_line` |
 
 `-g` 生成 `.debug_line` 支持源码行调用栈。若需 msSanitizer 全量插桩，可手动在 `add_ops_compile_options` 的 `OPTIONS` 里追加 `--cce-enable-sanitizer`（注意与 `-O0` 同开需 `--cce-ignore-always-inline=false`）。生产构建保持 unset 即可输出干净二进制。
 
 ## 4. 标准流程
 
-1. 选择适用场景（Kernel 直调 `<<<>>>` / aclnn 单算子 API / PyTorch TorchAir / Triton-Ascend）。本仓库是 aclnn 单算子 API 场景（源仓库用 `tools/bit_residual_pack_k8v4_perf` 作为 host runner，该工具未迁入）。
-2. 可选：配置 `-g -sanitizer` 编译选项重新编译算子（设 `BIT_RESIDUAL_PACK_K8V4_DEBUG_LINE=ON` 后重跑 `csrc/build.sh`）。
+1. 选择适用场景（Kernel 直调 `<<<>>>` / aclnn 单算子 API / PyTorch TorchAir / Triton-Ascend）。本仓库是 aclnn 单算子 API 场景（源仓库用 `tools/rq_uniform_pack_k8v4_perf` 作为 host runner，该工具未迁入）。
+2. 可选：配置 `-g -sanitizer` 编译选项重新编译算子（设 `RQ_UNIFORM_PACK_K8V4_DEBUG_LINE=ON` 后重跑 `csrc/build.sh`）。
 3. 运行 `mssanitizer` 命令。
 4. 解读 `--log-file` 报告或 `mindstudio_sanitizer_log/` 下的详细日志。
 
@@ -118,16 +118,16 @@ msSanitizer 运行时产生三类产物：
 
 ```shell
 # 1. 设好 CANN 环境变量（见 20-build/00-environment.md），带 debug 信息构建算子 kernel
-export BIT_RESIDUAL_PACK_K8V4_DEBUG_LINE=ON
+export RQ_UNIFORM_PACK_K8V4_DEBUG_LINE=ON
 cd packages/openjiuwen_ascend_ops
-bash csrc/build.sh 2>&1 | grep -iE "error|bit_residual_pack_k8v4_tiling" | head -30
-readelf -S ../../ztmp/cann_ops_install/vendors/vllm-ascend/op_impl/ai_core/tbe/kernel/ascend910b/bit_residual_pack_k8v4/*.o | grep debug_line
+bash csrc/build.sh 2>&1 | grep -iE "error|rq_uniform_pack_k8v4_tiling" | head -30
+readelf -S ../../ztmp/cann_ops_install/vendors/vllm-ascend/op_impl/ai_core/tbe/kernel/ascend910b/rq_uniform_pack_k8v4/*.o | grep debug_line
 
 # 2. 对任意 host 程序（如 e2e 测试）跑 msSanitizer memcheck
 source ../../ztmp/cann_ops_install/vendors/vllm-ascend/bin/set_env.bash
 export ASCEND_CUSTOM_OPP_PATH=<repo>/ztmp/cann_ops_install/vendors/vllm-ascend
 mssanitizer --tool=memcheck --log-file=ztmp/msanitizer.log -- \
-    python packages/openjiuwen_ascend_ops/tests/e2e/singlecard/xrx_bit_residual_k8v4_batch_tiers.py
+    python packages/openjiuwen_ascend_ops/tests/e2e/singlecard/xrx_rq_uniform_k8v4_batch_tiers.py
 
 # 3. 分析报告
 grep -c "ERROR:" ztmp/msanitizer.log
@@ -136,11 +136,11 @@ grep -c "ERROR:" ztmp/msanitizer.log
 ## 8. 已知坑位
 
 - `No sink op need to be detected`：未设 `ASCEND_CUSTOM_OPP_PATH` 或未 source `set_env.bash` 或未 `aclInit(acl.json)`。
-- `Kernel missed debug_line information`：未开 `BIT_RESIDUAL_PACK_K8V4_DEBUG_LINE=ON`。
-- 检测过慢：加 `--block-id=0` 或 `--kernel-name=BitResidualPackK8v4` 缩小范围。
+- `Kernel missed debug_line information`：未开 `RQ_UNIFORM_PACK_K8V4_DEBUG_LINE=ON`。
+- 检测过慢：加 `--block-id=0` 或 `--kernel-name=RqUniformPackK8v4` 缩小范围。
 - msSanitizer 通常使算子执行慢 10~50 倍，宜单点定位而非全量 bench。
 
 ## 9. 相关
 
 - 编译开关细节：[构建指南](../20-build/01-build-guide.md)
-- bit_residual pack 算子：[bit_residual_pack_k8v4](../40-features/01-bit-residual-pack-k8v4.md)（设计）/ [接口规格](../30-specifications/01-bit-residual-pack-k8v4.md)
+- rq_uniform pack 算子：[rq_uniform_pack_k8v4](../40-features/rq_uniform/01-pack-k8v4.md)（设计）/ [接口规格](../30-specifications/01-rq-uniform-pack-k8v4.md)

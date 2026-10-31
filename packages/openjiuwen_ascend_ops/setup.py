@@ -28,6 +28,21 @@ ascend_include_dir = CANN_HOME
 if os.path.exists(os.path.join(ascend_include_dir, "aarch64-linux", "include")):
     include_dirs.append(os.path.join(ascend_include_dir, "aarch64-linux", "include"))
 
+ADAPTER_SOURCES = [
+    os.path.join(CSRC_DIR, "rq_uniform_pack_k8v4", "rq_uniform_pack_k8v4_adapter.cpp"),
+    os.path.join(CSRC_DIR, "rq_uniform_pack_k4v4", "rq_uniform_pack_k4v4_adapter.cpp"),
+    os.path.join(CSRC_DIR, "rq_uniform_fia_paged_k8v4", "rq_uniform_fia_paged_k8v4_adapter.cpp"),
+    os.path.join(CSRC_DIR, "rq_uniform_fia_paged_k4v4", "rq_uniform_fia_paged_k4v4_adapter.cpp"),
+    os.path.join(CSRC_DIR, "rq_uniform_fia_paged_k8v4_msd", "rq_uniform_fia_paged_k8v4_msd_adapter.cpp"),
+    os.path.join(CSRC_DIR, "rq_uniform_fia_paged_k4v4_msd", "rq_uniform_fia_paged_k4v4_msd_adapter.cpp"),
+    os.path.join(CSRC_DIR, "rq_uniform_pack_mla_latent", "rq_uniform_pack_mla_latent_adapter.cpp"),
+    os.path.join(CSRC_DIR, "rq_uniform_pack_sfa", "rq_uniform_pack_sfa_adapter.cpp"),
+    os.path.join(CSRC_DIR, "rq_uniform_kv_quant_sparse_flash_attention_v2",
+                 "rq_uniform_kv_quant_sparse_flash_attention_v2_adapter.cpp"),
+    os.path.join(CSRC_DIR, "rq_uniform_dequant_mla_latent", "rq_uniform_dequant_mla_latent_adapter.cpp"),
+    os.path.join(CSRC_DIR, "rq_uniform_fia_mla_latent", "rq_uniform_fia_mla_latent_adapter.cpp"),
+]
+
 ext_modules = []
 
 ext_modules.append(
@@ -37,13 +52,13 @@ ext_modules.append(
             os.path.join(CSRC_DIR, "binding", "pybind_binding.cpp"),
             os.path.join(CSRC_DIR, "registration", "all_ops.cpp"),
             os.path.join(CSRC_DIR, "aclnn_torch_adapter", "NPUBridge.cpp"),
-            os.path.join(CSRC_DIR, "bit_residual_pack_k8v4", "bit_residual_pack_k8v4_adapter.cpp"),
+            *ADAPTER_SOURCES,
         ],
         include_dirs=include_dirs,
         extra_compile_args=["-std=c++17"],
         extra_link_args=[
             "-L{}".format(CSRC_DIR),
-            "-lcust_opapi",
+            "-lcust_opapi_jw",
             "-L{}/aarch64-linux/lib64".format(CANN_HOME),
             "-lacl_rt",
             "-L{}".format(os.path.join(torch_npu_include_dir, "..", "lib")),
@@ -80,10 +95,11 @@ setup(
     ],
     package_data={
         "openjiuwentools.openjiuwen_ascend_ops": [
-            "libcust_opapi.so",
+            "libcust_opapi_jw.so",
             "libcust_opmaster_rt2.0.so",
             "libcust_opsproto_rt2.0.so",
-            "bit_residual_pack_k8v4.py",
+            # Tiling adapters live under the OPP tree (ASCEND_CUSTOM_OPP_PATH).
+            "_cann_ops_custom/vendors/vllm-ascend/**",
         ],
     },
     include_package_data=True,

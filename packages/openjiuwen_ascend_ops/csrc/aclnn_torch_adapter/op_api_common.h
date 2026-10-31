@@ -133,7 +133,10 @@ inline bool IsOpInputBaseFormat(const at::Tensor &tensor)
 
 inline const char *GetOpApiLibName(void) { return "libopapi.so"; }
 
-inline const char *GetCustOpApiLibName(void) { return "libcust_opapi.so"; }
+// Unique SONAME (see the note in csrc/CMakeLists.txt): must not collide
+// with vllm-ascend's own libcust_opapi.so, or dlopen resolves to whichever
+// vendor library loaded first and our aclnn symbols are not found.
+inline const char *GetCustOpApiLibName(void) { return "libcust_opapi_jw.so"; }
 
 inline void *GetOpApiFuncAddrInLib(void *handler, const char *libName,
                                    const char *apiName) {
