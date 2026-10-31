@@ -30,6 +30,22 @@ class WorkerStatus:
     consecutive_failures: int = 0  # 连续失败次数
 
 
+def worker_endpoint_url(worker_url: str, endpoint: str) -> str:
+    """Join a worker base URL and an API endpoint without duplicating ``/v1``.
+
+    Worker configs document ``url`` as ``http://host:port/v1`` while forwarding
+    passes endpoints such as ``/v1/chat/completions``. Plain concatenation
+    produced ``/v1/v1/chat/completions``, which every worker answers with 404.
+    Etcd registrations use the bare ``http://host:port`` form, so both shapes
+    must keep working.
+    """
+    base = worker_url.rstrip("/")
+    path = endpoint if endpoint.startswith("/") else f"/{endpoint}"
+    if base.endswith("/v1") and (path == "/v1" or path.startswith("/v1/")):
+        path = path[len("/v1") :]
+    return base + path
+
+
 class WorkerManager:
     """工作器管理器，负责动态发现和健康检查"""
 
@@ -688,7 +704,7 @@ class WorkerManager:
             logger.error(f"[WORKER: ERROR] Worker {worker_id} not found")
             raise ValueError(f"Worker {worker_id} not found")
 
-        url = f"{worker.url}{endpoint}"
+        url = worker_endpoint_url(worker.url, endpoint)
 
         request_headers = {"Content-Type": "application/json"}
         if worker.api_key:
@@ -759,7 +775,7 @@ class WorkerManager:
             logger.error(f"[WORKER: ERROR] Worker {worker_id} not found")
             raise ValueError(f"Worker {worker_id} not found")
 
-        url = f"{worker.url}{endpoint}"
+        url = worker_endpoint_url(worker.url, endpoint)
 
         request_headers = {"Content-Type": "application/json"}
         if worker.api_key:
