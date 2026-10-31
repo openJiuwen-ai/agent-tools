@@ -194,11 +194,19 @@ class TokenizerManager:
         """
         formatted_messages = []
         for msg in messages:
-            formatted_msg = {"role": msg.get("role", "user")}
+            # Keep the OpenAI message fields verbatim (tool_calls/tool_call_id/name):
+            # the worker applies the same chat template to the original messages, so
+            # dropping them here makes the router's token ids/cache prefix diverge.
+            formatted_msg = dict(msg)
+            formatted_msg["role"] = msg.get("role", "user")
             content = msg.get("content", "")
 
             if isinstance(content, str):
                 formatted_msg["content"] = content
+            elif content is None:
+                # Assistant tool-call turns commonly have content=None. The old
+                # str(content) produced the literal text "None" in the prompt.
+                formatted_msg["content"] = ""
             elif isinstance(content, list):
                 text_parts = []
                 for part in content:
