@@ -141,10 +141,37 @@ class Settings(BaseSettings):
 
         """
         yaml_config = load_yaml_config(config_path)
-        if yaml_config:
-            flat_config = flatten_config(yaml_config)
-            return cls(**flat_config)
-        return cls()
+        return _with_yaml_defaults(cls, cls(), yaml_config)
+
+
+def _with_yaml_defaults(
+    settings_cls: type[Settings],
+    settings_instance: Settings,
+    yaml_config: dict[str, Any],
+) -> Settings:
+    """按文档声明的优先级合并 YAML：环境变量（及 .env）高于 YAML，高于默认值。
+
+    ``Settings(**yaml_flat)`` 会让 init 参数压过环境变量（pydantic-settings 中
+    init > env），与 docs/deployment.md「配置优先级」相反。这里先用
+    ``Settings()`` 让环境变量生效，再只把环境变量**没有**设置的字段用 YAML
+    覆盖，从而保持 环境变量 > YAML > 默认值。
+    """
+    if not yaml_config:
+        return settings_instance
+
+    flat_config = flatten_config(yaml_config)
+    known_fields = set(settings_cls.model_fields)
+    overrides = {
+        key: value
+        for key, value in flat_config.items()
+        if key in known_fields and key not in settings_instance.model_fields_set
+    }
+    if not overrides:
+        return settings_instance
+
+    merged = settings_instance.model_dump()
+    merged.update(overrides)
+    return settings_cls(**merged)
 
 
 _global_settings: Settings | None = None
@@ -183,10 +210,7 @@ def create_settings(config_path: str | None = None) -> Settings:
 
     """
     yaml_config = load_yaml_config(config_path)
-    if yaml_config:
-        flat_config = flatten_config(yaml_config)
-        return Settings(**flat_config)
-    return Settings()
+    return _with_yaml_defaults(Settings, Settings(), yaml_config)
 
 
 def set_global_settings(new_settings: Settings) -> None:
