@@ -20,7 +20,13 @@ using AscendC::CrossCoreSetFlag;
 using AscendC::CrossCoreWaitFlag;
 
 constexpr uint32_t TQ_VEC_DEQ_K0_READY_CUBE = 14U;
+// 3510 restricts mode-2 CrossCore flagId to 0-15; the V-ready pair uses the
+// free 12/13 slots there. 910b keeps the original 16.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+constexpr uint32_t TQ_VEC_DEQ_V0_READY_CUBE = 12U;
+#else
 constexpr uint32_t TQ_VEC_DEQ_V0_READY_CUBE = 16U;
+#endif
 constexpr uint32_t TQ_VEC_OUTPUT_PI_READY_CUBE = 10U;
 constexpr uint32_t TQ_CUBE_OUTPUT_PI_DONE_CUBE = 11U;
 
@@ -264,6 +270,23 @@ private:
         }
     }
 
+    // NZ-format Fixpipe dstStride for `rows` fractal rows of ELEM_T.
+    // 2201 (FixpipeParamsV220): unit is 32B blocks. 3510: the dav_3510 V220
+    // shim (TransFixpipeParamsV220ToFixpipeParamsArch3510) forwards dstStride
+    // verbatim to the native Arch3510 path, where non-NZ2ND NZ dstStride is in
+    // elements: FixpipeL0cToL1/FixpipeL0cToOut consume it as
+    // Loop1_dst_stride in units of element. rows * BLOCK_CUBE elements ==
+    // one fractal row per `rows` unit, dtype-independent.
+    template <typename ELEM_T>
+    static __aicore__ inline constexpr uint32_t NzFixpipeDstStride(uint32_t rows)
+    {
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        return rows * BLOCK_CUBE;
+#else
+        return rows * BLOCK_CUBE * sizeof(ELEM_T) / ONE_BLK_SIZE;
+#endif
+    }
+
     template <typename T1>
     __aicore__ inline constexpr uint32_t GetC0Num()
     {
@@ -297,7 +320,8 @@ private:
 
     template <uint32_t M_L1_SPLIT_Size, typename T1>
     __aicore__ inline void LoadAToL0(uint32_t dstBufId, const LocalTensor<T1> &l1Tensor, uint32_t mL1Size,
-                                     uint32_t subMStart, uint32_t subMSize, uint32_t subKStart, uint32_t subKSize);
+                                     uint32_t subMStart, uint32_t subMSize, uint32_t subKStart, uint32_t subKSize,
+                                     uint32_t kL1FullSize);
     __aicore__ inline void LoadBTransposeToL0(uint32_t dstBufId, const LocalTensor<WS_KV_T> &l1Tensor, uint32_t nL1Size,
                                               uint32_t subNStart, uint32_t subNSize, uint32_t subKStart, uint32_t subKSize);
     __aicore__ inline void LoadBToL0(uint32_t dstBufId, const LocalTensor<WS_KV_T> &l1Tensor, uint32_t kL1Size,
@@ -873,7 +897,7 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ApplyPiToQL1(
             }
             uint32_t mAlign = Align<uint32_t>(mAct, static_cast<uint32_t>(BLOCK_CUBE));
 
-            LoadAToL0<M_L1_SPLIT>(piAbId, qL1, subMSizeAlign, mOff, mAlign, 0U, headDim);
+            LoadAToL0<M_L1_SPLIT>(piAbId, qL1, subMSizeAlign, mOff, mAlign, 0U, headDim, headDim);
             LoadBToL0(piAbId, piStageL1, headDim, 0U, headDim, 0U, headDim);
 
             SetFlag<HardEvent::MTE1_M>(L0_READY_EVENT);
@@ -895,7 +919,7 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ApplyPiToQL1(
             fixParams.nSize = headDim;
             fixParams.mSize = mAct;
             fixParams.srcStride = mAlign;
-            fixParams.dstStride = subMSizeAlign * BLOCK_CUBE * sizeof(Q_T) / ONE_BLK_SIZE;
+            fixParams.dstStride = NzFixpipeDstStride<Q_T>(subMSizeAlign);
             fixParams.ndNum = 1;
             if constexpr (IsSameType<Q_T, bfloat16_t>::value) {
                 fixParams.quantPre = QuantMode_t::F322BF16;
@@ -940,7 +964,7 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ApplyPiToQL1(
                     if (!firstTile && kTile == 0U) {
                         WaitFlag<HardEvent::FIX_M>(L0C_EVENT0 + piCId);
                     }
-                    LoadAToL0<M_L1_SPLIT>(piAbId, qL1, subMSizeAlign, mOff, mAlign, kOff, TILE);
+                    LoadAToL0<M_L1_SPLIT>(piAbId, qL1, subMSizeAlign, mOff, mAlign, kOff, TILE, headDim);
                     LoadBToL0(piAbId, piStageL1, TILE, 0U, TILE, 0U, TILE);
 
                     SetFlag<HardEvent::MTE1_M>(L0_READY_EVENT);
@@ -967,7 +991,7 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ApplyPiToQL1(
                 fixParams.nSize = TILE;
                 fixParams.mSize = mAct;
                 fixParams.srcStride = mAlign;
-                fixParams.dstStride = subMSizeAlign * BLOCK_CUBE * sizeof(Q_T) / ONE_BLK_SIZE;
+                fixParams.dstStride = NzFixpipeDstStride<Q_T>(subMSizeAlign);
                 fixParams.ndNum = 1;
                 if constexpr (IsSameType<Q_T, bfloat16_t>::value) {
                     fixParams.quantPre = QuantMode_t::F322BF16;
@@ -1068,10 +1092,52 @@ template <typename FIAT>
 template <uint32_t M_L1_SPLIT_Size, typename T1>
 __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::LoadAToL0(
             uint32_t dstBufId, const LocalTensor<T1> &l1Tensor, uint32_t mL1Size,
-            uint32_t subMStart, uint32_t subMSize, uint32_t subKStart, uint32_t subKSize)
+            uint32_t subMStart, uint32_t subMSize, uint32_t subKStart, uint32_t subKSize,
+            uint32_t kL1FullSize)
 {
-    auto srcTensor = l1Tensor[mL1Size * subKStart][GetC0Num<T1>() * subMStart];
     auto dstTensor = this->aL0Tensor[dstBufId];
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    // 950: replace the conv-style LoadData 3D path with explicit V2 2D
+    // loads. The L1 A staging
+    // (Nd2Nz, dstNzC0Stride = mL1Size rows) places fractal (m-group a,
+    // k-group b) at a*mL1Size*32B + b*512B, i.e. k-fractals contiguous
+    // inside each m strip. One V2 load per m-group (mStep=1, kStep=kFract,
+    // srcStride=1) copies that strip into L0A at a*kFract*512B, forming the
+    // dense Nz tile the Mmad expects.
+    uint32_t mFract = subMSize / BLOCK_CUBE;
+    uint32_t kFract = subKSize / BLOCK_CUBE;
+    // 3510: the L1 A tile is a STANDARD NZ block (Nd2Nz NS=1, CS=16*mFract):
+    // fractal (mHat, kHat) at kHat*mFract*512B + mHat*512B. One V2 call with
+    // srcStride=mFract (k-fractal pitch) + mStartPosition reads it straight;
+    // dst (L0A) is written m-major (dstStride=1) in the same layout the 2201
+    // Mmad consumes.
+    {
+        AscendC::LoadData2DParamsV2 aLoadV2;
+        aLoadV2.mStartPosition = subMStart / BLOCK_CUBE;
+        aLoadV2.kStartPosition = 0;
+        aLoadV2.mStep = mFract;
+        aLoadV2.kStep = kFract;
+        aLoadV2.srcStride = mFract;
+        aLoadV2.dstStride = mFract; // L0A Nz (k-major): k-fractal pitch = mFract
+        // 3510 L0A fractal order is Nz (k-major): fractal (m, k) lives at
+        // k*mFract*512B + m*512B (2201 was Zz, m-major - the migration
+        // guide's "L0A Zz->Nz" change). With one V2 load per m-group the
+        // L0A k-fractal pitch is therefore mFract fractals and m-group a
+        // starts at a*512B. mFract==1 (all green single-strip cases) is
+        // identical in both orders.
+        // dstStride=1 (Zz) superseded: 3510 L0A is Nz per migration guide
+        aLoadV2.ifTranspose = false;
+        aLoadV2.sid = 0;
+        // src: strip (subMStart/16 + a), k-group subKStart/16
+        // (subKStart is an ELEMENT offset on the k axis; the k-group base is
+        // (subKStart/16)*512B = subKStart*32B = subKStart*BLOCK_CUBE elems).
+        // strip pitch = kL1FullSize*32B (the staged k width of one 16-row
+        // strip), NOT the M-based mL1Size.
+        auto srcV2 = l1Tensor[(subKStart / BLOCK_CUBE) * mFract * BLOCK_CUBE * BLOCK_CUBE];
+        AscendC::LoadData(dstTensor, srcV2, aLoadV2);
+    }
+#else
+    auto srcTensor = l1Tensor[mL1Size * subKStart][GetC0Num<T1>() * subMStart];
     loadData3DParams.mExtension = subMSize;
     loadData3DParams.kExtension = subKSize;
     loadData3DParams.channelSize = subKSize;
@@ -1084,6 +1150,7 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::LoadAToL0(
 
         ResetLoad3DConfig<M_L1_SPLIT_Size, true>();
     }
+#endif
 }
 
 template <typename FIAT>
@@ -1110,16 +1177,40 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::LoadBToL0(
             uint32_t dstBufId, const LocalTensor<WS_KV_T> &l1Tensor, uint32_t kL1Size,
             uint32_t subKStart, uint32_t subKSize, uint32_t subNStart, uint32_t subNSize)
 {
+    auto dstTensor = this->bL0Tensor[dstBufId];
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    // 950: V2 port of the v1 transposed-B load, following the
+    // pack_k8v4 recipe. The L1 staging (Nd2Nz, dstNzC0Stride =
+    // kL1Size rows) places fractal (row a, col b) at a*srcStride*512B +
+    // b*512B, which one V2 transposed load consumes with srcStride =
+    // kL1Size/16 and lays L0B out as Zn with dstStride = nFractals. The
+    // sub-tile k start rides on the source base pointer (row a0 base =
+    // subKStart/16 row-groups = subKStart*kL1Size elements) because
+    // kStartPosition semantics under ifTranspose are not doc-pinned.
+    AscendC::LoadData2DParamsV2 bLoadV2;
+    bLoadV2.mStartPosition = 0;
+    bLoadV2.kStartPosition = 0;
+    bLoadV2.mStep = subKSize / BLOCK_CUBE;
+    bLoadV2.kStep = subNSize / GetC0Num<KV_T>();
+    bLoadV2.srcStride = kL1Size / BLOCK_CUBE;
+    bLoadV2.dstStride = subNSize / GetC0Num<KV_T>();
+    bLoadV2.ifTranspose = true;
+    bLoadV2.sid = 0;
+    // Nd2Nz packs 16-row fractal groups CONTIGUOUSLY (256 elements each)
+    // inside a d-group column: row-group g base = g*256 elements.
+    auto srcV2 = l1Tensor[(subKStart / BLOCK_CUBE) * BLOCK_CUBE * BLOCK_CUBE];
+    AscendC::LoadData(dstTensor, srcV2, bLoadV2);
+#else
     mm2LoadDataBToL0Params.srcStride = kL1Size / BLOCK_CUBE;
     mm2LoadDataBToL0Params.repeatTimes = subNSize / GetC0Num<KV_T>();
 
     auto srcTensor = l1Tensor[kL1Size * subNStart][GetC0Num<KV_T>() * subKStart];
-    auto dstTensor = this->bL0Tensor[dstBufId];
 
     uint32_t kLoops = subKSize / BLOCK_CUBE;
     for (uint32_t i = 0; i < kLoops; i++) {
         LoadData(dstTensor[i * BLOCK_CUBE * subNSize], srcTensor[i * BLOCK_CUBE * GetC0Num<KV_T>()], mm2LoadDataBToL0Params);
     }
+#endif
 }
 
 template <typename FIAT>
@@ -1141,7 +1232,7 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::FixpipeCToGM(
 
     auto cL0Tensor = this->cL0Tensor[cL0BufId];
     if constexpr (GMFormat == CubeFormat::NZ) {
-        fixParams.dstStride = dstStride * BLOCK_CUBE * sizeof(MM_OUT_T) / ONE_BLK_SIZE;
+        fixParams.dstStride = NzFixpipeDstStride<MM_OUT_T>(dstStride);
         auto dstTensor = mmResGm[dstStride * subNStart][BLOCK_CUBE * subMStart];
         Fixpipe<MM_OUT_T, T, CFG_NZ>(dstTensor, cL0Tensor, fixParams);
     } else {
@@ -1155,7 +1246,15 @@ template <typename FIAT>
 template <CubeFormat OutFormat, CubeFormat BFormat>
 __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ComputeMm1(const RunInfo &info)
 {
+    // 950: CrossCoreWaitFlag's pipe param is live (910b blocked ALL pipes);
+    // the default PIPE_S does not gate the AIC's MTE2 consumption of the
+    // vec-staged workspace. Explicitly block the consuming stream.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    CrossCoreWaitFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE2>(
+        TQ_VEC_DEQ_K0_READY_CUBE + (info.loop % 2));
+#else
     CrossCoreWaitFlag(TQ_VEC_DEQ_K0_READY_CUBE + (info.loop % 2));
+#endif
     SetDequantWsTaskOffset(info);
 #if !DEBUG_DISABLE_C1
     Axis m(info.actMBaseSize);
@@ -1209,7 +1308,6 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ComputeMm1(const RunInfo 
 
                 SetFlag<HardEvent::MTE2_MTE1>(Q_EVENT0 + qBufId);
                 WaitFlag<HardEvent::MTE2_MTE1>(Q_EVENT0 + qBufId);
-
                 // Q@Π^T：Π→kpL1（调用前 KP 已 Wait 空闲）。结束后 SetFlag KP，供 CopyK。
                 if (kLoaded) {
                     // 同 nL1 上一块 m 的 K 仍占着 KP；先放行再写 Π，随后重新 CopyK。
@@ -1243,7 +1341,7 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ComputeMm1(const RunInfo 
                     for (auto& kL0 : kL0Slices) {
                         WaitFlag<HardEvent::M_MTE1>(L0AB_EVENT0 + this->abL0BufId);
 
-                        LoadAToL0<M_SPLIT_SIZE>(this->abL0BufId, qL1Tensor[qBufId], mL1.AlignedSize(), mL0.start, mL0.AlignedSize(), kL0.start, kL0.AlignedSize());
+                        LoadAToL0<M_SPLIT_SIZE>(this->abL0BufId, qL1Tensor[qBufId], mL1.AlignedSize(), mL0.start, mL0.AlignedSize(), kL0.start, kL0.AlignedSize(), k.AlignedSize());
                         LoadBTransposeToL0(this->abL0BufId, kpL1Tensor[this->kpL1BufId], nL1.AlignedSize(), nL0.start, nL0.AlignedSize(), kL0.start, kL0.AlignedSize());
                            
                         SetFlag<HardEvent::MTE1_M>(L0_READY_EVENT);
@@ -1330,7 +1428,7 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ComputeMm2Mkn(const RunIn
                 for (auto& kL0 : kL1.Split(K_BASE)) {
                     WaitFlag<HardEvent::M_MTE1>(L0AB_EVENT0 + this->abL0BufId);
                     LoadAToL0<M_SPLIT_SIZE>(this->abL0BufId, kpL1Tensor[this->kpL1BufId],
-                        mL1.AlignedSize(), 0, mL1.AlignedSize(), kL0.start, kL0.AlignedSize());
+                        mL1.AlignedSize(), 0, mL1.AlignedSize(), kL0.start, kL0.AlignedSize(), kL1.AlignedSize());
                     LoadBToL0(this->abL0BufId, vL1Tensor[vBufId], kL1.AlignedSize(),
                         kL0.start, kL0.AlignedSize(), 0, nL1.AlignedSize());
                     SetFlag<HardEvent::MTE1_M>(L0_READY_EVENT);
@@ -1383,9 +1481,20 @@ template <typename FIAT>
 template <CubeFormat OutFormat, CubeFormat AFormat>
 __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ComputeMm2(const RunInfo &info)
 {
+    // 950: explicit mode+pipe, see the ComputeMm1 note (PIPE_S default does
+    // not gate MTE2 consumption on 3510).
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    CrossCoreWaitFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE2>(
+        TQ_VEC_DEQ_V0_READY_CUBE + (info.loop % 2));
+#else
     CrossCoreWaitFlag(TQ_VEC_DEQ_V0_READY_CUBE + (info.loop % 2));
+#endif
     SetDequantWsTaskOffset(info);
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    CrossCoreWaitFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE2>(constInfo.syncV1C2);
+#else
     CrossCoreWaitFlag(constInfo.syncV1C2);
+#endif
 #if !DEBUG_DISABLE_C2
     if (constInfo.headDim > 128U) {
         ComputeMm2Mkn<OutFormat, AFormat>(info);
@@ -1422,7 +1531,6 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ComputeMm2(const RunInfo 
 
             SetFlag<HardEvent::MTE2_MTE1>(KP_EVENT0 + this->kpL1BufId);
             WaitFlag<HardEvent::MTE2_MTE1>(KP_EVENT0 + this->kpL1BufId);
-
             if (unlikely(kL1Id >= vL1Snapshot.bufCnt)) {
                 reuseVBuf = false;
             }
@@ -1443,7 +1551,7 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ComputeMm2(const RunInfo 
             for (auto& kL0 : kL1.Split(K_BASE)) {
                 WaitFlag<HardEvent::M_MTE1>(L0AB_EVENT0 + this->abL0BufId);
 
-                LoadAToL0<M_SPLIT_SIZE>(this->abL0BufId, kpL1Tensor[this->kpL1BufId], mL1.AlignedSize(), 0, mL1.AlignedSize(), kL0.start, kL0.AlignedSize());
+                LoadAToL0<M_SPLIT_SIZE>(this->abL0BufId, kpL1Tensor[this->kpL1BufId], mL1.AlignedSize(), 0, mL1.AlignedSize(), kL0.start, kL0.AlignedSize(), kL1.AlignedSize());
                 LoadBToL0(this->abL0BufId, vL1Tensor[vBufId], kL1.AlignedSize(), kL0.start, kL0.AlignedSize(), 0, n.AlignedSize());
                 SetFlag<HardEvent::MTE1_M>(L0_READY_EVENT);
                 WaitFlag<HardEvent::MTE1_M>(L0_READY_EVENT);
@@ -1505,7 +1613,13 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ComputeOutputPi(const Run
     }
 
     // Both AIV subcores finish staging their disjoint M rows before AIC reads.
+    // 950: explicit mode+pipe, see the ComputeMm1 note.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    CrossCoreWaitFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE2>(
+        TQ_VEC_OUTPUT_PI_READY_CUBE);
+#else
     CrossCoreWaitFlag(TQ_VEC_OUTPUT_PI_READY_CUBE);
+#endif
 
     constexpr uint32_t M_BASE = 128U;
     constexpr uint32_t TILE = tq_pack::BR_CUBE_TILE_D;
@@ -1541,7 +1655,7 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ComputeOutputPi(const Run
             WaitFlag<HardEvent::M_MTE1>(L0AB_EVENT0 + this->abL0BufId);
             WaitFlag<HardEvent::FIX_M>(L0C_EVENT0 + this->cL0BufId);
             LoadAToL0<M_BASE>(this->abL0BufId, kpL1Tensor[kpBufId],
-                mAlign, 0U, mAlign, 0U, headDim);
+                mAlign, 0U, mAlign, 0U, headDim, headDim);
             LoadBToL0(this->abL0BufId, vL1Tensor[vBufId],
                 headDim, 0U, headDim, 0U, headDim);
             SetFlag<HardEvent::MTE1_M>(L0_READY_EVENT);
@@ -1605,7 +1719,7 @@ __aicore__ inline void FiaBlockCubeTurboQuantP0<FIAT>::ComputeOutputPi(const Run
                         WaitFlag<HardEvent::FIX_M>(L0C_EVENT0 + this->cL0BufId);
                     }
                     LoadAToL0<M_BASE>(this->abL0BufId, kpL1Tensor[kpBufId],
-                        mAlign, 0U, mAlign, kOff, TILE);
+                        mAlign, 0U, mAlign, kOff, TILE, headDim);
                     LoadBToL0(this->abL0BufId, vL1Tensor[vBufId],
                         TILE, 0U, TILE, 0U, TILE);
                     SetFlag<HardEvent::MTE1_M>(L0_READY_EVENT);

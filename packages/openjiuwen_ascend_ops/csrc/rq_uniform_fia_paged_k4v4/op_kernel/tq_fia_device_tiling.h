@@ -11,7 +11,9 @@
 
 namespace optiling {
 
-constexpr uint32_t TQ_FIA_MAX_AIC_CORE_NUM = 26;
+// 950 (A5) launches up to 28 AIC cores (56 AIV blocks); the 910b-era 26
+// under-sizes the split tables, so cores 26+ would read out of range.
+constexpr uint32_t TQ_FIA_MAX_AIC_CORE_NUM = 32;
 
 struct TqFiaBaseParams {
     uint32_t bSize;

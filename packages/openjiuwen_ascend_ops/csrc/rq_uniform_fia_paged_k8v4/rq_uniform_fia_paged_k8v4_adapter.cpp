@@ -69,6 +69,13 @@ at::Tensor rq_uniform_fia_paged_k8v4(
     TORCH_CHECK(actual_seq_len_q.size() > 0, "actual_seq_len_q must not be empty");
     TORCH_CHECK(actual_seq_len_q.size() == actual_seq_len_kv.size(),
                 "actual_seq_len_q and actual_seq_len_kv must have the same length");
+    // The host tiling derives batchSize from the block table's ROW COUNT; a
+    // padded table (rows > seq lists) makes it read the seq arrays out of
+    // range. Fail fast instead.
+    TORCH_CHECK(block_table.size(0) == actual_seq_len_q.size(),
+                "block_table rows (", block_table.size(0),
+                ") must equal actual_seq_len_q length (", actual_seq_len_q.size(),
+                "); slice the padded table to the real batch before calling");
 
     const at::Tensor query_c = query.contiguous();
     const at::Tensor key_cache_c = key_cache.contiguous();

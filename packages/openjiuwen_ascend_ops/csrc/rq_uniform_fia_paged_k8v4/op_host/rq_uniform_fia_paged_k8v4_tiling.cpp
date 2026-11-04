@@ -243,11 +243,19 @@ static ge::graphStatus RqUniformFiaPagedK8v4TilingFunc(gert::TilingContext* cont
         return ge::GRAPH_FAILED;
     }
     auto ascendcPlatform = platform_ascendc::PlatformAscendC(platformInfoPtr);
-    const uint32_t aicNum = static_cast<uint32_t>(ascendcPlatform.GetCoreNumAic());
+    uint32_t aicNum = static_cast<uint32_t>(ascendcPlatform.GetCoreNumAic());
     const uint32_t aivNum = static_cast<uint32_t>(ascendcPlatform.GetCoreNumAiv());
     if (aicNum == 0 || aivNum == 0) {
         OPS_LOG_E(nodeName, "invalid core nums aic=%u aiv=%u", aicNum, aivNum);
         return ge::GRAPH_FAILED;
+    }
+    // The split tables are sized TQ_FIA_MAX_AIC_CORE_NUM; a part with more
+    // AIC cores than that must clamp (lost parallelism) instead of writing
+    // past the split-table arrays.
+    if (aicNum > TQ_FIA_MAX_AIC_CORE_NUM) {
+        OPS_LOG_E(nodeName, "aicNum %u exceeds TQ_FIA_MAX_AIC_CORE_NUM %u, clamping",
+                  aicNum, TQ_FIA_MAX_AIC_CORE_NUM);
+        aicNum = TQ_FIA_MAX_AIC_CORE_NUM;
     }
     const uint32_t cvRatio = aivNum / aicNum;
     size_t libapiSize = ascendcPlatform.GetLibApiWorkSpaceSize();
@@ -347,6 +355,18 @@ static ge::graphStatus RqUniformFiaPagedK8v4TilingFunc(gert::TilingContext* cont
     const int64_t maxBlocksPerSeq = btShape.GetDim(1);
     if (numTokens <= 0 || batchSize <= 0 || maxBlocksPerSeq <= 0) {
         OPS_LOG_E(nodeName, "invalid query/block_table shape");
+        return ge::GRAPH_FAILED;
+    }
+    // The seq-len arrays are indexed by block-table ROW (batch); a padded
+    // table (rows > seq entries) makes these reads run past the arrays.
+    // The aclnn entry path skips the adapter's TORCH_CHECK, so re-validate
+    // here where batchSize is actually derived.
+    const uint32_t seqQCount = static_cast<uint32_t>(seqQTensor->GetStorageShape().GetDim(0));
+    if (seqQCount != 0U && static_cast<uint32_t>(batchSize) > seqQCount) {
+        OPS_LOG_E(nodeName,
+                  "block_table rows (%ld) exceed actual_seq_len_q entries (%u); "
+                  "slice the padded table to the real batch",
+                  batchSize, seqQCount);
         return ge::GRAPH_FAILED;
     }
 

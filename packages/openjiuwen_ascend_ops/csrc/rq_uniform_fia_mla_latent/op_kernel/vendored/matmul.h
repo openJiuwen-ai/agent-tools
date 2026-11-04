@@ -54,7 +54,14 @@ __aicore__ inline T AlignUp(T num, T rnd)
     return (((rnd) == 0) ? 0 : (((num) + (rnd) - 1) / (rnd) * (rnd)));
 }
 
-#if ((__CCE_AICORE__ == 310) || (defined __DAV_310R6__) || (__NPU_ARCH__ == 5102))
+// 950 (NPU arch 3510) reports __CCE_AICORE__==310 (CANN's matmul_chip_cap.h
+// maps 3510 to CHIP_TYPE_310), which would select the 310P LoadData2DParamsV2
+// branch below. That branch's LoadDataToL0A/L0B lack the ABLayout template
+// parameter and mismatch this file's <T, AL>-style call sites (e.g. MatmulKPP,
+// the K-loop path MLA/FIA instantiate). Route 3510 to the Load3D-v2 branch
+// instead — every call site instantiated on 910b is written against it, and
+// dav_3510 implements both LoadData3D v2 and LoadData2D.
+#if ((__CCE_AICORE__ == 310) || (defined __DAV_310R6__) || (__NPU_ARCH__ == 5102)) && (__NPU_ARCH__ != 3510)
 template <typename T>
 __aicore__ inline uint32_t GetBlockNum(uint32_t size) {
     if constexpr (IsSameType<T, float>::value) {
