@@ -24,10 +24,13 @@ from openjiuwentools.infer_router.fault_tolerance.fault_tolerance import (
     CircuitBreaker,
     RetryConfig,
 )
-from openjiuwentools.infer_router.kv_cache.event import CacheEvent
+from openjiuwentools.infer_router.kv_cache.event import CacheEvent, CacheLocation
 from openjiuwentools.infer_router.kv_cache.kv_cache import KVCacheManager
 from openjiuwentools.infer_router.kv_cache.kv_event_generator import KVEventGenerator
 from openjiuwentools.infer_router.kv_cache.kv_event_manager import KVEventManager
+from openjiuwentools.infer_router.kvbm.transfer_orchestrator import (
+    orchestrate_cross_worker_transfer,
+)
 from openjiuwentools.infer_router.monitoring.metrics import metrics
 from openjiuwentools.infer_router.monitoring.performance_stats import (
     RequestTimings,
@@ -54,13 +57,9 @@ circuit_breaker: CircuitBreaker | None = None
 settings: Settings | None = None
 
 
-def _build_kv_headers(
-    prefill_kv_addr: str, decode_kv_addr: str, decode_url: str, dp_rank: int = 0
-) -> dict[str, str]:
+def _build_kv_headers(prefill_kv_addr: str, decode_kv_addr: str, decode_url: str, dp_rank: int = 0) -> dict[str, str]:
     """Construct the headers expected by vLLM's P2P disagg connector."""
-    request_id = (
-        f"___prefill_addr_{prefill_kv_addr}___decode_addr_{decode_kv_addr}_{uuid.uuid4().hex}"
-    )
+    request_id = f"___prefill_addr_{prefill_kv_addr}___decode_addr_{decode_kv_addr}_{uuid.uuid4().hex}"
     headers: dict[str, str] = {"X-Request-Id": request_id}
     kv_target = os.environ.get("KV_TARGET")
     if kv_target:
@@ -97,9 +96,7 @@ def _parse_agent_hints(chat_request: ChatCompletionRequest | CompletionRequest) 
 
         if chat_request.jiuwenext.cache_control:
             cache_control = chat_request.jiuwenext.cache_control
-            logger.debug(
-                f"[STEP 2] Cache Control found: type={cache_control.type}, ttl={cache_control.ttl}"
-            )
+            logger.debug(f"[STEP 2] Cache Control found: type={cache_control.type}, ttl={cache_control.ttl}")
     else:
         logger.debug("[STEP 2] No Agent Hints provided, using defaults")
 
@@ -157,6 +154,8 @@ def _record_stream_metrics(
     osl: int,
     token_count: int,
     endpoint: str,
+    route_hint=None,
+    overlap_scores: dict | None = None,
 ):
     """流式响应结束后记录指标和事件，由 _wrap_stream_with_metrics 的 on_stream_complete 回调。
 
@@ -175,6 +174,8 @@ def _record_stream_metrics(
         osl: 预估输出 token 数，当 usage 不可用时作为 completion_tokens 的回退值
         token_count: 输入 token 数量，用于 decode_end 事件
         endpoint: API 端点路径，用于 Prometheus 指标标签
+        route_hint: 路由提示，用于延迟预测训练数据上报
+        overlap_scores: KV 缓存匹配分数，用于延迟预测训练数据上报
     """
     # 流结束时取真实的 end_time，而非流创建时间
     end_time = time.time()
@@ -191,27 +192,30 @@ def _record_stream_metrics(
     # 生成 decode_end 事件，使用实际 completion_tokens 或回退到 osl 估算值
     if event_generator:
         target_worker_id = worker_id if decode_id is None else decode_id
-        event_manager.process_event(CacheEvent(
-            event_type="decode_end",
-            token_count=token_count,
-            token_ids=[],
-            worker_id=target_worker_id,
-            engine_specific={
-                "worker_id": target_worker_id,
-                "osl": osl,
-                "completion_tokens": completion_tokens if completion_tokens else osl,
-            },
-        ))
+        event_manager.process_event(
+            CacheEvent(
+                event_type="decode_end",
+                token_count=token_count,
+                token_ids=[],
+                worker_id=target_worker_id,
+                engine_specific={
+                    "worker_id": target_worker_id,
+                    "osl": osl,
+                    "completion_tokens": completion_tokens if completion_tokens else osl,
+                },
+            )
+        )
 
     # 记录性能统计
     decode_duration = end_time - prefill_end_time
+    prefill_duration = prefill_end_time - start_time + router_dispatch_duration
     performance_stats.record_request(
         RequestTimings(
             request_id=request_id,
             start_time=start_time,
             end_time=end_time,
             router_dispatch_duration=router_dispatch_duration,
-            prefill_duration=prefill_end_time - start_time + router_dispatch_duration,
+            prefill_duration=prefill_duration,
             decode_duration=decode_duration,
             response_return_duration=0.0,
             prompt_tokens=prompt_tokens,
@@ -221,18 +225,220 @@ def _record_stream_metrics(
         )
     )
 
+    if router is not None:
+        router.release_worker(worker_id)
+        if decode_id:
+            router.release_worker(decode_id)
+
+    # 上报延迟预测训练数据
+    if route_hint is not None:
+        _report_latency_training_data(
+            worker_id=worker_id,
+            decode_id=decode_id,
+            route_hint=route_hint,
+            overlap_scores=overlap_scores,
+            prefill_duration=prefill_duration,
+            decode_duration=decode_duration,
+            completion_tokens=completion_tokens,
+        )
+
+    logger.info(
+        "[STREAM_COMPLETE] request={} workers={} ttft={:.1f}ms total={:.1f}ms tokens={}/{}/{} overlap={}",
+        request_id,
+        [worker_id] if decode_id is None else [worker_id, decode_id],
+        prefill_duration * 1000,
+        duration * 1000,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        overlap_scores,
+    )
+
     logger.info(
         f"[REQUEST] Stream {request_id} completed in {duration:.3f}s, "
         f"tokens={prompt_tokens}/{completion_tokens}/{total_tokens}"
     )
 
 
+def _report_latency_training_data(
+    *,
+    worker_id: str,
+    decode_id: str | None,
+    route_hint,
+    overlap_scores: dict,
+    prefill_duration: float,
+    decode_duration: float,
+    completion_tokens: int,
+):
+    """若当前算法配置了 latency-predict-scorer，异步上报训练样本到 training_server。"""
+    from openjiuwentools.infer_router.routing.scorer import PluginScorerAlgorithm
+
+    algo = router.get_algorithm_for_phase("decode") if decode_id is not None else router.current_algorithm
+    if not isinstance(algo, PluginScorerAlgorithm):
+        return
+
+    reporter = algo.get_latency_predict_scorer()
+    if reporter is None:
+        return
+
+    target_worker_id = worker_id if decode_id is None else decode_id
+    target_worker = worker_manager.get_worker(target_worker_id)
+    if not target_worker:
+        return
+
+    actual_ttft_ms = prefill_duration * 1000.0
+    actual_tpot_ms = 0.0
+    if completion_tokens > 0 and decode_duration > 0:
+        actual_tpot_ms = (decode_duration * 1000.0) / completion_tokens
+
+    logger.info(
+        "[LatencyTraining] Reporting: worker={}, ttft={:.1f}ms, tpot={:.2f}ms, tokens={}",
+        target_worker_id,
+        actual_ttft_ms,
+        actual_tpot_ms,
+        completion_tokens,
+    )
+    reporter.report_training_data_fire_and_forget(
+        worker=target_worker,
+        route_hint=route_hint,
+        overlap_scores=overlap_scores or {},
+        actual_ttft_ms=actual_ttft_ms,
+        actual_tpot_ms=actual_tpot_ms,
+        completion_tokens=completion_tokens,
+    )
+
+
+async def _prefetch_kvbm_blocks_for_worker(worker_id: str, route_hint, request_id: str) -> None:
+    """在转发请求前为目标 worker 触发 KVBM 前缀 block 预取。
+
+    参数:
+        worker_id: 目标 worker ID。
+        route_hint: 预处理得到的路由提示，包含 token_ids。
+        request_id: 当前请求 ID，用于 worker 侧日志串联。
+
+    返回:
+        无返回值；预取失败只记录日志，不影响主请求。
+    """
+
+    if settings is None or worker_manager is None or kvcache_manager is None:
+        return
+    if not getattr(route_hint, "token_ids", None):
+        return
+    target_prefix_snapshot = None
+    try:
+        transfer_result = await orchestrate_cross_worker_transfer(
+            target_worker_id=worker_id,
+            token_ids=route_hint.token_ids,
+            request_id=request_id,
+            config=settings,
+            kvcache_manager=kvcache_manager,
+            worker_manager=worker_manager,
+        )
+        target_prefix_snapshot = transfer_result.pop(
+            "_target_prefix_snapshot",
+            None,
+        )
+    except Exception as exc:
+        logger.warning(
+            "KVBM cross-worker transfer orchestration failed request={} target={} error={}; falling back to recompute",
+            request_id,
+            worker_id,
+            exc,
+        )
+    if not getattr(settings, "kvbm_router_prefetch_enabled", True):
+        return
+
+    if target_prefix_snapshot is None:
+        target_prefix_snapshot = kvcache_manager.get_worker_prefix_snapshot(
+            worker_id,
+            route_hint.token_ids,
+        )
+    limit = int(getattr(settings, "kvbm_router_prefetch_max_blocks", 64))
+    location_counts = kvcache_manager.get_matched_block_location_counts(
+        worker_id,
+        route_hint.token_ids,
+        snapshot=target_prefix_snapshot,
+    )
+    cpu_remote_matches = location_counts.get(CacheLocation.CPU, 0) + location_counts.get(CacheLocation.REMOTE, 0)
+    npu_matches = location_counts.get(CacheLocation.NPU, 0)
+    block_hashes = kvcache_manager.get_matched_block_hashes(
+        worker_id,
+        route_hint.token_ids,
+        limit=limit,
+        locations={CacheLocation.CPU, CacheLocation.REMOTE},
+        snapshot=target_prefix_snapshot,
+    )
+    logger.info(
+        "KVBM router prefetch candidates worker={} cpu_remote_matches={} npu_matches={} requested_blocks={}",
+        worker_id,
+        cpu_remote_matches,
+        npu_matches,
+        len(block_hashes) if isinstance(block_hashes, list) else 0,
+    )
+    if not isinstance(block_hashes, list):
+        logger.debug("KVBM router prefetch skipped: worker={} invalid match result", worker_id)
+        return
+    if not block_hashes:
+        logger.debug("KVBM router prefetch skipped: worker={} matched_blocks=0", worker_id)
+        return
+
+    deadline_ms = int(getattr(settings, "kvbm_router_prefetch_timeout_ms", 100))
+    prefetch_coro = worker_manager.prefetch_kv_blocks(
+        worker_id,
+        block_hashes,
+        request_id=request_id,
+        deadline_ms=deadline_ms,
+    )
+    if not getattr(settings, "kvbm_router_prefetch_wait_for_result", False):
+        task = asyncio.create_task(prefetch_coro)
+        task.add_done_callback(
+            lambda done: logger.debug(
+                "KVBM router prefetch task finished: worker={} result={}",
+                worker_id,
+                _prefetch_task_result(done),
+            )
+        )
+        logger.info(
+            "KVBM router prefetch dispatched worker={} requested_blocks={}",
+            worker_id,
+            len(block_hashes),
+        )
+        return
+
+    result = await prefetch_coro
+    logger.info(
+        "KVBM router prefetch worker={} requested_blocks={} result={}",
+        worker_id,
+        len(block_hashes),
+        result,
+    )
+
+
+def _prefetch_task_result(task: asyncio.Task) -> object:
+    """读取异步预取任务结果，避免 fire-and-forget 任务异常未被消费。
+
+    参数:
+        task: asyncio.create_task 返回的预取任务。
+
+    返回:
+        任务返回值；任务取消时返回字符串标记；任务异常时返回异常字符串。
+    """
+
+    if task.cancelled():
+        return "cancelled"
+    try:
+        return task.result()
+    except Exception as exc:
+        return f"{type(exc).__name__}: {exc}"
+
+
 async def _handle_combined_worker(
     worker_id: str,
     chat_request: ChatCompletionRequest,
     route_hint,
-    max_tokens: int,
+    max_tokens: int | None,
     prefill_start_time: float,
+    request_id: str,
 ):
     """处理组合型worker的请求"""
     combined_worker = worker_manager.get_worker(worker_id)
@@ -241,9 +447,11 @@ async def _handle_combined_worker(
 
     logger.debug(f"[STEP 9] Selected combined worker: {combined_worker.worker_id}")
 
-    estimated_tokens = max_tokens
+    estimated_tokens = max_tokens or route_hint.estimated_output_tokens
     if chat_request.jiuwenext and chat_request.jiuwenext.agent_hints:
-        estimated_tokens = chat_request.jiuwenext.agent_hints.estimated_output_tokens or max_tokens
+        estimated_tokens = chat_request.jiuwenext.agent_hints.estimated_output_tokens or estimated_tokens
+
+    await _prefetch_kvbm_blocks_for_worker(combined_worker.worker_id, route_hint, request_id)
 
     if event_generator:
         decode_start_event = CacheEvent(
@@ -263,9 +471,7 @@ async def _handle_combined_worker(
             event_manager.process_event(event)
 
     request_data = chat_request.model_dump(exclude_none=True, exclude={"jiuwenext"})
-    logger.debug(
-        f"[STEP 10] Forwarding request to {combined_worker.worker_id} with max_tokens={max_tokens}"
-    )
+    logger.debug(f"[STEP 10] Forwarding request to {combined_worker.worker_id} with max_tokens={max_tokens}")
     prefill_end_time = time.time()
     if chat_request.stream:
         # 流式：返回原始 AsyncGenerator，由调用方通过 _wrap_stream_with_metrics 包装
@@ -295,7 +501,7 @@ class DisaggWorkerParams:
 
     prefill_id: str
     decode_id: str
-    max_tokens: int
+    max_tokens: int | None
     prefill_start_time: float
 
 
@@ -303,6 +509,7 @@ async def _handle_disagg_workers(
     params: DisaggWorkerParams,
     chat_request: ChatCompletionRequest,
     route_hint,
+    request_id: str,
 ):
     """处理非组合型worker的请求（Mooncake模式）"""
     prefill_id = params.prefill_id
@@ -323,19 +530,13 @@ async def _handle_disagg_workers(
     prefill_kv_addr = getattr(prefill_worker, "kv_addr", "")
     decode_kv_addr = getattr(decode_worker, "kv_addr", "")
     dp_rank = getattr(prefill_worker, "dp_rank", 0)
-    logger.debug(
-        f"[STEP 9] Prefill KV addr: {prefill_kv_addr}, Decode KV addr: {decode_kv_addr}, DP rank: {dp_rank}"
-    )
+    logger.debug(f"[STEP 9] Prefill KV addr: {prefill_kv_addr}, Decode KV addr: {decode_kv_addr}, DP rank: {dp_rank}")
 
     kv_headers = _build_kv_headers(prefill_kv_addr, decode_kv_addr, decode_worker.url, dp_rank)
     logger.debug(f"[STEP 9] Built KV headers: {kv_headers}")
 
-    req_data_to_prefill = copy.deepcopy(
-        chat_request.model_dump(exclude_none=True, exclude={"jiuwenext"})
-    )
-    req_data_to_decode = copy.deepcopy(
-        chat_request.model_dump(exclude_none=True, exclude={"jiuwenext"})
-    )
+    req_data_to_prefill = copy.deepcopy(chat_request.model_dump(exclude_none=True, exclude={"jiuwenext"}))
+    req_data_to_decode = copy.deepcopy(chat_request.model_dump(exclude_none=True, exclude={"jiuwenext"}))
 
     req_data_to_prefill["stream"] = False
     req_data_to_prefill["max_tokens"] = 1
@@ -345,9 +546,8 @@ async def _handle_disagg_workers(
         del req_data_to_prefill["stream_options"]
 
     logger.debug("[STEP 11] KV Transfer type: MOONCAKE")
-    logger.debug(
-        f"[STEP 11] Forwarding prefill request to {prefill_worker.worker_id} with max_tokens=1"
-    )
+    logger.debug(f"[STEP 11] Forwarding prefill request to {prefill_worker.worker_id} with max_tokens=1")
+    await _prefetch_kvbm_blocks_for_worker(prefill_worker.worker_id, route_hint, request_id)
 
     if event_generator:
         prefill_start_event = CacheEvent(
@@ -391,14 +591,13 @@ async def _handle_disagg_workers(
         )
         event_manager.process_event(prefill_end_event)
 
-    logger.debug(
-        f"[STEP 13] Forwarding decode request to {decode_worker.worker_id} with max_tokens={max_tokens}"
-    )
+    logger.debug(f"[STEP 13] Forwarding decode request to {decode_worker.worker_id} with max_tokens={max_tokens}")
+    await _prefetch_kvbm_blocks_for_worker(decode_worker.worker_id, route_hint, request_id)
 
     # 计算 estimated_tokens（供 decode_start 和 decode_end 共用）
-    estimated_tokens = max_tokens
+    estimated_tokens = max_tokens or route_hint.estimated_output_tokens
     if chat_request.jiuwenext and chat_request.jiuwenext.agent_hints:
-        estimated_tokens = chat_request.jiuwenext.agent_hints.estimated_output_tokens or max_tokens
+        estimated_tokens = chat_request.jiuwenext.agent_hints.estimated_output_tokens or estimated_tokens
 
     # 生成 decode_start 事件
     if event_generator:
@@ -480,12 +679,22 @@ def register_routes(app: FastAPI):
         start_time = time.time()
         endpoint = "/v1/chat/completions"
         method = "POST"
+        prefill_id = None
+        decode_id = None
         try:
             request_id = f"chatcmpl-{uuid.uuid4()}"
+            if (
+                chat_request.max_completion_tokens is None
+                and chat_request.max_tokens is None
+                and isinstance(settings.default_max_tokens, int)
+            ):
+                chat_request.max_tokens = settings.default_max_tokens
             logger.info(
-                "[REQUEST] Received request %s: model=%s, messages=%d, max_tokens=%s",
-                request_id, chat_request.model,
-                len(chat_request.messages), chat_request.max_tokens,
+                "[REQUEST] Received request {}: model={}, messages={}, max_tokens={}",
+                request_id,
+                chat_request.model,
+                len(chat_request.messages),
+                chat_request.max_tokens,
             )
 
             agent_hints, cache_control = _parse_agent_hints(chat_request)
@@ -520,16 +729,20 @@ def register_routes(app: FastAPI):
 
             scheduled_request, prefill_id, decode_id = dispatch_request()
             router_dispatch_end_time = time.time()
-            logger.debug(
-                f"[STEP 8] Request {request_id} dispatched to prefill={prefill_id}, decode={decode_id}"
-            )
+            logger.debug(f"[STEP 8] Request {request_id} dispatched to prefill={prefill_id}, decode={decode_id}")
 
-            max_tokens = chat_request.max_tokens or 128
+            max_tokens = (
+                chat_request.max_completion_tokens
+                if chat_request.max_completion_tokens is not None
+                else chat_request.max_tokens
+            )
+            if max_tokens is None and isinstance(settings.default_max_tokens, int):
+                max_tokens = settings.default_max_tokens
             prefill_start_time = time.time()
 
             if decode_id is None:
                 response_data, _, prefill_end_time, decode_end_time = await _handle_combined_worker(
-                    prefill_id, chat_request, route_hint, max_tokens, prefill_start_time
+                    prefill_id, chat_request, route_hint, max_tokens, prefill_start_time, request_id
                 )
             else:
                 disagg_params = DisaggWorkerParams(
@@ -539,17 +752,13 @@ def register_routes(app: FastAPI):
                     prefill_start_time=prefill_start_time,
                 )
                 response_data, _, prefill_end_time, decode_end_time = await _handle_disagg_workers(
-                    disagg_params, chat_request, route_hint
+                    disagg_params, chat_request, route_hint, request_id
                 )
 
             scheduler.mark_task_completed()
             logger.debug("[STEP 15] Marked task as completed")
 
-            osl = (
-                agent_hints.estimated_output_tokens
-                if agent_hints and agent_hints.estimated_output_tokens
-                else 0
-            )
+            osl = agent_hints.estimated_output_tokens if agent_hints and agent_hints.estimated_output_tokens else 0
             router_dispatch_duration = router_dispatch_end_time - start_time
             token_count = len(route_hint.token_ids) if route_hint.token_ids else 0
 
@@ -571,6 +780,8 @@ def register_routes(app: FastAPI):
                             osl=osl,
                             token_count=token_count,
                             endpoint=endpoint,
+                            route_hint=route_hint,
+                            overlap_scores=overlap_scores,
                         ),
                     ),
                     media_type="text/event-stream",
@@ -599,17 +810,19 @@ def register_routes(app: FastAPI):
                 # 在响应返回后生成 decode_end 事件，包含真实的 completion_tokens
                 if event_generator:
                     target_worker_id = prefill_id if decode_id is None else decode_id
-                    event_manager.process_event(CacheEvent(
-                        event_type="decode_end",
-                        token_count=token_count,
-                        token_ids=[],
-                        worker_id=target_worker_id,
-                        engine_specific={
-                            "worker_id": target_worker_id,
-                            "osl": osl,
-                            "completion_tokens": completion_tokens,
-                        },
-                    ))
+                    event_manager.process_event(
+                        CacheEvent(
+                            event_type="decode_end",
+                            token_count=token_count,
+                            token_ids=[],
+                            worker_id=target_worker_id,
+                            engine_specific={
+                                "worker_id": target_worker_id,
+                                "osl": osl,
+                                "completion_tokens": completion_tokens,
+                            },
+                        )
+                    )
 
             performance_stats.record_request(
                 RequestTimings(
@@ -627,13 +840,41 @@ def register_routes(app: FastAPI):
                 )
             )
 
-            logger.info(f"[REQUEST] Request {request_id} completed in {duration:.3f}s")
+            _report_latency_training_data(
+                worker_id=prefill_id,
+                decode_id=decode_id,
+                route_hint=route_hint,
+                overlap_scores=overlap_scores,
+                prefill_duration=prefill_duration,
+                decode_duration=decode_duration,
+                completion_tokens=completion_tokens,
+            )
+
+            router.release_worker(prefill_id)
+            if decode_id:
+                router.release_worker(decode_id)
+
+            logger.info(
+                "[REQUEST_COMPLETE] request={} workers={} ttft={:.1f}ms total={:.1f}ms tokens={}/{}/{} overlap={}",
+                request_id,
+                [prefill_id] if decode_id is None else [prefill_id, decode_id],
+                prefill_duration * 1000,
+                duration * 1000,
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                overlap_scores,
+            )
             return JSONResponse(response_data)
 
         except (httpx.TimeoutException, asyncio.TimeoutError) as e:
             logger.error(f"Request timeout: {e}")
 
             scheduler.mark_task_failed()
+            if prefill_id:
+                router.release_worker(prefill_id)
+            if decode_id:
+                router.release_worker(decode_id)
 
             end_time = time.time()
             duration = end_time - start_time
@@ -648,6 +889,10 @@ def register_routes(app: FastAPI):
             logger.error(f"HTTP exception: {e.status_code} - {e.detail}")
 
             scheduler.mark_task_failed()
+            if prefill_id:
+                router.release_worker(prefill_id)
+            if decode_id:
+                router.release_worker(decode_id)
 
             end_time = time.time()
             duration = end_time - start_time
@@ -663,6 +908,10 @@ def register_routes(app: FastAPI):
             logger.error(f"Error processing request: {e}")
 
             scheduler.mark_task_failed()
+            if prefill_id:
+                router.release_worker(prefill_id)
+            if decode_id:
+                router.release_worker(decode_id)
 
             end_time = time.time()
             duration = end_time - start_time
@@ -692,18 +941,23 @@ def register_routes(app: FastAPI):
         start_time = time.time()
         endpoint = "/v1/completions"
         method = "POST"
+        prefill_id = None
+        decode_id = None
         try:
             request_id = f"cmpl-{uuid.uuid4()}"
+            if comp_request.max_tokens is None and isinstance(settings.default_max_tokens, int):
+                comp_request.max_tokens = settings.default_max_tokens
             prompt_desc = (
                 f"prompt_tokens={len(comp_request.prompt)}"
                 if isinstance(comp_request.prompt, list)
                 else f"prompt_len={len(comp_request.prompt)}"
             )
             logger.info(
-                "[REQUEST] Received completion request %s: model=%s, %s,"
-                " max_tokens=%s",
-                request_id, comp_request.model,
-                prompt_desc, comp_request.max_tokens,
+                "[REQUEST] Received completion request {}: model={}, {}, max_tokens={}",
+                request_id,
+                comp_request.model,
+                prompt_desc,
+                comp_request.max_tokens,
             )
 
             agent_hints, cache_control = _parse_agent_hints(comp_request)
@@ -732,7 +986,9 @@ def register_routes(app: FastAPI):
             scheduled_request, prefill_id, decode_id = dispatch_request()
             router_dispatch_end_time = time.time()
 
-            max_tokens = comp_request.max_tokens or 128
+            max_tokens = comp_request.max_tokens
+            if max_tokens is None and isinstance(settings.default_max_tokens, int):
+                max_tokens = settings.default_max_tokens
             prefill_start_time = time.time()
             request_data = comp_request.model_dump(exclude_none=True, exclude={"jiuwenext"})
 
@@ -741,17 +997,25 @@ def register_routes(app: FastAPI):
                 if not combined_worker:
                     raise ValueError(f"Combined worker {prefill_id} not found")
 
-                estimated_tokens = max_tokens
+                estimated_tokens = max_tokens or route_hint.estimated_output_tokens
                 if comp_request.jiuwenext and comp_request.jiuwenext.agent_hints:
-                    estimated_tokens = comp_request.jiuwenext.agent_hints.estimated_output_tokens or max_tokens
+                    estimated_tokens = comp_request.jiuwenext.agent_hints.estimated_output_tokens or estimated_tokens
+
+                await _prefetch_kvbm_blocks_for_worker(
+                    combined_worker.worker_id,
+                    route_hint,
+                    request_id,
+                )
 
                 if event_generator:
-                    event_manager.process_event(CacheEvent(
-                        event_type="decode_start",
-                        token_count=len(route_hint.token_ids) if route_hint.token_ids else 0,
-                        worker_id=combined_worker.worker_id,
-                        engine_specific={"worker_id": combined_worker.worker_id, "osl": estimated_tokens},
-                    ))
+                    event_manager.process_event(
+                        CacheEvent(
+                            event_type="decode_start",
+                            token_count=len(route_hint.token_ids) if route_hint.token_ids else 0,
+                            worker_id=combined_worker.worker_id,
+                            engine_specific={"worker_id": combined_worker.worker_id, "osl": estimated_tokens},
+                        )
+                    )
 
                 if event_generator and route_hint.token_ids:
                     for event in event_generator.generate_events(combined_worker.worker_id, route_hint.token_ids):
@@ -795,13 +1059,20 @@ def register_routes(app: FastAPI):
                     del req_data_to_prefill["stream_options"]
 
                 if event_generator:
-                    event_manager.process_event(CacheEvent(
-                        event_type="prefill_start",
-                        token_count=len(route_hint.token_ids) if route_hint.token_ids else 0,
-                        worker_id=prefill_worker.worker_id,
-                        engine_specific={"worker_id": prefill_worker.worker_id},
-                    ))
+                    event_manager.process_event(
+                        CacheEvent(
+                            event_type="prefill_start",
+                            token_count=len(route_hint.token_ids) if route_hint.token_ids else 0,
+                            worker_id=prefill_worker.worker_id,
+                            engine_specific={"worker_id": prefill_worker.worker_id},
+                        )
+                    )
 
+                await _prefetch_kvbm_blocks_for_worker(
+                    prefill_worker.worker_id,
+                    route_hint,
+                    request_id,
+                )
                 try:
                     await worker_manager.forward_request(
                         worker_id=prefill_worker.worker_id,
@@ -811,35 +1082,47 @@ def register_routes(app: FastAPI):
                         headers=kv_headers,
                     )
                     prefill_end_time = time.time()
-                except Exception as e:
+                except Exception:
                     if event_generator:
-                        event_manager.process_event(CacheEvent(
+                        event_manager.process_event(
+                            CacheEvent(
+                                event_type="prefill_end",
+                                token_count=len(route_hint.token_ids) if route_hint.token_ids else 0,
+                                worker_id=prefill_worker.worker_id,
+                                engine_specific={"worker_id": prefill_worker.worker_id},
+                            )
+                        )
+                    raise
+
+                if event_generator:
+                    event_manager.process_event(
+                        CacheEvent(
                             event_type="prefill_end",
                             token_count=len(route_hint.token_ids) if route_hint.token_ids else 0,
                             worker_id=prefill_worker.worker_id,
                             engine_specific={"worker_id": prefill_worker.worker_id},
-                        ))
-                    raise
+                        )
+                    )
 
-                if event_generator:
-                    event_manager.process_event(CacheEvent(
-                        event_type="prefill_end",
-                        token_count=len(route_hint.token_ids) if route_hint.token_ids else 0,
-                        worker_id=prefill_worker.worker_id,
-                        engine_specific={"worker_id": prefill_worker.worker_id},
-                    ))
-
-                estimated_tokens = max_tokens
+                estimated_tokens = max_tokens or route_hint.estimated_output_tokens
                 if comp_request.jiuwenext and comp_request.jiuwenext.agent_hints:
-                    estimated_tokens = comp_request.jiuwenext.agent_hints.estimated_output_tokens or max_tokens
+                    estimated_tokens = comp_request.jiuwenext.agent_hints.estimated_output_tokens or estimated_tokens
+
+                await _prefetch_kvbm_blocks_for_worker(
+                    decode_worker.worker_id,
+                    route_hint,
+                    request_id,
+                )
 
                 if event_generator:
-                    event_manager.process_event(CacheEvent(
-                        event_type="decode_start",
-                        token_count=len(route_hint.token_ids) if route_hint.token_ids else 0,
-                        worker_id=decode_worker.worker_id,
-                        engine_specific={"worker_id": decode_worker.worker_id, "osl": estimated_tokens},
-                    ))
+                    event_manager.process_event(
+                        CacheEvent(
+                            event_type="decode_start",
+                            token_count=len(route_hint.token_ids) if route_hint.token_ids else 0,
+                            worker_id=decode_worker.worker_id,
+                            engine_specific={"worker_id": decode_worker.worker_id, "osl": estimated_tokens},
+                        )
+                    )
 
                 if event_generator and route_hint.token_ids:
                     for event in event_generator.generate_events(prefill_worker.worker_id, route_hint.token_ids):
@@ -869,11 +1152,7 @@ def register_routes(app: FastAPI):
 
             scheduler.mark_task_completed()
 
-            osl = (
-                agent_hints.estimated_output_tokens
-                if agent_hints and agent_hints.estimated_output_tokens
-                else 0
-            )
+            osl = agent_hints.estimated_output_tokens if agent_hints and agent_hints.estimated_output_tokens else 0
             router_dispatch_duration = router_dispatch_end_time - start_time
             token_count = len(route_hint.token_ids) if route_hint.token_ids else 0
 
@@ -895,6 +1174,8 @@ def register_routes(app: FastAPI):
                             osl=osl,
                             token_count=token_count,
                             endpoint=endpoint,
+                            route_hint=route_hint,
+                            overlap_scores=overlap_scores,
                         ),
                     ),
                     media_type="text/event-stream",
@@ -922,17 +1203,19 @@ def register_routes(app: FastAPI):
 
                 if event_generator:
                     target_worker_id = prefill_id if decode_id is None else decode_id
-                    event_manager.process_event(CacheEvent(
-                        event_type="decode_end",
-                        token_count=token_count,
-                        token_ids=[],
-                        worker_id=target_worker_id,
-                        engine_specific={
-                            "worker_id": target_worker_id,
-                            "osl": osl,
-                            "completion_tokens": completion_tokens,
-                        },
-                    ))
+                    event_manager.process_event(
+                        CacheEvent(
+                            event_type="decode_end",
+                            token_count=token_count,
+                            token_ids=[],
+                            worker_id=target_worker_id,
+                            engine_specific={
+                                "worker_id": target_worker_id,
+                                "osl": osl,
+                                "completion_tokens": completion_tokens,
+                            },
+                        )
+                    )
 
             performance_stats.record_request(
                 RequestTimings(
@@ -950,12 +1233,30 @@ def register_routes(app: FastAPI):
                 )
             )
 
+            _report_latency_training_data(
+                worker_id=prefill_id,
+                decode_id=decode_id,
+                route_hint=route_hint,
+                overlap_scores=overlap_scores,
+                prefill_duration=prefill_duration,
+                decode_duration=decode_duration,
+                completion_tokens=completion_tokens,
+            )
+
+            router.release_worker(prefill_id)
+            if decode_id:
+                router.release_worker(decode_id)
+
             logger.info(f"[REQUEST] Completion request {request_id} completed in {duration:.3f}s")
             return JSONResponse(response_data)
 
         except (httpx.TimeoutException, asyncio.TimeoutError) as e:
             logger.error(f"Completion request timeout: {e}")
             scheduler.mark_task_failed()
+            if prefill_id:
+                router.release_worker(prefill_id)
+            if decode_id:
+                router.release_worker(decode_id)
             end_time = time.time()
             duration = end_time - start_time
             metrics.record_request(endpoint, method, 504)
@@ -967,6 +1268,10 @@ def register_routes(app: FastAPI):
         except HTTPException as e:
             logger.error(f"HTTP exception: {e.status_code} - {e.detail}")
             scheduler.mark_task_failed()
+            if prefill_id:
+                router.release_worker(prefill_id)
+            if decode_id:
+                router.release_worker(decode_id)
             end_time = time.time()
             duration = end_time - start_time
             metrics.record_request(endpoint, method, e.status_code)
@@ -978,6 +1283,10 @@ def register_routes(app: FastAPI):
         except Exception as e:
             logger.error(f"Error processing completion request: {e}")
             scheduler.mark_task_failed()
+            if prefill_id:
+                router.release_worker(prefill_id)
+            if decode_id:
+                router.release_worker(decode_id)
             end_time = time.time()
             duration = end_time - start_time
             metrics.record_request(endpoint, method, 500)
@@ -1132,15 +1441,10 @@ def create_app(cfg: Settings) -> FastAPI:
         from openjiuwentools.infer_router.worker.worker_event_subscriber import WorkerEventSubscriber
 
         event_subscriber = WorkerEventSubscriber()
-        event_subscriber.register_handler(
-            "kv_events", KVEventHandler(event_manager, kvcache_manager)
-        )
-        event_subscriber.register_handler(
-            "kv_metrics", MetricsHandler(worker_manager)
-        )
+        event_subscriber.register_handler("kv_events", KVEventHandler(event_manager))
+        event_subscriber.register_handler("kv_metrics", MetricsHandler(worker_manager))
         worker_manager.on_worker_discovered(
-            lambda w: event_subscriber.subscribe(w.worker_id, w.publisher_endpoint)
-            if w.publisher_endpoint else None
+            lambda w: event_subscriber.subscribe(w.worker_id, w.publisher_endpoint) if w.publisher_endpoint else None
         )
         logger.info("WorkerEventSubscriber initialized for worker_event mode")
 
@@ -1280,6 +1584,12 @@ def get_app() -> FastAPI:
     return _app_instance
 
 
+def app_factory() -> FastAPI:
+    cfg = create_settings()
+    set_global_settings(cfg)
+    return create_app(cfg)
+
+
 def main():
     """主入口点"""
     import argparse
@@ -1311,19 +1621,37 @@ def main():
         default=None,
         help="Log level (overrides config)",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of uvicorn worker processes (overrides config)",
+    )
 
     args = parser.parse_args()
 
-    # 先加载配置并创建应用
     cfg = create_settings(args.config)
     set_global_settings(cfg)
-    app = create_app(cfg)
 
-    host = args.host or settings.host
-    port = args.port or settings.port
-    log_level = args.log_level or settings.log_level
+    host = args.host or cfg.host
+    port = args.port or cfg.port
+    log_level = args.log_level or cfg.log_level
+    workers = args.workers or getattr(cfg, "uvicorn_workers", 1)
 
-    uvicorn.run(app, host=host, port=port, log_level=log_level)
+    if workers > 1:
+        if args.config:
+            os.environ.setdefault("CONFIG_PATH", args.config)
+        uvicorn.run(
+            "openjiuwentools.infer_router.api.server:app_factory",
+            factory=True,
+            host=host,
+            port=port,
+            log_level=log_level,
+            workers=workers,
+        )
+    else:
+        app = create_app(cfg)
+        uvicorn.run(app, host=host, port=port, log_level=log_level)
 
 
 if __name__ == "__main__":

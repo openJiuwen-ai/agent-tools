@@ -1,5 +1,7 @@
 """测试预处理模块"""
 
+from unittest.mock import Mock
+
 import pytest
 
 from openjiuwentools.infer_router.preprocess.preprocessor import Preprocessor
@@ -98,3 +100,29 @@ def test_preprocessor_empty_messages(preprocessor):
 
     assert route_hint is not None
     assert route_hint.token_ids == []
+
+
+def test_preprocessor_includes_tools_in_chat_template(preprocessor):
+    """路由侧 token 计算必须包含工具 schema，避免 KV 前缀误匹配。"""
+    tools = [
+        {
+            "type": "function",
+            "function": {"name": "lookup", "parameters": {"type": "object"}},
+        }
+    ]
+    request = ChatCompletionRequest(
+        model="test-model",
+        messages=[{"role": "user", "content": "call a tool"}],
+        tools=tools,
+        tool_choice="auto",
+    )
+    preprocessor.tokenizer_manager.tokenize_messages = Mock(return_value=[1, 2, 3])
+
+    route_hint = preprocessor.process(request, None, "tool-request")
+
+    assert route_hint.token_ids == [1, 2, 3]
+    preprocessor.tokenizer_manager.tokenize_messages.assert_called_once_with(
+        messages=request.messages,
+        model=request.model,
+        tools=tools,
+    )

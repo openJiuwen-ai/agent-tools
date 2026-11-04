@@ -85,6 +85,12 @@ logs/
 .gitattributes
 .github/
 
+# Rust
+target/
+vendor/
+.cargo/
+Cargo.lock
+
 # Build artifacts
 get-pip.py
 .npm_cache/
@@ -103,12 +109,6 @@ kernel_meta/
 **/csrc/*/autogen/
 **/csrc/build/
 **/csrc/output/
-
-# Dynamically generated OPP install directory
 **/pysrc/**/_cann_ops_custom/
-
-# Build output and install directories for debug/perf
 ztmp/
-
-# CANN custom-op self-installing package
 **/*.run

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from loguru import logger
 
 from openjiuwentools.infer_router.config.config import settings
-from openjiuwentools.infer_router.kv_cache.event import CacheEvent
+from openjiuwentools.infer_router.kv_cache.event import CacheEvent, normalize_cache_event_type
 from openjiuwentools.infer_router.monitoring.metrics import metrics
 
 
@@ -20,9 +20,11 @@ class KVEventManager:
         self.event_stats = {
             "store": 0,
             "removed": 0,
-            "Cleared": 0,
+            "cleared": 0,
             "evict": 0,
             "hit": 0,
+            "move": 0,
+            "transfer": 0,
             "total": 0,
         }
         self.event_handlers: dict[str, list[Callable]] = {}
@@ -53,6 +55,7 @@ class KVEventManager:
         """
         start_time = time.time()
         try:
+            event.event_type = normalize_cache_event_type(event.event_type)
             # 记录事件
             self.events.append(event)
             if len(self.events) > self.event_buffer_size:

@@ -2,6 +2,7 @@ import asyncio
 import json
 import struct
 
+import orjson
 import pytest
 
 from transport import _tcp_pack_message
@@ -46,7 +47,7 @@ class TestMessageFraming:
     def test_header_is_4_bytes_big_endian():
         obj = {"a": 1}
         packed = _tcp_pack_message(obj)
-        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        body = orjson.dumps(obj)
         expected_header = struct.pack("!I", len(body))
         assert packed[:4] == expected_header
         assert packed[4:] == body

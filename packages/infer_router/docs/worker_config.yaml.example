@@ -30,7 +30,10 @@ kv_transfer_config:
 port: 8010
 # served_model_name: null  # 默认使用 model 名称
 # request_plane: http      # http 或 tcp
-worker_mode: prefill        # aggregated / prefill / decode
+worker_mode: prefill        # aggregated / prefill / decode；etcd 注册时映射为 worker_type
+
+# Router 和对端 Worker 可访问的 KVBM 控制地址。启用 Router PD handoff 时必填。
+# kvbm_control_url: "http://10.0.0.1:18010"
 
 # ---- ZMQ 事件上报 ----
 kv_relay_endpoint: "tcp://*:9010"

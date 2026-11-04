@@ -1,0 +1,228 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1180" viewBox="0 0 1800 1180">
+  <defs>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#1769aa"/>
+    </marker>
+    <marker id="arrow-teal" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#16877c"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="11" markerHeight="11" refX="10" refY="3.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,7 L10,3.5 z" fill="#d85b18"/>
+    </marker>
+    <marker id="arrow-gray" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#66737f"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#203040" flood-opacity="0.14"/>
+    </filter>
+    <style>
+      text { font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #17212b; }
+      .title { font-size: 34px; font-weight: 700; }
+      .subtitle { font-size: 17px; fill: #52606d; }
+      .band-title { font-size: 22px; font-weight: 700; }
+      .section-title { font-size: 19px; font-weight: 700; }
+      .node-title { font-size: 17px; font-weight: 700; }
+      .body { font-size: 14px; }
+      .small { font-size: 12px; fill: #52606d; }
+      .label { font-size: 13px; font-weight: 700; }
+      .container { fill: #ffffff; stroke: #9aa9b6; stroke-width: 2; rx: 10; filter: url(#shadow); }
+      .scheduler { fill: #eef6ff; stroke: #4f87bd; stroke-width: 1.5; rx: 8; }
+      .npu { fill: #f0fbf6; stroke: #3c9872; stroke-width: 1.5; rx: 8; }
+      .component { fill: #ffffff; stroke: #9aa9b6; stroke-width: 1.2; rx: 6; }
+      .router { fill: #eef3ff; stroke: #5d72bd; stroke-width: 1.5; rx: 8; }
+      .storage { fill: #fff8e8; stroke: #c18a24; stroke-width: 1.4; rx: 6; }
+      .datadist { fill: #fff1ea; stroke: #d85b18; stroke-width: 2; rx: 7; }
+      .experimental { fill: #f4f5f7; stroke: #7b8794; stroke-width: 1.5; stroke-dasharray: 8 6; rx: 8; }
+      .control { stroke: #16877c; stroke-width: 3; fill: none; stroke-dasharray: 9 6; marker-end: url(#arrow-teal); }
+      .data { stroke: #d85b18; stroke-width: 7; fill: none; marker-end: url(#arrow-orange); }
+      .event { stroke: #1769aa; stroke-width: 2.6; fill: none; marker-end: url(#arrow-blue); }
+      .local { stroke: #66737f; stroke-width: 2.2; fill: none; marker-end: url(#arrow-gray); }
+      .future { stroke: #7f56a6; stroke-width: 2.4; fill: none; stroke-dasharray: 8 6; marker-end: url(#arrow-gray); }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1180" fill="#f7f9fb"/>
+  <text x="60" y="58" class="title">Jiuwen KVBM + HIXL 当前实现架构</text>
+  <text x="60" y="88" class="subtitle">实线表示已实现主链路；虚线表示控制面、实验路径或待补齐的自动编排</text>
+
+  <!-- Router -->
+  <rect x="60" y="120" width="1680" height="170" class="router" filter="url(#shadow)"/>
+  <text x="86" y="154" class="band-title">Router / Rust Data Plane</text>
+  <rect x="90" y="176" width="300" height="82" class="component"/>
+  <text x="110" y="204" class="node-title">KVCacheManager</text>
+  <text x="110" y="228" class="body">block_hash → worker → location</text>
+  <text x="110" y="248" class="small">NPU / CPU(RAM) / REMOTE(DISK)</text>
+
+  <rect x="430" y="176" width="330" height="82" class="component"/>
+  <text x="450" y="204" class="node-title">路由评分与位置感知</text>
+  <text x="450" y="228" class="body">NPU 命中优先，RAM 次之，DISK 较低</text>
+  <text x="450" y="248" class="small">消费 worker KV event / location event</text>
+
+  <rect x="800" y="176" width="340" height="82" class="component"/>
+  <text x="820" y="204" class="node-title">本地 prefetch 调度（已实现）</text>
+  <text x="820" y="228" class="body">仅对目标 worker 的 RAM / DISK block</text>
+  <text x="820" y="248" class="small">异步 HTTP，默认不阻塞 TTFT</text>
+
+  <rect x="1180" y="176" width="520" height="82" class="component" stroke-dasharray="8 6"/>
+  <text x="1200" y="204" class="node-title">跨 worker transfer orchestration（待接入 router）</text>
+  <text x="1200" y="228" class="body">选择源/目标、建链、source block、transfer_id、失败回退</text>
+  <text x="1200" y="248" class="small">当前可通过 /datadist/transfers/pull 手工联调</text>
+
+  <!-- Worker containers -->
+  <rect x="60" y="330" width="800" height="670" class="container"/>
+  <text x="86" y="366" class="band-title">源 Worker A（vLLM-Ascend 0.18 / NPU A）</text>
+
+  <rect x="90" y="392" width="740" height="232" class="scheduler"/>
+  <text x="112" y="423" class="section-title">Engine-core Scheduler 进程</text>
+  <rect x="112" y="446" width="218" height="142" class="component"/>
+  <text x="128" y="475" class="node-title">vLLM BlockPool</text>
+  <text x="128" y="500" class="body">block_hash + group_id</text>
+  <text x="128" y="522" class="body">physical block_id / ref_cnt</text>
+  <text x="128" y="544" class="small">touch / free_blocks</text>
+  <text x="128" y="564" class="small">prefix cache index</text>
+
+  <rect x="354" y="446" width="218" height="142" class="component"/>
+  <text x="370" y="475" class="node-title">SourceLeaseManager</text>
+  <text x="370" y="500" class="body">acquire / renew / release</text>
+  <text x="370" y="522" class="body">hash 原子读取 + pin</text>
+  <text x="370" y="544" class="small">心跳续租 / TTL 回收</text>
+  <text x="370" y="564" class="small">防止传输中淘汰与复用</text>
+
+  <rect x="596" y="446" width="208" height="142" class="component"/>
+  <text x="612" y="475" class="node-title">vLLM Hooks</text>
+  <text x="612" y="500" class="body">BlockPool / KVCacheManager</text>
+  <text x="612" y="522" class="body">hash → physical block</text>
+  <text x="612" y="544" class="small">KV event 消费</text>
+  <text x="612" y="564" class="small">共用 RLock 串行化</text>
+
+  <path d="M330 512 L354 512" class="local"/>
+  <path d="M572 512 L596 512" class="local"/>
+
+  <rect x="90" y="648" width="740" height="322" class="npu"/>
+  <text x="112" y="680" class="section-title">Engine-core NPU Worker 进程</text>
+  <rect x="112" y="704" width="218" height="112" class="component"/>
+  <text x="128" y="733" class="node-title">TensorProvider / Accessor</text>
+  <text x="128" y="758" class="body">真实 kv_caches K/V tensors</text>
+  <text x="128" y="780" class="small">shape / dtype / NPU address</text>
+  <text x="128" y="800" class="small">block read / write / digest</text>
+
+  <rect x="354" y="704" width="218" height="112" class="component"/>
+  <text x="370" y="733" class="node-title">WorkerKVBMRuntime</text>
+  <text x="370" y="758" class="body">元数据、LRU、水位策略</text>
+  <text x="370" y="780" class="small">NPU → RAM → DISK</text>
+  <text x="370" y="800" class="small">location event outbox</text>
+
+  <rect x="596" y="704" width="208" height="112" class="datadist"/>
+  <text x="612" y="733" class="node-title">LLM-DataDist</text>
+  <text x="612" y="758" class="body">register_blocks_cache</text>
+  <text x="612" y="780" class="body">CacheManager.pull_blocks</text>
+  <text x="612" y="800" class="small">transfer_backend = hixl</text>
+
+  <rect x="112" y="842" width="176" height="94" class="storage"/>
+  <text x="128" y="870" class="node-title">NPU KV Cache</text>
+  <text x="128" y="894" class="body">vLLM 物理 block</text>
+  <text x="128" y="916" class="small">在线推理命中</text>
+  <rect x="324" y="842" width="176" height="94" class="storage"/>
+  <text x="340" y="870" class="node-title">Host RAM</text>
+  <text x="340" y="894" class="body">LocalRamBackend</text>
+  <text x="340" y="916" class="small">Python 本地数据面</text>
+  <rect x="536" y="842" width="176" height="94" class="storage"/>
+  <text x="552" y="870" class="node-title">Local Disk</text>
+  <text x="552" y="894" class="body">LocalDiskBackend</text>
+  <text x="552" y="916" class="small">启动可清理旧 payload</text>
+
+  <path d="M288 888 L324 888" class="local"/>
+  <path d="M500 888 L536 888" class="local"/>
+  <path d="M220 816 L200 842" class="local"/>
+  <path d="M464 816 L412 842" class="local"/>
+
+  <!-- Target worker -->
+  <rect x="940" y="330" width="800" height="670" class="container"/>
+  <text x="966" y="366" class="band-title">目标 Worker B（vLLM-Ascend 0.18 / NPU B）</text>
+
+  <rect x="970" y="392" width="740" height="232" class="scheduler"/>
+  <text x="992" y="423" class="section-title">Engine-core Scheduler 进程</text>
+  <rect x="992" y="446" width="218" height="142" class="component"/>
+  <text x="1008" y="475" class="node-title">vLLM BlockPool</text>
+  <text x="1008" y="500" class="body">目标 free block queue</text>
+  <text x="1008" y="522" class="body">prefix cache index</text>
+  <text x="1008" y="544" class="small">命中后进入 request block table</text>
+  <text x="1008" y="564" class="small">ref_cnt / LRU 淘汰</text>
+
+  <rect x="1234" y="446" width="218" height="142" class="component"/>
+  <text x="1250" y="475" class="node-title">ReservationManager</text>
+  <text x="1250" y="500" class="body">reserve / publish</text>
+  <text x="1250" y="522" class="body">rollback / release</text>
+  <text x="1250" y="544" class="small">精确 packed hash 注入</text>
+  <text x="1250" y="564" class="small">目标物理 block 安全预留</text>
+
+  <rect x="1476" y="446" width="208" height="142" class="component"/>
+  <text x="1492" y="475" class="node-title">vLLM Hooks</text>
+  <text x="1492" y="500" class="body">BlockPool / KVCacheManager</text>
+  <text x="1492" y="522" class="body">publish 后真实可命中</text>
+  <text x="1492" y="544" class="small">store / move / remove</text>
+  <text x="1492" y="564" class="small">location event relay</text>
+
+  <path d="M1210 512 L1234 512" class="local"/>
+  <path d="M1452 512 L1476 512" class="local"/>
+
+  <rect x="970" y="648" width="740" height="322" class="npu"/>
+  <text x="992" y="680" class="section-title">Engine-core NPU Worker 进程</text>
+  <rect x="992" y="704" width="218" height="112" class="component"/>
+  <text x="1008" y="733" class="node-title">TensorProvider / Accessor</text>
+  <text x="1008" y="758" class="body">目标 kv_caches K/V tensors</text>
+  <text x="1008" y="780" class="small">reserved block addresses</text>
+  <text x="1008" y="800" class="small">digest / diagnostics</text>
+
+  <rect x="1234" y="704" width="218" height="112" class="component"/>
+  <text x="1250" y="733" class="node-title">WorkerKVBMRuntime</text>
+  <text x="1250" y="758" class="body">注册迁移后的 NPU block</text>
+  <text x="1250" y="780" class="small">上报 BlockStored(NPU)</text>
+  <text x="1250" y="800" class="small">后续可本地 offload/prefetch</text>
+
+  <rect x="1476" y="704" width="208" height="112" class="datadist"/>
+  <text x="1492" y="733" class="node-title">LLM-DataDist</text>
+  <text x="1492" y="758" class="body">link_clusters</text>
+  <text x="1492" y="780" class="body">CacheManager.pull_blocks</text>
+  <text x="1492" y="800" class="small">同步完成后才 publish</text>
+
+  <rect x="992" y="842" width="176" height="94" class="storage"/>
+  <text x="1008" y="870" class="node-title">NPU KV Cache</text>
+  <text x="1008" y="894" class="body">目标物理 block</text>
+  <text x="1008" y="916" class="small">prefix cache 可命中</text>
+  <rect x="1204" y="842" width="176" height="94" class="storage"/>
+  <text x="1220" y="870" class="node-title">Host RAM</text>
+  <text x="1220" y="894" class="body">LocalRamBackend</text>
+  <text x="1220" y="916" class="small">本地预取来源</text>
+  <rect x="1416" y="842" width="176" height="94" class="storage"/>
+  <text x="1432" y="870" class="node-title">Local Disk</text>
+  <text x="1432" y="894" class="body">LocalDiskBackend</text>
+  <text x="1432" y="916" class="small">本地预取来源</text>
+
+  <path d="M1168 888 L1204 888" class="local"/>
+  <path d="M1380 888 L1416 888" class="local"/>
+  <path d="M1100 816 L1080 842" class="local"/>
+  <path d="M1344 816 L1292 842" class="local"/>
+
+  <!-- Cross-worker flows -->
+  <path d="M804 760 C920 660, 1360 660, 1476 760" class="data"/>
+  <text x="925" y="642" class="label" fill="#d85b18">KV tensor 数据面：LLM-DataDist → HIXL → NPU/网络/NPU</text>
+
+  <path d="M1476 805 C1320 1030, 770 1030, 572 570" class="control"/>
+  <text x="820" y="1042" class="label" fill="#16877c">HTTP 控制面：source lease acquire / renew / release（不传 KV 数据）</text>
+
+  <!-- Router events -->
+  <path d="M700 446 C700 320, 270 320, 270 258" class="event"/>
+  <path d="M1580 446 C1580 320, 1080 320, 1080 258" class="event"/>
+  <text x="300" y="316" class="label" fill="#1769aa">KV / location events</text>
+  <text x="1350" y="316" class="label" fill="#1769aa">KV / location events</text>
+  <path d="M970 216 L1140 216" class="future"/>
+
+  <!-- Legend -->
+  <line x1="1170" y1="1084" x2="1245" y2="1084" class="data"/>
+  <text x="1260" y="1089" class="small">KV 数据</text>
+  <line x1="1340" y1="1084" x2="1415" y2="1084" class="control"/>
+  <text x="1430" y="1089" class="small">HTTP 控制</text>
+  <line x1="1530" y1="1084" x2="1605" y2="1084" class="event"/>
+  <text x="1620" y="1089" class="small">事件上报</text>
+</svg>

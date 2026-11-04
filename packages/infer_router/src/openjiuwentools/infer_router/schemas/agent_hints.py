@@ -34,25 +34,34 @@ class JWExt(BaseModel):
 class ChatCompletionRequest(BaseModel):
     """聊天完成请求模型"""
 
+    model_config = {"extra": "allow"}
+
     model: str = Field(description="模型名称")
     messages: list[dict[str, Any]] = Field(description="消息列表")
     jiuwenext: JWExt | None = Field(default=None, description="Jiuwen扩展字段")
     # 其他标准字段
-    max_tokens: int | None = Field(default=128)
+    max_tokens: int | None = Field(default=None)
+    max_completion_tokens: int | None = Field(default=None)
     temperature: float | None = Field(default=1.0)
     top_p: float | None = Field(default=1.0)
     n: int | None = Field(default=1)
     stream: bool | None = Field(default=False)
     stream_options: dict[str, Any] | None = Field(default=None)
+    tools: list[dict[str, Any]] | None = Field(default=None)
+    tool_choice: str | dict[str, Any] | None = Field(default=None)
+    parallel_tool_calls: bool | None = Field(default=None)
+    response_format: dict[str, Any] | None = Field(default=None)
 
 
 class CompletionRequest(BaseModel):
     """文本完成请求模型（/v1/completions）"""
 
+    model_config = {"extra": "allow"}
+
     model: str = Field(description="模型名称")
     prompt: str | list[int] = Field(description="提示文本或token ID列表")
     jiuwenext: JWExt | None = Field(default=None, description="Jiuwen扩展字段")
-    max_tokens: int | None = Field(default=128)
+    max_tokens: int | None = Field(default=None)
     temperature: float | None = Field(default=1.0)
     top_p: float | None = Field(default=1.0)
     n: int | None = Field(default=1)
@@ -75,6 +84,12 @@ class RouteHint(BaseModel):
     total_requests: int | None = None
     iat: int | None = None
     token_ids: list[int] | None = None
+    precomputed_overlap_scores: dict[str, int] | None = Field(default=None, exclude=True)
+    precomputed_prefix_snapshots: dict[str, Any] | None = Field(
+        default=None,
+        exclude=True,
+    )
+    pd_decode_affinity_worker_id: str | None = Field(default=None, exclude=True)
 
 
 class WorkerType(str, Enum):
@@ -94,6 +109,26 @@ class WorkerInfo(BaseModel):
     current_load: float = 0.0
     queue_depth: int = 0
     running_requests: int = 0
+    num_gpu_blocks: int = 0
+    active_decode_blocks: int = 0
+    kv_cache_usage: float = 0.0
+    kvbm_free_blocks: int = Field(
+        default=-1,
+        description="D Worker engine-core真实BlockPool空闲block数；-1表示未知",
+    )
+    kvbm_block_pool_updated_at: float = Field(
+        default=0.0,
+        description="Router收到真实BlockPool容量指标时的单调时钟时间戳",
+    )
+    kvbm_capacity_generation: int = Field(
+        default=-1,
+        description="D Worker BlockPool容量样本的单调代际；-1表示旧Worker未上报",
+    )
+    kvbm_block_size: int = Field(
+        default=0,
+        description="Worker从真实KV tensor识别出的每个物理block token数",
+    )
+    max_num_batched_tokens: int = 0
     cached_prefixes: list[str] = []
     engine_type: str = "vllm"
     url: str = ""
@@ -102,6 +137,10 @@ class WorkerInfo(BaseModel):
     group: str = "default"
     kv_addr: str = Field(default="", description="KV存储地址，用于P2P disagg connector")
     publisher_endpoint: str = Field(default="", description="ZMQ PUB endpoint for KV cache events from worker")
+    kvbm_control_url: str = Field(
+        default="",
+        description="其他 Worker 可访问的 KVBM HTTP 控制服务根地址",
+    )
 
     @property
     def available_memory(self) -> int:

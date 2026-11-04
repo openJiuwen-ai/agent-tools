@@ -105,6 +105,11 @@ class WorkerStatLogger(StatLoggerBase):
         self.kv_cache_usage = 0.0
         self.num_running_reqs = 0
         self.num_waiting_reqs = 0
+        scheduler_config = getattr(vllm_config, "scheduler_config", None)
+        self.max_num_batched_tokens = max(
+            int(getattr(scheduler_config, "max_num_batched_tokens", 0) or 0),
+            0,
+        )
 
     def set_num_gpu_block(self, num_blocks: int) -> None:
         self.num_gpu_block = num_blocks
@@ -142,6 +147,7 @@ class WorkerStatLogger(StatLoggerBase):
             "active_decode_blocks": self.active_decode_blocks,
             "num_running_reqs": self.num_running_reqs,
             "num_waiting_reqs": self.num_waiting_reqs,
+            "max_num_batched_tokens": self.max_num_batched_tokens,
         }
 
     def init_publish(self) -> None:

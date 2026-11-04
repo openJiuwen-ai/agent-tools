@@ -21,6 +21,18 @@ class Preprocessor:
         self.default_iat = 250
         self.tokenizer_manager = TokenizerManager(load_from_file=settings.tokenizer_load_from_file)
 
+    def preload_tokenizers(self, models: list[str] | tuple[str, ...] | set[str]) -> dict[str, bool]:
+        """预加载并预热 Router 即将使用的模型 tokenizer。
+
+        Args:
+            models: Worker 发现结果中的模型名称或路径集合。
+
+        Returns:
+            模型名称到预加载成功状态的映射。
+        """
+
+        return self.tokenizer_manager.preload_models(models)
+
     def process(
         self, request: ChatCompletionRequest, agent_hints: AgentHints, request_id: str
     ) -> RouteHint:
@@ -52,6 +64,7 @@ class Preprocessor:
         token_ids = self.tokenizer_manager.tokenize_messages(
             messages=request.messages,
             model=request.model,
+            tools=request.tools,
         )
 
         route_hint = RouteHint(

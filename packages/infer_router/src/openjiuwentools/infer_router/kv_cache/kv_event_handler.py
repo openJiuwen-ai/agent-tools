@@ -5,20 +5,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from loguru import logger
 
-from openjiuwentools.infer_router.kv_cache.event import CacheEvent
-
-if TYPE_CHECKING:
-    from openjiuwentools.infer_router.kv_cache.kv_cache import KVCacheManager
-    from openjiuwentools.infer_router.kv_cache.kv_event_manager import KVEventManager
+from openjiuwentools.infer_router.kv_cache.event import CacheEvent, cache_location_from_medium
+from openjiuwentools.infer_router.kv_cache.kv_event_manager import KVEventManager
 
 _TYPE_MAPPING = {
     "BlockStored": "store",
-    "BlockRemoved": "evict",
-    "BlockCleared": "Cleared",
+    "BlockRemoved": "removed",
+    "BlockEvicted": "evict",
+    "BlockCleared": "cleared",
+    "BlockHit": "hit",
+    "BlockMoved": "move",
+    "BlockTransferred": "move",
 }
 
 
@@ -28,14 +27,10 @@ class KVEventHandler:
     def __init__(
         self,
         event_manager: KVEventManager,
-        kvcache_manager: KVCacheManager,
     ) -> None:
         self.event_manager = event_manager
-        self.kvcache_manager = kvcache_manager
 
     def __call__(self, worker_id: str, msg: dict) -> None:
-        from openjiuwentools.infer_router.kv_cache.kv_cache import CacheStateUpdate
-
         events = msg.get("events", [])
         logger.debug(f"[KV_EVENT] Received {len(events)} events from {worker_id}")
         for event_data in events:
@@ -43,15 +38,9 @@ class KVEventHandler:
             data = event_data.get("data", {})
             cache_event = self._convert(worker_id, event_type_name, data)
             if cache_event:
+                # KVCacheManager已经向同一个event_manager注册了状态处理器；
+                # process_event会完成索引更新，无需再次update_cache_state。
                 self.event_manager.process_event(cache_event)
-                self.kvcache_manager.update_cache_state(
-                    CacheStateUpdate(
-                        worker_id=worker_id,
-                        event_type=cache_event.event_type,
-                        token_ids=cache_event.token_ids,
-                        token_count=cache_event.token_count,
-                    )
-                )
 
     @staticmethod
     def _convert(
@@ -65,10 +54,15 @@ class KVEventHandler:
         block_hashes = [str(h) for h in data.get("block_hashes", [])]
         token_ids = data.get("token_ids", [])
         block_size = data.get("block_size", 16)
+        medium = data.get("medium") or data.get("location") or data.get("to") or "GPU"
+        physical_block_ids = data.get("physical_block_ids")
+        if physical_block_ids is None and data.get("physical_block_id") is not None:
+            physical_block_ids = [data["physical_block_id"]]
 
         return CacheEvent(
             event_type=event_type,
             block_hashes=block_hashes,
+            location=cache_location_from_medium(medium),
             token_ids=token_ids,
             worker_id=worker_id,
             token_count=len(token_ids) if token_ids else block_size,
@@ -76,6 +70,9 @@ class KVEventHandler:
                 "worker_id": worker_id,
                 "parent_block_hash": str(data.get("parent_block_hash", "")) if data.get("parent_block_hash") else None,
                 "block_size": block_size,
-                "medium": data.get("medium", "GPU"),
+                "medium": medium,
+                "from": data.get("from") or data.get("source"),
+                "to": data.get("to") or data.get("destination") or medium,
+                "physical_block_ids": physical_block_ids or [],
             },
         )

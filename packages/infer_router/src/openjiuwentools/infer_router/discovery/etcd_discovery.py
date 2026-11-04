@@ -118,6 +118,7 @@ class EtcdDiscovery(WorkerDiscovery):
                                 "group": worker_data.get("group", "default"),
                                 "kv_addr": worker_data.get("kv_addr", ""),
                                 "publisher_endpoint": worker_data.get("publisher_endpoint", ""),
+                                "kvbm_control_url": worker_data.get("kvbm_control_url", ""),
                             }
                             if total_tokens > 0:
                                 worker_kwargs["total_tokens"] = total_tokens

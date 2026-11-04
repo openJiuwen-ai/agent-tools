@@ -118,6 +118,10 @@ class Scheduler:
         if overlap_scores:
             logger.debug(f"[SCHEDULER: SUBMIT] Overlap scores: {overlap_scores}")
 
+        # overlap已经在data plane入口计算，随RouteHint传给router/scorer复用，
+        # 避免Prefix Aware在同一请求内重复扫描Radix索引。
+        route_hint.precomputed_overlap_scores = overlap_scores
+
         scheduled_request = ScheduledRequest(
             route_hint=route_hint,
             arrival_time=time.time(),
@@ -137,7 +141,7 @@ class Scheduler:
         self.task_stats["total_tasks"] += 1
 
         logger.info(
-            "[SCHEDULER: QUEUE] Request %s added to global queue. Queue size: %d",
+            "[SCHEDULER: QUEUE] Request {} added to global queue. Queue size: {}",
             route_hint.request_id, len(self.global_queue),
         )
 
@@ -161,13 +165,13 @@ class Scheduler:
         metrics.update_queue_size("global", len(self.global_queue))
 
         logger.info(
-            "[SCHEDULER: DISPATCH] Dispatching request %s from global queue."
-            " Remaining queue size: %d",
+            "[SCHEDULER: DISPATCH] Dispatching request {} from global queue."
+            " Remaining queue size: {}",
             next_request.route_hint.request_id, len(self.global_queue),
         )
         logger.debug(
-            "[SCHEDULER: DISPATCH] Selected request: priority=%s,"
-            " estimated_tokens=%s",
+            "[SCHEDULER: DISPATCH] Selected request: priority={},"
+            " estimated_tokens={}",
             next_request.priority, next_request.estimated_output_tokens,
         )
         return next_request

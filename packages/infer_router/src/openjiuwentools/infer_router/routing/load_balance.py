@@ -15,7 +15,6 @@ class SharedContext:
     osl: str
     iat: str
     last_w: str | None
-    last_group: str | None
     reuse_after: int
     decode_cost: float
     iat_factor: float
@@ -32,7 +31,6 @@ class PrefixUpdateParams:
     decode_cost: float = 2.0
     prefill_cost: float = 0.0
     iat_factor: float = 1.0
-    group_id: str | None = None
 
 
 @dataclass
@@ -46,7 +44,6 @@ class FeatureParams:
     decode_cost: float
     prefill_cost: float
     iat_factor: float
-    last_group: str | None = None
 
 
 @dataclass
@@ -58,7 +55,6 @@ class ScoreParams:
     reuse_after: int | None = None
     decode_cost: float | None = None
     iat_factor: float | None = None
-    last_group: str | None = None
 
 
 class LoadBalancingAlgorithm:
@@ -70,15 +66,15 @@ class LoadBalancingAlgorithm:
 
     def select_worker_pair(
         self,
-        workers: dict[str, WorkerInfo],
-        groups: dict[str, list[str]],
+        prefill_workers: list[WorkerInfo],
+        decode_workers: list[WorkerInfo],
         route_hint: RouteHint,
     ) -> tuple[WorkerInfo, WorkerInfo]:
-        """选择最佳的prefill-decode工作器对
+        """从全局 prefill/decode 池中选择最佳工作器对
 
         Args:
-            workers: 所有可用工作器字典（worker_id -> WorkerInfo）
-            groups: group字典（group_name -> list[worker_id]）
+            prefill_workers: 所有可用的 prefill 工作器
+            decode_workers: 所有可用的 decode 工作器
             route_hint: 路由提示信息
 
         Returns:
@@ -88,13 +84,12 @@ class LoadBalancingAlgorithm:
 
 
 class RoundRobinAlgorithm(LoadBalancingAlgorithm):
-    """轮询算法 — 按 group 轮询，组内 prefill/decode 各自轮询"""
+    """轮询算法 — prefill/decode 各自独立轮询"""
 
     def __init__(self):
         self.current_index = -1
-        self.group_index = -1
-        self.prefill_indices: dict[str, int] = {}
-        self.decode_indices: dict[str, int] = {}
+        self.prefill_index = -1
+        self.decode_index = -1
 
     def select_worker(self, workers: list[WorkerInfo], route_hint: RouteHint) -> WorkerInfo:
         self.current_index = (self.current_index + 1) % len(workers)
@@ -102,40 +97,17 @@ class RoundRobinAlgorithm(LoadBalancingAlgorithm):
 
     def select_worker_pair(
         self,
-        workers: dict[str, WorkerInfo],
-        groups: dict[str, list[str]],
+        prefill_workers: list[WorkerInfo],
+        decode_workers: list[WorkerInfo],
         route_hint: RouteHint,
     ) -> tuple[WorkerInfo, WorkerInfo]:
-        from openjiuwentools.infer_router.schemas.agent_hints import WorkerType
+        if not prefill_workers or not decode_workers:
+            raise ValueError("No valid prefill or decode workers available")
 
-        group_list = list(groups.keys())
-        if not group_list:
-            raise ValueError("No groups available")
+        self.prefill_index = (self.prefill_index + 1) % len(prefill_workers)
+        self.decode_index = (self.decode_index + 1) % len(decode_workers)
 
-        attempts = len(group_list)
-        while attempts > 0:
-            self.group_index = (self.group_index + 1) % len(group_list)
-            group_name = group_list[self.group_index]
-            workers_in_group = [workers[wid] for wid in groups[group_name] if wid in workers]
-
-            prefill_workers = [w for w in workers_in_group if w.worker_type == WorkerType.PREFILL]
-            decode_workers = [w for w in workers_in_group if w.worker_type == WorkerType.DECODE]
-
-            if not prefill_workers or not decode_workers:
-                attempts -= 1
-                continue
-
-            pi = self.prefill_indices.get(group_name, -1)
-            pi = (pi + 1) % len(prefill_workers)
-            self.prefill_indices[group_name] = pi
-
-            di = self.decode_indices.get(group_name, -1)
-            di = (di + 1) % len(decode_workers)
-            self.decode_indices[group_name] = di
-
-            return prefill_workers[pi], decode_workers[di]
-
-        raise ValueError("No valid prefill or decode workers available")
+        return prefill_workers[self.prefill_index], decode_workers[self.decode_index]
 
 
 class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
@@ -168,7 +140,7 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
         self.switch_cost_reuse = 0.08
         self.switch_cost_iat = 0.05
 
-        self.queue_penalty_weight = 0.50
+        self.queue_penalty_weight = 2.00
         self.npu_penalty_weight = 1.00
         self.outstanding_work_weight = 0.45
         self.job_npu_coupling_weight = 0.40
@@ -188,7 +160,7 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
         self.beta_params = {}  # worker_id -> (alpha, beta)
 
         # 前缀跟踪
-        self.prefix_tracking = {}  # prefix_id -> (last_worker, last_group, reuse_budget)
+        self.prefix_tracking = {}  # prefix_id -> (last_worker, reuse_budget)
         self.prefix_meta = {}  # prefix_id -> {decode_cost, prefill_cost, iat_factor}
 
     def _get_worker_workload(self, worker_id: str):
@@ -217,7 +189,7 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
         osl = self.norm_level(estimated_osl, "MEDIUM")
         iat = self.norm_level(estimated_iat, "MEDIUM")
 
-        last_w, last_group, reuse_budget = self.get_prefix(prefix_id)
+        last_w, reuse_budget = self.get_prefix(prefix_id)
         reuse_after = max(int(reuse_budget), 0)
         decode_cost = self.decode_cost(osl)
         iat_factor = self.iat_factor(iat)
@@ -233,10 +205,10 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
         )
         logger.info(
             "overlap_scores: %s, len tokens ids=%d, osl=%d, iat=%s,"
-            " last_w=%s, last_group=%s, reuse_after=%s,"
+            " last_w=%s, reuse_after=%s,"
             " decode_cost=%.2f, iat_factor=%.2f, temp=%.2f",
             overlap_scores, len(token_ids), osl, iat,
-            last_w, last_group, reuse_after,
+            last_w, reuse_after,
             decode_cost, iat_factor, temp,
         )
 
@@ -245,7 +217,6 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
             osl=osl,
             iat=iat,
             last_w=last_w,
-            last_group=last_group,
             reuse_after=reuse_after,
             decode_cost=decode_cost,
             iat_factor=iat_factor,
@@ -254,28 +225,21 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
 
     def select_worker_pair(
         self,
-        workers: dict[str, WorkerInfo],
-        groups: dict[str, list[str]],
+        prefill_workers: list[WorkerInfo],
+        decode_workers: list[WorkerInfo],
         route_hint: RouteHint,
     ) -> tuple[WorkerInfo, WorkerInfo]:
-        from openjiuwentools.infer_router.schemas.agent_hints import WorkerType
+        if not prefill_workers or not decode_workers:
+            raise ValueError("No valid prefill or decode workers available")
 
         logger.info(
-            f"[ALGO: CTS] Starting worker pair selection for {len(groups)} groups, "
-            f"prefix_id={route_hint.prefix_id}"
+            "[ALGO: CTS] Starting worker pair selection: %d prefill, %d decode, prefix_id=%s",
+            len(prefill_workers), len(decode_workers), route_hint.prefix_id,
         )
 
-        if not groups:
-            raise ValueError("No groups available")
-
-        # 阶段1：预计算共享上下文（find_matches + 参数计算）
         t0 = time.perf_counter()
         ctx = self._prepare_shared_context(route_hint)
         t_context = time.perf_counter()
-
-        # 阶段2：per-group 打分
-        best_pair = None
-        best_score = float("-inf")
 
         score_params = ScoreParams(
             overlap_scores=ctx.overlap_scores,
@@ -283,107 +247,52 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
             reuse_after=ctx.reuse_after,
             decode_cost=ctx.decode_cost,
             iat_factor=ctx.iat_factor,
-            last_group=ctx.last_group,
         )
 
-        for group_name, worker_ids in groups.items():
-            workers_in_group = [workers[wid] for wid in worker_ids if wid in workers]
+        prefill_scores = {
+            w.worker_id: self.calculate_score(w, prefill_workers, route_hint, score_params=score_params)
+            for w in prefill_workers
+        }
+        decode_scores = {
+            w.worker_id: self.calculate_score(w, decode_workers, route_hint, score_params=score_params)
+            for w in decode_workers
+        }
 
-            prefill_workers = [
-                w
-                for w in workers_in_group
-                if w.worker_type in (WorkerType.PREFILL, WorkerType.COMBINED)
-            ]
-            decode_workers = [
-                w
-                for w in workers_in_group
-                if w.worker_type in (WorkerType.DECODE, WorkerType.COMBINED)
-            ]
-
-            if not prefill_workers or not decode_workers:
-                continue
-
-            prefill_scores = {
-                w.worker_id: self.calculate_score(
-                    w,
-                    prefill_workers,
-                    route_hint,
-                    score_params=score_params,
-                )
-                for w in prefill_workers
-            }
-            decode_scores = {
-                w.worker_id: self.calculate_score(
-                    w,
-                    decode_workers,
-                    route_hint,
-                    score_params=score_params,
-                )
-                for w in decode_workers
-            }
-
-            prefill_best_id = max(prefill_scores, key=prefill_scores.get)
-            decode_best_id = max(decode_scores, key=decode_scores.get)
-
-            prefill_best_score = prefill_scores[prefill_best_id]
-            decode_best_score = decode_scores[decode_best_id]
-
-            average_score = (2 * prefill_best_score * decode_best_score) / (
-                prefill_best_score + decode_best_score
-            )
-
-            logger.info(
-                f"[ALGO: CTS] Group {group_name}: prefill={prefill_best_id}({prefill_best_score:.3f}), "
-                f"decode={decode_best_id}({decode_best_score:.3f}), avg_score={average_score:.3f}"
-            )
-
-            if average_score > best_score:
-                best_score = average_score
-                best_pair = (workers[prefill_best_id], workers[decode_best_id])
+        best_prefill_id = max(prefill_scores, key=prefill_scores.get)
+        best_decode_id = max(decode_scores, key=decode_scores.get)
+        best_prefill = next(w for w in prefill_workers if w.worker_id == best_prefill_id)
+        best_decode = next(w for w in decode_workers if w.worker_id == best_decode_id)
 
         t_scoring = time.perf_counter()
 
-        if not best_pair:
-            raise ValueError("No valid worker pair found")
-
-        # 阶段3：前缀跟踪更新
         prefix_id = route_hint.prefix_id
         if prefix_id:
             token_ids = route_hint.token_ids or []
             prefill_overlap = (
-                float(ctx.overlap_scores.get(best_pair[0].worker_id, 0.0)) / len(token_ids)
+                float(ctx.overlap_scores.get(best_prefill_id, 0.0)) / len(token_ids)
                 if token_ids
                 else 0.0
             )
-            chosen_prefill_cost = self.prefill_cost_for_worker(token_ids, prefill_overlap)
-            chosen_decode_cost = self.decode_cost(ctx.osl)
-
-            chosen_group = best_pair[0].group
             self.update_prefix(PrefixUpdateParams(
                 prefix_id=prefix_id,
-                worker_id=best_pair[0].worker_id,
+                worker_id=best_prefill_id,
                 initial_reuse_budget=route_hint.total_requests,
-                decode_cost=chosen_decode_cost,
-                prefill_cost=chosen_prefill_cost,
+                decode_cost=self.decode_cost(ctx.osl),
+                prefill_cost=self.prefill_cost_for_worker(token_ids, prefill_overlap),
                 iat_factor=ctx.iat_factor,
-                group_id=chosen_group,
             ))
 
         t_end = time.perf_counter()
-
-        context_ms = (t_context - t0) * 1000
-        scoring_ms = (t_scoring - t_context) * 1000
-        prefix_ms = (t_end - t_scoring) * 1000
-        total_ms = (t_end - t0) * 1000
-
         logger.info(
-            f"[ALGO: CTS] Selected {best_pair[0].worker_id} + {best_pair[1].worker_id}, "
-            f"score={best_score:.3f} | "
-            f"context(find_matches)={context_ms:.2f}ms, scoring={scoring_ms:.2f}ms, "
-            f"prefix_update={prefix_ms:.2f}ms, total={total_ms:.2f}ms"
+            "[ALGO: CTS] Selected %s + %s, prefill_score=%.3f, decode_score=%.3f | "
+            "context=%.2fms, scoring=%.2fms, prefix=%.2fms, total=%.2fms",
+            best_prefill_id, best_decode_id,
+            prefill_scores[best_prefill_id], decode_scores[best_decode_id],
+            (t_context - t0) * 1000, (t_scoring - t_context) * 1000,
+            (t_end - t_scoring) * 1000, (t_end - t0) * 1000,
         )
 
-        return best_pair
+        return best_prefill, best_decode
 
     def norm_level(self, level: str, default: str = "MEDIUM") -> str:
         """规范化级别参数"""
@@ -406,18 +315,17 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
         factor_map = {"LOW": 1.5, "MEDIUM": 1.0, "HIGH": 0.6}
         return factor_map.get(iat, 1.0)
 
-    def get_prefix(self, prefix_id: str | None) -> tuple[str | None, str | None, int]:
+    def get_prefix(self, prefix_id: str | None) -> tuple[str | None, int]:
         """获取前缀跟踪信息"""
         if not prefix_id or prefix_id not in self.prefix_tracking:
-            return None, None, 0
+            return None, 0
 
         entry = self.prefix_tracking[prefix_id]
         if len(entry) == 3:
-            last_worker, last_group, reuse_budget = entry
+            last_worker, _, reuse_budget = entry
         else:
             last_worker, reuse_budget = entry
-            last_group = None
-        return last_worker, last_group, reuse_budget
+        return last_worker, reuse_budget
 
     def update_prefix(self, params: PrefixUpdateParams):
         """更新前缀跟踪信息"""
@@ -427,9 +335,9 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
         if params.initial_reuse_budget is not None and params.prefix_id not in self.prefix_tracking:
             reuse_budget = params.initial_reuse_budget
         else:
-            _, _, reuse_budget = self.get_prefix(params.prefix_id)
+            _, reuse_budget = self.get_prefix(params.prefix_id)
         self.prefix_tracking[params.prefix_id] = (
-            params.worker_id, params.group_id, max(0, reuse_budget - 1),
+            params.worker_id, max(0, reuse_budget - 1),
         )
         self.prefix_meta[params.prefix_id] = {
             "decode_cost": float(params.decode_cost),
@@ -454,10 +362,7 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
         for pid, info in self.prefix_tracking.items():
             if not isinstance(info, tuple) or len(info) < 2:
                 continue
-            if len(info) == 3:
-                last_worker, _, reuse_budget = info
-            else:
-                last_worker, reuse_budget = info
+            last_worker, reuse_budget = info[0], info[-1]
             if last_worker != worker_id:
                 continue
             r = int(reuse_budget) if reuse_budget else 0
@@ -488,7 +393,7 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
         )
 
         inverse_load = 1.0 / (1.0 + penalties)
-        affinity = 1.0 if (params.last_group and params.last_group == worker.group) else 0.0
+        affinity = 1.0 if (params.last_w and params.last_w == worker.worker_id) else 0.0
 
         normalized_decode_cost = min(params.decode_cost / 3.0, 1.0)
         normalized_prefill_cost = math.tanh(params.prefill_cost)
@@ -607,7 +512,6 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
         reuse_after = score_params.reuse_after
         decode_cost = score_params.decode_cost
         iat_factor = score_params.iat_factor
-        last_group = score_params.last_group
 
         has_missing = (
             overlap_scores is None or reuse_after is None
@@ -617,7 +521,6 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
             ctx = self._prepare_shared_context(route_hint)
             overlap_scores = ctx.overlap_scores
             last_w = ctx.last_w
-            last_group = ctx.last_group
             reuse_after = ctx.reuse_after
             decode_cost = ctx.decode_cost
             iat_factor = ctx.iat_factor
@@ -646,7 +549,6 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
             decode_cost=decode_cost,
             prefill_cost=prefill_cost,
             iat_factor=iat_factor,
-            last_group=last_group,
         ))
         logger.debug(f"[ALGO: CTS] {worker.worker_id}: features={[f'{v:.3f}' for v in x]}")
 
@@ -660,49 +562,36 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
         logger.debug(f"[ALGO: CTS] {worker.worker_id}: explore_bonus={explore_bonus:.3f}")
 
         val = lints_score + explore_bonus
-        logger.debug(
-            "[ALGO: CTS] %s: val_before_modifiers=%.3f,"
-            " last_group=%s, reuse_after=%s",
-            worker.worker_id, val, last_group, reuse_after,
-        )
 
-        is_same_group = last_group is not None and worker.group == last_group
+        is_same_worker = last_w is not None and worker.worker_id == last_w
 
-        # 3.7 亲和性奖励：KV 缓存重叠对*每个*请求都生效，不再要求同组复用。
-        # 命中前缀缓存的 worker 直接按重叠比例获得加分（affinity_base * overlap）；
-        # 若同时是同组复用，再叠加历史复用/间隔加成。这样冷启动请求也能被路由到
-        # 已缓存其前缀的 worker，而不是被未学习的 LinTS 噪声淹没。
+        # Cache overlap applies even without historical request affinity.
         affinity_bonus = self.affinity_base * overlap
-        if is_same_group and reuse_after > 0:
+        if is_same_worker and reuse_after > 0:
             affinity_bonus += (
                 self.affinity_reuse_weight * float(reuse_after)
                 + self.affinity_iat_weight * iat_factor
             ) * (0.5 + 0.5 * overlap)
         if affinity_bonus:
             val += affinity_bonus
-            logger.debug(
-                f"[ALGO: CTS] {worker.worker_id}: affinity_bonus={affinity_bonus:.3f} "
-                f"(overlap={overlap:.3f}, group={worker.group})"
-            )
+            logger.debug(f"[ALGO: CTS] {worker.worker_id}: affinity_bonus={affinity_bonus:.3f}")
 
-        # 3.8 切换惩罚（group 级别）
-        if last_group is not None and not is_same_group and reuse_after > 0:
+        # 3.8 切换惩罚（worker 级别）
+        if last_w is not None and not is_same_worker and reuse_after > 0:
             raw_switch_penalty = (
                 self.switch_cost_base
                 + self.switch_cost_reuse * float(reuse_after)
                 + self.switch_cost_iat * iat_factor
             )
-
             val -= raw_switch_penalty
             logger.debug(
                 f"[ALGO: CTS] {worker.worker_id}: switch_penalty={raw_switch_penalty:.3f}, "
-                f"worker_group={worker.group}, last_group={last_group}, "
-                f"val_after_penalty={val:.3f}"
+                f"last_w={last_w}, val_after_penalty={val:.3f}"
             )
 
         # 3.9 负载平衡
         load_mod = self.load_score(worker, job_cost_total)
-        if is_same_group and reuse_after > 0:
+        if is_same_worker and reuse_after > 0:
             load_mod = max(load_mod, self.sticky_load_floor)
         val *= load_mod
         logger.debug(
@@ -741,7 +630,6 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
             reuse_after=ctx.reuse_after,
             decode_cost=ctx.decode_cost,
             iat_factor=ctx.iat_factor,
-            last_group=ctx.last_group,
         )
 
         worker_scores = {}
@@ -805,11 +693,6 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
             chosen_worker = top_overlap_workers[chosen_idx]
             selection_reason = "load_tiebreak"
         else:
-            # Exactly one worker is the clear cache-overlap winner (all others are
-            # >10% of the prompt behind it): route to it. Previously this picked
-            # max score over ALL workers, so a lone overlap winner could be
-            # discarded in favour of a higher-scoring but cache-cold worker,
-            # defeating prefix-cache routing.
             chosen_worker = top_overlap_workers[0]
             selection_reason = "overlap_affinity"
 
@@ -845,7 +728,6 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
                 decode_cost=chosen_decode_cost,
                 prefill_cost=chosen_prefill_cost,
                 iat_factor=ctx.iat_factor,
-                group_id=chosen_worker.group,
             ))
 
         t_end = time.perf_counter()
@@ -906,3 +788,192 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
             self.lints_models[worker_id] = (a, b)
 
         logger.info(f"[ALGO: CTS] Updated feedback for {worker_id}: reward={reward:.3f}")
+
+
+class PrefixAwareAlgorithm(LoadBalancingAlgorithm):
+    """llm-d 风格加权评分算法：4 个 scorer 加权求和 + argmax 确定性选择。
+
+    Scorers (each produces [0, 1]):
+      - prefix_cache:    overlap / total_tokens         (weight 3)
+      - kv_utilization:  1 - gpu_kv_cache_usage%        (weight 2)
+      - queue:           min-max normalized queue_depth  (weight 2)
+      - no_hit_lru:      cold-request LRU spreading     (weight 2)
+    """
+
+    def __init__(self, kv_cache_manager: KVCacheManager, worker_manager=None):
+        self.kv_cache_manager = kv_cache_manager
+        self.worker_manager = worker_manager
+        self.prefix_cache_weight = 3.0
+        self.kv_utilization_weight = 2.0
+        self.queue_weight = 2.0
+        self.no_hit_lru_weight = 2.0
+        self._cold_lru: list[str] = []
+
+    def _prefix_cache_score(self, worker_id: str, overlap_scores: dict, total_tokens: int) -> float:
+        if total_tokens == 0:
+            return 0.0
+        return min(float(overlap_scores.get(worker_id, 0.0)) / total_tokens, 1.0)
+
+    def _kv_utilization_score(self, worker: WorkerInfo) -> float:
+        return max(0.0, 1.0 - worker.current_load / 100.0)
+
+    def _queue_score(self, worker: WorkerInfo, all_workers: list[WorkerInfo]) -> float:
+        queue_sizes = [w.queue_depth for w in all_workers]
+        min_q, max_q = min(queue_sizes), max(queue_sizes)
+        if max_q == min_q:
+            return 1.0
+        return (max_q - worker.queue_depth) / (max_q - min_q)
+
+    def _no_hit_lru_score(self, worker_id: str, has_hit: bool, all_worker_ids: list[str]) -> float:
+        if has_hit:
+            return 0.5
+        total = len(all_worker_ids)
+        if total <= 1:
+            return 1.0
+        never_used = [wid for wid in all_worker_ids if wid not in self._cold_lru]
+        if worker_id not in self._cold_lru:
+            rank = never_used.index(worker_id)
+        else:
+            rank = len(never_used) + self._cold_lru.index(worker_id)
+        return max(0.0, 1.0 - float(rank) / float(total - 1))
+
+    def _update_cold_lru(self, worker_id: str):
+        if worker_id in self._cold_lru:
+            self._cold_lru.remove(worker_id)
+        self._cold_lru.append(worker_id)
+
+    def _score_worker(
+        self,
+        worker: WorkerInfo,
+        all_workers: list[WorkerInfo],
+        overlap_scores: dict,
+        total_tokens: int,
+        any_hit: bool,
+        all_worker_ids: list[str],
+    ) -> float:
+        prefix = self._prefix_cache_score(worker.worker_id, overlap_scores, total_tokens)
+        kv = self._kv_utilization_score(worker)
+        queue = self._queue_score(worker, all_workers)
+        lru = self._no_hit_lru_score(worker.worker_id, any_hit, all_worker_ids)
+        total = (
+            self.prefix_cache_weight * prefix
+            + self.kv_utilization_weight * kv
+            + self.queue_weight * queue
+            + self.no_hit_lru_weight * lru
+        )
+        logger.debug(
+            "[PrefixAware] %s: prefix=%.3f kv=%.3f queue=%.3f lru=%.3f total=%.3f",
+            worker.worker_id, prefix, kv, queue, lru, total,
+        )
+        return total
+
+    def _compute_overlap_context(
+        self, workers_list: list[WorkerInfo], route_hint: RouteHint,
+    ) -> tuple[dict, int, bool]:
+        token_ids = route_hint.token_ids or []
+        total_tokens = len(token_ids)
+        precomputed = route_hint.precomputed_overlap_scores
+        if precomputed is not None:
+            overlap_scores = {
+                worker.worker_id: int(precomputed.get(worker.worker_id, 0))
+                for worker in workers_list
+            }
+        else:
+            overlap_scores = self.kv_cache_manager.find_matches(
+                token_ids=token_ids,
+                model=route_hint.model,
+                include_workers={worker.worker_id for worker in workers_list},
+            )
+        if total_tokens > 0:
+            max_ratio = max(
+                float(overlap_scores.get(w.worker_id, 0.0)) / total_tokens
+                for w in workers_list
+            )
+        else:
+            max_ratio = 0.0
+        any_hit = max_ratio > 0.01
+        return overlap_scores, total_tokens, any_hit
+
+    def select_worker(self, workers: list[WorkerInfo], route_hint: RouteHint) -> WorkerInfo:
+        if not workers:
+            raise ValueError("No workers available")
+        if len(workers) == 1:
+            return workers[0]
+
+        t0 = time.perf_counter()
+        overlap_scores, total_tokens, any_hit = self._compute_overlap_context(workers, route_hint)
+        worker_ids = [w.worker_id for w in workers]
+
+        best_worker = workers[0]
+        best_score = float("-inf")
+        for w in workers:
+            score = self._score_worker(w, workers, overlap_scores, total_tokens, any_hit, worker_ids)
+            if score > best_score:
+                best_score = score
+                best_worker = w
+
+        if not any_hit:
+            self._update_cold_lru(best_worker.worker_id)
+
+        overlap_pct = (
+            float(overlap_scores.get(best_worker.worker_id, 0.0)) / total_tokens * 100
+            if total_tokens > 0 else 0.0
+        )
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.info(
+            "[PrefixAware] Selected %s score=%.3f overlap=%.1f%% hit=%s took=%.2fms",
+            best_worker.worker_id, best_score, overlap_pct, any_hit, elapsed_ms,
+        )
+        return best_worker
+
+    def select_worker_pair(
+        self,
+        prefill_workers: list[WorkerInfo],
+        decode_workers: list[WorkerInfo],
+        route_hint: RouteHint,
+    ) -> tuple[WorkerInfo, WorkerInfo]:
+        if not prefill_workers or not decode_workers:
+            raise ValueError("No valid prefill or decode workers available")
+
+        t0 = time.perf_counter()
+        all_workers_map = {w.worker_id: w for w in prefill_workers}
+        for w in decode_workers:
+            all_workers_map.setdefault(w.worker_id, w)
+        all_workers_list = list(all_workers_map.values())
+        all_worker_ids = list(all_workers_map.keys())
+
+        overlap_scores, total_tokens, any_hit = self._compute_overlap_context(
+            all_workers_list, route_hint,
+        )
+
+        best_prefill, best_p_score = None, float("-inf")
+        for w in prefill_workers:
+            score = self._score_worker(
+                w, prefill_workers, overlap_scores, total_tokens, any_hit, all_worker_ids,
+            )
+            if score > best_p_score:
+                best_p_score = score
+                best_prefill = w
+
+        best_decode, best_d_score = None, float("-inf")
+        for w in decode_workers:
+            kv = self._kv_utilization_score(w)
+            queue = self._queue_score(w, decode_workers)
+            score = self.kv_utilization_weight * kv + self.queue_weight * queue
+            if score > best_d_score:
+                best_d_score = score
+                best_decode = w
+
+        if not best_prefill or not best_decode:
+            raise ValueError("No valid worker pair found")
+
+        if not any_hit:
+            self._update_cold_lru(best_prefill.worker_id)
+
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.info(
+            "[PrefixAware] Selected pair %s + %s score=%.3f took=%.2fms",
+            best_prefill.worker_id, best_decode.worker_id,
+            best_p_score + best_d_score, elapsed_ms,
+        )
+        return best_prefill, best_decode

@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "setuptools-scm>=8.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "openjiuwentools-infer-router"
@@ -55,6 +55,7 @@ openjiuwentools_infer_router = "openjiuwentools.infer_router.api.server:app"
 
 [project.scripts]
 jiuwen-infer-router = "openjiuwentools.infer_router.api.server:main"
+jiuwen-infer-proxy = "openjiuwentools.infer_router.data_plane.server:main"
 jiuwen-infer-worker = "openjiuwentools.infer_router.vllm.cli:main"
 
 [project.urls]
@@ -62,15 +63,10 @@ Homepage = "https://gitcode.com/openJiuwen/agent-tools"
 Repository = "https://gitcode.com/openJiuwen/agent-tools.git"
 Issues = "https://gitcode.com/openJiuwen/agent-tools/issues"
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-packages.find = {where = ["src"]}
-
-[tool.setuptools.dynamic]
-
-
-[tool.setuptools_scm]
-root = "../.."
+[tool.maturin]
+module-name = "openjiuwentools.infer_router._data_plane"
+python-source = "src"
+features = ["pyo3/extension-module"]
 
 [tool.ruff]
 line-length = 100

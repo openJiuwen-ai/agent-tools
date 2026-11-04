@@ -54,7 +54,10 @@ fallback_version = "0.0.1"
 
 # 声明工作区成员
 [tool.uv.workspace]
-members = ["packages/*"]
+members = [
+    "packages/infer_router",
+    "packages/jiuwen-kvbm",
+]
 
 # 声明依赖来源为工作区
 [tool.uv.sources]

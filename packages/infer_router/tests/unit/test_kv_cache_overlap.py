@@ -1,6 +1,7 @@
 import logging
 
 from openjiuwentools.infer_router.kv_cache.event import CacheEvent
+from openjiuwentools.infer_router.kv_cache.event import CacheLocation
 from openjiuwentools.infer_router.kv_cache.kv_cache import KVCacheManager
 
 
@@ -67,9 +68,222 @@ def test_store_and_retrieve_block():
 
     overlap_scores = kv_cache_manager.find_matches(token_ids=test_tokens, model="Qwen3-8B")
 
-    assert overlap_scores.get("worker-2-decode", 0) == block_size, (
-        f"存储块后overlap应为{block_size}"
+    assert overlap_scores.get("worker-2-decode", 0) == block_size, f"存储块后overlap应为{block_size}"
+
+
+def test_get_matched_block_hashes_returns_event_hashes():
+    """测试 KVBM 预取路径能取回 worker 上真实命中的 block hash。"""
+    kv_cache_manager = KVCacheManager(enable_radix_tree=True)
+    kv_cache_manager.register_worker("worker-1", "vllm", "Qwen3-8B")
+
+    block_size = kv_cache_manager.block_size
+    token_ids = list(range(block_size * 2))
+    block_hashes = ["vllm-hash-0", "vllm-hash-1"]
+    event = CacheEvent(
+        event_type="store",
+        block_hashes=block_hashes,
+        token_ids=token_ids,
+        worker_id="worker-1",
+        engine_specific={"worker_id": "worker-1", "block_size": block_size},
     )
+
+    kv_cache_manager.process_event(event)
+
+    assert kv_cache_manager.get_matched_block_hashes("worker-1", token_ids) == block_hashes
+    assert kv_cache_manager.get_matched_block_hashes("worker-1", token_ids, limit=1) == ["vllm-hash-0"]
+
+
+def test_find_matches_returns_reusable_snapshot_and_updates_active_nodes():
+    """首次匹配应产出快照，移除 block 后增量活跃节点索引应立即失效。"""
+
+    manager = KVCacheManager(enable_radix_tree=True)
+    manager.register_worker("worker-1", "vllm", "Qwen3-8B")
+    block_size = manager.block_size
+    token_ids = list(range(block_size * 2))
+    block_hashes = ["snapshot-hash-0", "snapshot-hash-1"]
+    manager.process_event(
+        CacheEvent(
+            event_type="store",
+            block_hashes=block_hashes,
+            token_ids=token_ids,
+            worker_id="worker-1",
+            engine_specific={"worker_id": "worker-1", "block_size": block_size},
+        )
+    )
+    snapshots = {}
+
+    matches = manager.find_matches(
+        token_ids,
+        "Qwen3-8B",
+        snapshot_output=snapshots,
+    )
+
+    state = manager.index.pod_states["worker-1"]
+    assert matches == {"worker-1": block_size * 2}
+    assert snapshots.get("worker-1").matched_tokens == block_size * 2
+    assert len(state.active_node_ref_counts) == 2
+
+    manager.process_event(
+        CacheEvent(
+            event_type="removed",
+            block_hashes=[block_hashes[1]],
+            worker_id="worker-1",
+            engine_specific={"worker_id": "worker-1", "block_size": block_size},
+        )
+    )
+
+    assert manager.find_matches(token_ids, "Qwen3-8B") == {"worker-1": block_size}
+    assert len(state.active_node_ref_counts) == 1
+
+
+def test_common_prefix_cursor_cache_reuses_path_and_keeps_metadata_live():
+    """公共前缀应复用 Radix 游标，location 更新仍应从实时元数据读取。"""
+
+    manager = KVCacheManager(enable_radix_tree=True)
+    manager.register_worker("worker-1", "vllm", "Qwen3-8B")
+    event_block_size = manager.block_size * 2
+    common_tokens = list(range(event_block_size * 2))
+    block_hashes = ["cursor-hash-0", "cursor-hash-1"]
+    manager.process_event(
+        CacheEvent(
+            event_type="store",
+            block_hashes=block_hashes,
+            token_ids=common_tokens,
+            worker_id="worker-1",
+            location=CacheLocation.NPU,
+            engine_specific={
+                "worker_id": "worker-1",
+                "block_size": event_block_size,
+            },
+        )
+    )
+
+    first_timing = {}
+    first = manager.get_worker_prefix_snapshot(
+        "worker-1",
+        common_tokens,
+        timing=first_timing,
+    )
+    assert first.matched_tokens == len(common_tokens)
+    assert first_timing.get("cursor_cache_hits") == 0
+    assert first_timing.get("cursor_cache_misses") == 2
+
+    manager.process_event(
+        CacheEvent(
+            event_type="move",
+            block_hashes=[block_hashes[0]],
+            worker_id="worker-1",
+            location=CacheLocation.CPU,
+            engine_specific={
+                "worker_id": "worker-1",
+                "block_size": event_block_size,
+            },
+        )
+    )
+    second_timing = {}
+    second = manager.get_worker_prefix_snapshot(
+        "worker-1",
+        common_tokens,
+        timing=second_timing,
+    )
+
+    assert second_timing.get("cursor_cache_hits") == 2
+    assert second_timing.get("cursor_cache_misses") == 0
+    assert second.blocks[0].select().location == CacheLocation.CPU
+    assert manager.index.pod_states["worker-1"].radix_block_size == event_block_size
+
+
+def test_common_prefix_cursor_cache_is_invalidated_by_clear():
+    """Worker clear 后必须提升查询代次，不能复用旧 RadixTree 游标。"""
+
+    manager = KVCacheManager(enable_radix_tree=True)
+    manager.register_worker("worker-1", "vllm", "Qwen3-8B")
+    block_size = manager.block_size
+    token_ids = list(range(block_size))
+    manager.process_event(
+        CacheEvent(
+            event_type="store",
+            block_hashes=["cursor-hash-0"],
+            token_ids=token_ids,
+            worker_id="worker-1",
+            engine_specific={"worker_id": "worker-1", "block_size": block_size},
+        )
+    )
+    manager.get_worker_prefix_snapshot("worker-1", token_ids)
+    state = manager.index.pod_states["worker-1"]
+    generation_before_clear = state.radix_query_generation
+
+    manager.process_event(
+        CacheEvent(
+            event_type="cleared",
+            worker_id="worker-1",
+            engine_specific={"worker_id": "worker-1"},
+        )
+    )
+    timing = {}
+    snapshot = manager.get_worker_prefix_snapshot(
+        "worker-1",
+        token_ids,
+        timing=timing,
+    )
+
+    assert state.radix_query_generation == generation_before_clear + 1
+    assert snapshot.matched_tokens == 0
+    assert timing.get("cursor_cache_hits") == 0
+    assert timing.get("cursor_cache_misses") == 1
+
+
+def test_get_matched_block_hashes_can_filter_by_location():
+    """测试 KVBM prefetch 可只选择 RAM/DISK 层级的命中 block。"""
+    kv_cache_manager = KVCacheManager(enable_radix_tree=True)
+    kv_cache_manager.register_worker("worker-1", "vllm", "Qwen3-8B")
+
+    block_size = kv_cache_manager.block_size
+    token_ids = list(range(block_size * 2))
+    block_hashes = ["vllm-hash-0", "vllm-hash-1"]
+    kv_cache_manager.process_event(
+        CacheEvent(
+            event_type="store",
+            block_hashes=block_hashes,
+            token_ids=token_ids,
+            worker_id="worker-1",
+            location=CacheLocation.NPU,
+            engine_specific={"worker_id": "worker-1", "block_size": block_size},
+        )
+    )
+
+    assert (
+        kv_cache_manager.get_matched_block_hashes(
+            "worker-1",
+            token_ids,
+            locations={CacheLocation.CPU, CacheLocation.REMOTE},
+        )
+        == []
+    )
+
+    kv_cache_manager.process_event(
+        CacheEvent(
+            event_type="move",
+            block_hashes=["vllm-hash-0"],
+            worker_id="worker-1",
+            location=CacheLocation.CPU,
+            engine_specific={"worker_id": "worker-1", "block_size": block_size},
+        )
+    )
+
+    assert kv_cache_manager.get_matched_block_hashes(
+        "worker-1",
+        token_ids,
+        locations={CacheLocation.CPU, CacheLocation.REMOTE},
+    ) == ["vllm-hash-0"]
+    assert kv_cache_manager.get_matched_block_location_counts("worker-1", token_ids) == {
+        CacheLocation.CPU: 1,
+        CacheLocation.NPU: 1,
+    }
+    assert kv_cache_manager.get_matched_block_location_token_counts("worker-1", token_ids) == {
+        CacheLocation.CPU: block_size,
+        CacheLocation.NPU: block_size,
+    }
 
 
 def test_same_request_twice_overlap():
@@ -173,12 +387,8 @@ def test_group_based_routing_with_overlap():
 
     overlap_scores = kv_cache_manager.find_matches(token_ids=test_tokens, model="Qwen3-8B")
 
-    assert overlap_scores.get("worker-2-decode") == block_size, (
-        f"worker-2-decode应该有overlap {block_size}"
-    )
-    assert overlap_scores.get("worker-5-decode") == block_size, (
-        f"worker-5-decode应该有overlap {block_size}"
-    )
+    assert overlap_scores.get("worker-2-decode") == block_size, f"worker-2-decode应该有overlap {block_size}"
+    assert overlap_scores.get("worker-5-decode") == block_size, f"worker-5-decode应该有overlap {block_size}"
     assert overlap_scores.get("worker-1-prefill") == 0, "worker-1-prefill不应该有overlap"
 
 
