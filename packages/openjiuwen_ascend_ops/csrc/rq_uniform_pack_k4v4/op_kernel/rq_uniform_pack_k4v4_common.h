@@ -71,6 +71,11 @@ static constexpr uint16_t TQ_MANUAL_SYNC_A_READY = 1;
 static constexpr uint16_t TQ_MANUAL_SYNC_C_FREE = 2;
 static constexpr uint16_t TQ_MANUAL_SYNC_C_READY = 3;
 static constexpr uint16_t TQ_MANUAL_SYNC_PP_STRIDE = 4;
+// Lifecycle handshake (3510 only): the AIC must not enter its compute
+// loop before both AIV subcores reset C_FREE, and must not retire
+// before both drained their Y-cache writes.
+static constexpr uint16_t TQ_MANUAL_SYNC_ENTRY_READY = 8;
+static constexpr uint16_t TQ_MANUAL_SYNC_AIV_DONE = 9;
 
 // -----------vector--------------------------------------------------------
 static constexpr uint32_t TQ_AIV_SUB_BLOCKS = 2;

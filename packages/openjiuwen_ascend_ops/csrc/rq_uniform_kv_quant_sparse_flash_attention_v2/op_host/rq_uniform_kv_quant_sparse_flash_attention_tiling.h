@@ -62,7 +62,8 @@ constexpr uint32_t NUM_BYTES_FLOAT = 4;
 constexpr uint32_t NUM_BYTES_FLOAT16 = 2;
 constexpr uint32_t NUM_BYTES_BF16 = 2;
 constexpr uint32_t BYTE_BLOCK = 32;
-const uint32_t QSFA_MAX_AIC_CORE_NUM = 26; // 25 + 1 保证数组8字节对齐
+// 950 launches up to 28 AIC cores; size the split tables for it.
+const uint32_t QSFA_MAX_AIC_CORE_NUM = 32; // 31 + 1 keeps the arrays 8-byte aligned
 
 // ------------------公共定义--------------------------
 enum class QSFALayout : uint32_t {

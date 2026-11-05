@@ -409,7 +409,11 @@ __aicore__ inline void FiaKernelTurboQuantP0<FIAT, CubeBlockType, VecBlockType, 
 
     if ASCEND_IS_AIV {
         tmpBlockIdx = GetBlockIdx();
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        aiCoreIdx = tmpBlockIdx / GetSubBlockNum();
+#else
         aiCoreIdx = tmpBlockIdx / 2;
+#endif
     } else {
         tmpBlockIdx = GetBlockIdx();
         aiCoreIdx = tmpBlockIdx;

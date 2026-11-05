@@ -18,7 +18,13 @@
 #include "tq_dequant_device.h"
 
 constexpr uint32_t TQ_VEC_DEQ_K0_READY_VEC = 14U;
+// 3510 restricts mode-2 CrossCore flagId to 0-15; the V-ready pair uses the
+// free 12/13 slots there. 910b keeps the original 16.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+constexpr uint32_t TQ_VEC_DEQ_V0_READY_VEC = 12U;
+#else
 constexpr uint32_t TQ_VEC_DEQ_V0_READY_VEC = 16U;
+#endif
 constexpr uint32_t TQ_VEC_OUTPUT_PI_READY_VEC = 10U;
 constexpr uint32_t TQ_CUBE_OUTPUT_PI_DONE_VEC = 11U;
 constexpr float TQ_MSE_SCALE = 0.0026f;
@@ -389,7 +395,11 @@ template <typename FIAT> __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::S
         mSplitInfo.vecDealM = ((mSplitInfo.nBufferDealM + 15) / 16 + 1) / 2 * 16;
     }
     mSplitInfo.vecStartM = 0;
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    if (GetSubBlockIdx() == 1) {
+#else
     if (GetBlockIdx() % 2 == 1) {
+#endif
         // VEC1处理的M大小
         mSplitInfo.vecStartM = mSplitInfo.vecDealM;
         mSplitInfo.vecDealM = mSplitInfo.nBufferDealM - mSplitInfo.vecDealM;
@@ -1205,7 +1215,11 @@ template <typename FIAT> __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::C
 {
     DequantV(info);
     SetMSplitInfo(info.actMBaseSize);
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    CrossCoreWaitFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE2>(constInfo.syncC1V1);
+#else
     CrossCoreWaitFlag(constInfo.syncC1V1);
+#endif
     ProcessVec1SingleBuf(info);
     CrossCoreSetFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE3>(constInfo.syncV1C2);
 }
@@ -1213,7 +1227,11 @@ template <typename FIAT> __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::C
 template <typename FIAT> __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::ComputeVec2(const RunInfo &info)
 {
     SetMSplitInfo(info.actMBaseSize);
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    CrossCoreWaitFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE2>(constInfo.syncC2V2);
+#else
     CrossCoreWaitFlag(constInfo.syncC2V2);
+#endif
     const bool useCubePi = piApplyEnabled_ &&
         (TQ_PI_OUTPUT_CUBE != 0) && info.isLastS2Loop &&
         info.actMBaseSize >= TQ_PI_OUTPUT_CUBE_MIN_M;
@@ -1222,7 +1240,11 @@ template <typename FIAT> __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::C
         // FIA_SYNC_MODE2 waits for both AIV subcores, so the full M tile is ready.
         CrossCoreSetFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE3>(
             TQ_VEC_OUTPUT_PI_READY_VEC);
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        CrossCoreWaitFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE2>(TQ_CUBE_OUTPUT_PI_DONE_VEC);
+#else
         CrossCoreWaitFlag(TQ_CUBE_OUTPUT_PI_DONE_VEC);
+#endif
         CopyCubePiResult(info);
     } else {
         ProcessVec2SingleBuf(info);
@@ -1372,7 +1394,11 @@ __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::DequantKvImpl(const RunInf
     // masks mid-block tails and fails when s2Count <= block_size.
     // Correctness: V_MTE2 before meta/codes MTE2 (ablation: V_MTE3 dual-event
     // / drain-before-prefetch not required for NaN).
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    uint32_t subCoreId = static_cast<uint32_t>(GetSubBlockIdx());
+#else
     uint32_t subCoreId = GetBlockIdx() % 2U;
+#endif
     uint32_t split = s2Count / 2U;
     uint32_t siStart = (subCoreId == 0U) ? 0U : split;
     uint32_t siEnd = (subCoreId == 0U) ? split : s2Count;
