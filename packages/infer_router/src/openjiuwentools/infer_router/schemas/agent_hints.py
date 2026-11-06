@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CacheControl(BaseModel):
@@ -36,6 +36,12 @@ class ChatCompletionRequest(BaseModel):
 
     model_config = {"extra": "allow"}
 
+    # OpenAI-compatible clients send fields the router does not interpret itself
+    # (tools/tool_choice/stop/seed/response_format/penalties/...). They are
+    # forwarded verbatim to the worker, so Pydantic must keep them instead of
+    # silently dropping the request body down to the declared subset.
+    model_config = ConfigDict(extra="allow")
+
     model: str = Field(description="模型名称")
     messages: list[dict[str, Any]] = Field(description="消息列表")
     jiuwenext: JWExt | None = Field(default=None, description="Jiuwen扩展字段")
@@ -57,6 +63,8 @@ class CompletionRequest(BaseModel):
     """文本完成请求模型（/v1/completions）"""
 
     model_config = {"extra": "allow"}
+
+    model_config = ConfigDict(extra="allow")
 
     model: str = Field(description="模型名称")
     prompt: str | list[int] = Field(description="提示文本或token ID列表")
