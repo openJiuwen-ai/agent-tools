@@ -1,5 +1,6 @@
 """测试KV缓存管理"""
 
+from openjiuwentools.infer_router.kv_cache.event import CacheEvent
 from openjiuwentools.infer_router.kv_cache.kv_cache import (
     CacheStateUpdate,
     EngineType,
@@ -76,6 +77,41 @@ class TestKVCacheManager:
         # 获取统计信息
         stats = self.kv_cache_manager.get_cache_stats()
         assert stats["total_pods"] >= 1
+
+    def test_index_update_pod_cache_keeps_block_granularity(self):
+        """旧 KVCacheIndex 入口应按 block 边界维护 block_node_map。"""
+        manager = KVCacheManager(block_size=16, enable_radix_tree=True)
+        manager.register_worker(self.worker_id, "vllm", self.model)
+        tokens = list(range(32))
+        block_size = manager.block_size
+        block_hashes = [
+            manager.scorer.compute_block_hash(tokens[:block_size]),
+            manager.scorer.compute_block_hash(tokens[block_size:]),
+        ]
+
+        manager.index.update_pod_cache(
+            self.worker_id,
+            CacheEvent(
+                event_type="store",
+                block_hashes=block_hashes,
+                token_ids=tokens,
+                worker_id=self.worker_id,
+                engine_specific={"worker_id": self.worker_id, "block_size": block_size},
+            ),
+        )
+        assert manager.find_matches(tokens, self.model)[self.worker_id] == 32
+
+        manager.index.update_pod_cache(
+            self.worker_id,
+            CacheEvent(
+                event_type="evict",
+                block_hashes=[block_hashes[1]],
+                worker_id=self.worker_id,
+                engine_specific={"worker_id": self.worker_id, "block_size": block_size},
+            ),
+        )
+
+        assert manager.find_matches(tokens, self.model)[self.worker_id] == block_size
 
 
 class TestPrefixCacheScorer:

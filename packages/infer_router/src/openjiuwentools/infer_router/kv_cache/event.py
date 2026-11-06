@@ -12,11 +12,36 @@ class CacheLocation(Enum):
     REMOTE = "remote"
 
 
+def cache_location_from_medium(medium: str | None) -> CacheLocation:
+    """Normalize backend tier names into CacheLocation."""
+    normalized = str(medium or "").lower()
+    if normalized in {"cpu", "host", "ram"}:
+        return CacheLocation.CPU
+    if normalized in {"remote", "fs", "file", "filesystem", "disk", "nvme", "ssd"}:
+        return CacheLocation.REMOTE
+    return CacheLocation.NPU
+
+
+def normalize_cache_event_type(event_type: str) -> str:
+    """Normalize historical and backend-specific cache event names."""
+    mapping = {
+        "Cleared": "cleared",
+        "BlockStored": "store",
+        "BlockRemoved": "removed",
+        "BlockEvicted": "evict",
+        "BlockCleared": "cleared",
+        "BlockHit": "hit",
+        "BlockMoved": "move",
+        "BlockTransferred": "move",
+    }
+    return mapping.get(event_type, event_type)
+
+
 @dataclass
 class CacheEvent:
     """缓存事件"""
 
-    event_type: str  # store | evict | hit | transfer | removed | Cleared
+    event_type: str  # store | evict | hit | move | transfer | removed | cleared
     block_hashes: list[str] = field(default_factory=list)
     location: CacheLocation = CacheLocation.NPU
     timestamp: float = field(default_factory=time.time)

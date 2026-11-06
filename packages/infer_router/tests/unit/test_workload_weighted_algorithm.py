@@ -139,36 +139,34 @@ class TestContextualThompsonSamplingAlgorithm:
     @staticmethod
     def test_get_prefix_new(cts_algorithm):
         """测试新前缀获取"""
-        last_w, last_group, reuse_budget = cts_algorithm.get_prefix("new-prefix")
+        last_w, reuse_budget = cts_algorithm.get_prefix("new-prefix")
         assert last_w is None
-        assert last_group is None
         assert reuse_budget == 0
 
     @staticmethod
     def test_get_prefix_existing(cts_algorithm):
         """测试已存在前缀获取"""
         cts_algorithm.prefix_tracking["test-prefix"] = ("worker-1", "group1", 5)
-        last_w, last_group, reuse_budget = cts_algorithm.get_prefix("test-prefix")
+        last_w, reuse_budget = cts_algorithm.get_prefix("test-prefix")
         assert last_w == "worker-1"
-        assert last_group == "group1"
         assert reuse_budget == 5
 
     @staticmethod
     def test_update_prefix(cts_algorithm):
         """测试前缀更新"""
         # 先设置初始前缀跟踪
-        cts_algorithm.prefix_tracking["test-prefix"] = ("worker-1", "group1", 5)
+        cts_algorithm.prefix_tracking["test-prefix"] = ("worker-1", 5)
         cts_algorithm.update_prefix(PrefixUpdateParams(
-            prefix_id="test-prefix", worker_id="worker-2", group_id="group2",
+            prefix_id="test-prefix", worker_id="worker-2",
         ))
-        assert cts_algorithm.prefix_tracking["test-prefix"] == ("worker-2", "group2", 4)
+        assert cts_algorithm.prefix_tracking["test-prefix"] == ("worker-2", 4)
 
         # 测试重用预算为0的情况
-        cts_algorithm.prefix_tracking["test-prefix"] = ("worker-1", "group1", 0)
+        cts_algorithm.prefix_tracking["test-prefix"] = ("worker-1", 0)
         cts_algorithm.update_prefix(PrefixUpdateParams(
-            prefix_id="test-prefix", worker_id="worker-3", group_id="group1",
+            prefix_id="test-prefix", worker_id="worker-3",
         ))
-        assert cts_algorithm.prefix_tracking["test-prefix"] == ("worker-3", "group1", 0)
+        assert cts_algorithm.prefix_tracking["test-prefix"] == ("worker-3", 0)
 
     @staticmethod
     def test_prefill_cost_for_worker(cts_algorithm):
@@ -203,7 +201,6 @@ class TestContextualThompsonSamplingAlgorithm:
         features = cts_algorithm.feature_vector(FeatureParams(
             worker=worker, overlap=overlap, last_w=last_w, reuse_after=reuse_after,
             decode_cost=decode_cost, prefill_cost=prefill_cost, iat_factor=iat_factor,
-            last_group="default",
         ))
 
         # 检查特征向量维度
@@ -307,7 +304,7 @@ class TestContextualThompsonSamplingAlgorithm:
     def test_select_worker_with_prefix_tracking(cts_algorithm, sample_workers, route_hint):
         """测试带前缀跟踪的选择"""
         # 设置初始前缀跟踪
-        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", "default", 5)
+        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", 5)
 
         # Mock KV cache manager
         cts_algorithm.kv_cache_manager.find_matches = Mock(
@@ -318,7 +315,7 @@ class TestContextualThompsonSamplingAlgorithm:
 
         # 检查前缀跟踪是否更新
         assert route_hint.prefix_id in cts_algorithm.prefix_tracking
-        last_worker, last_group, reuse_budget = cts_algorithm.prefix_tracking[route_hint.prefix_id]
+        last_worker, reuse_budget = cts_algorithm.prefix_tracking[route_hint.prefix_id]
         assert last_worker == selected_worker.worker_id
         assert reuse_budget == 4  # 重用预算减少1
 
@@ -366,7 +363,7 @@ class TestContextualThompsonSamplingAlgorithm:
 
         # 低温（更多利用）
         cts_algorithm.temp_base = 0.1
-        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", "default", 10)
+        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", 10)
         cts_algorithm.kv_cache_manager.find_matches = Mock(
             return_value={"worker-1": 0.9, "worker-2": 0.1, "worker-3": 0.1}
         )
@@ -380,7 +377,7 @@ class TestContextualThompsonSamplingAlgorithm:
 
         # 高温（更多探索）
         cts_algorithm.temp_base = 2.0
-        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", "default", 10)
+        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", 10)
 
         results_high_temp = []
         for _ in range(50):
@@ -405,7 +402,7 @@ class TestContextualThompsonSamplingAlgorithm:
     def test_select_worker_stickiness(cts_algorithm, sample_workers, route_hint):
         """测试粘性（stickiness）"""
         # 设置 worker-1 为上次选择的工作器
-        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", "default", 5)
+        cts_algorithm.prefix_tracking[route_hint.prefix_id] = ("worker-1", 5)
 
         # Mock KV cache manager - worker-1 有高重叠
         cts_algorithm.kv_cache_manager.find_matches = Mock(

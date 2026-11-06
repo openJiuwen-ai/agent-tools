@@ -40,7 +40,7 @@ async def tcp_server_port():
     engine = AsyncMock()
     model_name = "test-model"
 
-    async def mock_completion(eng, body, name):
+    async def mock_completion(eng, body, name, *args):
         resp = MOCK_RESPONSE.copy()
         resp["model"] = name
         return resp

@@ -92,7 +92,7 @@ class WorkerTokenManager:
 
             events = [
                 {
-                    "event_type": "Cleared",
+                    "event_type": "cleared",
                     "token_count": len(tokens),
                     "worker_id": worker_id,
                     "token_ids": tokens,

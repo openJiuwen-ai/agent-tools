@@ -1,6 +1,8 @@
+import hashlib
+
 from loguru import logger
 
-from openjiuwentools.infer_router.kv_cache.event import CacheEvent
+from openjiuwentools.infer_router.kv_cache.event import CacheEvent, CacheLocation
 from openjiuwentools.infer_router.kv_cache.worker_token_manager import WorkerTokenManager
 
 
@@ -16,6 +18,14 @@ class KVEventGenerator:
         self.worker_token_manager = WorkerTokenManager()
         self.enable_radix_tree = enable_radix_tree
         logger.info(f"KVEventGenerator initialized (enable_radix_tree={enable_radix_tree})")
+
+    def _block_hashes(self, token_ids: list[int]) -> list[str]:
+        block_hashes = []
+        for start in range(0, len(token_ids), self.worker_token_manager.block_size):
+            block_tokens = token_ids[start:start + self.worker_token_manager.block_size]
+            token_str = ",".join(map(str, block_tokens))
+            block_hashes.append(hashlib.sha256(token_str.encode()).hexdigest())
+        return block_hashes
 
     def generate_events(self, worker_id: str, token_ids: list[int]) -> list[CacheEvent]:
         """生成事件
@@ -45,9 +55,16 @@ class KVEventGenerator:
         for event in dict_events:
             cache_event = CacheEvent(
                 event_type=event["event_type"],
+                block_hashes=self._block_hashes(event.get("token_ids", [])),
+                location=CacheLocation.NPU,
                 token_ids=event.get("token_ids", []),
                 worker_id=worker_id,
-                engine_specific={"worker_id": worker_id},
+                token_count=event.get("token_count", 0),
+                engine_specific={
+                    "worker_id": worker_id,
+                    "block_size": self.worker_token_manager.block_size,
+                    "medium": "GPU",
+                },
             )
             events.append(cache_event)
 
@@ -70,9 +87,16 @@ class KVEventGenerator:
         for event in dict_events:
             cache_event = CacheEvent(
                 event_type=event["event_type"],
+                block_hashes=self._block_hashes(event.get("token_ids", [])),
+                location=CacheLocation.NPU,
                 token_ids=event.get("token_ids", []),
                 worker_id=worker_id,
-                engine_specific={"worker_id": worker_id},
+                token_count=event.get("token_count", 0),
+                engine_specific={
+                    "worker_id": worker_id,
+                    "block_size": self.worker_token_manager.block_size,
+                    "medium": "GPU",
+                },
             )
             events.append(cache_event)
 

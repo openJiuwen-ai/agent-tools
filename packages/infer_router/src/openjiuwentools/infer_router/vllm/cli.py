@@ -52,12 +52,13 @@ def _merge_config_and_cli(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main() -> None:
+    args = _merge_config_and_cli()
+
+    log_level = getattr(logging, args.log_level.upper(), logging.INFO)
     logging.basicConfig(
-        level=logging.INFO,
+        level=log_level,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
-
-    args = _merge_config_and_cli()
 
     logger.info("Starting Jiuwen vLLM Worker (model=%s, port=%d, mode=%s)",
                 args.model, args.port, args.worker_mode)

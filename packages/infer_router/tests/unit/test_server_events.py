@@ -72,6 +72,7 @@ class TestServerEvents:
                         route_hint=mock_route_hint,
                         max_tokens=100,
                         prefill_start_time=0.0,
+                        request_id="test-request",
                     )
 
                     # 验证事件生成（decode_end事件现在在响应返回后生成）
@@ -137,6 +138,7 @@ class TestServerEvents:
                         ),
                         chat_request=mock_chat_request,
                         route_hint=mock_route_hint,
+                        request_id="test-request",
                     )
 
                     # 验证事件生成（decode_end事件现在在响应返回后生成）
@@ -216,6 +218,7 @@ class TestServerEvents:
                             ),
                             chat_request=mock_chat_request,
                             route_hint=mock_route_hint,
+                            request_id="test-request",
                         )
 
                     # 即使失败，也应该生成 prefill_start 和 prefill_end 事件
@@ -284,6 +287,7 @@ class TestServerEvents:
                         ),
                         chat_request=chat_request,
                         route_hint=mock_route_hint,
+                        request_id="test-request",
                     )
 
                     # 验证 decode_start 事件使用 agent_hints 的 estimated_output_tokens
