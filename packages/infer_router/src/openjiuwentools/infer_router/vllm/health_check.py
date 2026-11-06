@@ -83,4 +83,33 @@ class HealthChecker:
         except asyncio.TimeoutError:
             return False, "health check timed out (30s)"
         except Exception as e:
+            message = str(e)
+            # Completion-only/base models have no chat template, but the worker
+            # still serves /v1/completions. The documented default payload is a
+            # BOS-token completion; fall back to it instead of marking a healthy
+            # engine as 503.
+            if "chat_template" in message.lower() or "chat template" in message.lower():
+                return await self._check_with_bos_completion()
+            return False, message
+
+    async def _check_with_bos_completion(self) -> tuple[bool, str]:
+        """Health-check a model without a chat template via a one-token completion."""
+        from openjiuwentools.infer_router.vllm.transport import do_completion
+
+        payload = {
+            "prompt": [_get_bos_token_id(self.engine)],
+            "max_tokens": 1,
+            "temperature": 0.0,
+        }
+        try:
+            result = await asyncio.wait_for(
+                do_completion(self.engine, payload, self.model_name),
+                timeout=30.0,
+            )
+            if "error" in result:
+                return False, result["error"]
+            return True, "ok"
+        except asyncio.TimeoutError:
+            return False, "health check timed out (30s)"
+        except Exception as e:
             return False, str(e)
