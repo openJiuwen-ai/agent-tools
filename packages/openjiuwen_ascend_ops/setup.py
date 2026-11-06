@@ -1,4 +1,5 @@
 import os
+import platform
 import sys
 from setuptools import setup, Extension, find_packages
 from torch.utils.cpp_extension import BuildExtension, CppExtension
@@ -13,6 +14,20 @@ CANN_HOME = os.environ.get(
 )
 ASCEND_ROOT = os.environ.get("ASCEND_HOME", os.path.dirname(CANN_HOME))
 
+# CANN host triple: same rule as csrc/build.sh (x86_64 | aarch64).
+_HOST_ARCH = platform.machine()
+if _HOST_ARCH == "aarch64":
+    _CANN_HOST_TRIPLE = "aarch64-linux"
+elif _HOST_ARCH == "x86_64":
+    _CANN_HOST_TRIPLE = "x86_64-linux"
+else:
+    raise RuntimeError(
+        f"Unsupported host architecture: {_HOST_ARCH} "
+        "(expected x86_64 or aarch64)"
+    )
+_CANN_HOST_LIB = os.path.join(CANN_HOME, _CANN_HOST_TRIPLE, "lib64")
+_CANN_HOST_INCLUDE = os.path.join(CANN_HOME, _CANN_HOST_TRIPLE, "include")
+
 torch_npu_include_dir = ""
 for path in sys.path:
     torch_npu_path = os.path.join(path, "torch_npu", "include")
@@ -24,9 +39,8 @@ include_dirs = [CSRC_DIR]
 if torch_npu_include_dir:
     include_dirs.append(torch_npu_include_dir)
 
-ascend_include_dir = CANN_HOME
-if os.path.exists(os.path.join(ascend_include_dir, "aarch64-linux", "include")):
-    include_dirs.append(os.path.join(ascend_include_dir, "aarch64-linux", "include"))
+if os.path.exists(_CANN_HOST_INCLUDE):
+    include_dirs.append(_CANN_HOST_INCLUDE)
 
 ADAPTER_SOURCES = [
     os.path.join(CSRC_DIR, "rq_uniform_pack_k8v4", "rq_uniform_pack_k8v4_adapter.cpp"),
@@ -59,12 +73,12 @@ ext_modules.append(
         extra_link_args=[
             "-L{}".format(CSRC_DIR),
             "-lcust_opapi_jw",
-            "-L{}/aarch64-linux/lib64".format(CANN_HOME),
+            "-L{}".format(_CANN_HOST_LIB),
             "-lacl_rt",
             "-L{}".format(os.path.join(torch_npu_include_dir, "..", "lib")),
             "-ltorch_npu",
             "-Wl,-rpath=$ORIGIN",
-            "-Wl,-rpath={}/aarch64-linux/lib64".format(CANN_HOME),
+            "-Wl,-rpath={}".format(_CANN_HOST_LIB),
             "-Wl,-rpath={}/driver/lib64/driver".format(ASCEND_ROOT),
             "-Wl,-rpath,{}".format(os.path.join(torch_npu_include_dir, "..", "lib")),
         ],
