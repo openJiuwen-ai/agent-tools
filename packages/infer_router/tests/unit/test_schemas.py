@@ -218,3 +218,16 @@ def test_route_hint_with_new_fields():
     assert route_hint.prefix_id == "prefix-123"
     assert route_hint.total_requests == 10
     assert route_hint.iat == 250
+
+
+def test_worker_info_available_memory_alias_sets_total_tokens():
+    """旧 available_memory 关键字必须真正映射到 total_tokens。"""
+    worker = WorkerInfo(
+        worker_id="worker-1",
+        model="test-model",
+        available_memory=800000,
+        url="http://localhost:8001/v1",
+    )
+
+    assert worker.total_tokens == 800000
+    assert worker.available_memory == 800000
