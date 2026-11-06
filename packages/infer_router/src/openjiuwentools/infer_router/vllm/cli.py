@@ -12,6 +12,8 @@ import argparse
 import logging
 import sys
 
+import yaml
+
 logger = logging.getLogger("jiuwen.worker")
 
 
@@ -41,7 +43,10 @@ def _merge_config_and_cli(argv: list[str] | None = None) -> argparse.Namespace:
     if has_config:
         from openjiuwentools.infer_router.vllm.worker_config import load_worker_config
 
-        yaml_ns = load_worker_config(pre_args.config)
+        try:
+            yaml_ns = load_worker_config(pre_args.config)
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            parser.error(str(exc))
         defaults = vars(yaml_ns)
         parser.set_defaults(**defaults)
 
