@@ -38,13 +38,13 @@ class ConfigDiscovery(WorkerDiscovery):
         suffix = config_file.suffix.lower()
 
         if suffix == ".json":
-            with open(config_file, encoding="utf-8") as f:
+            with open(config_file, encoding="utf-8-sig") as f:
                 return json.load(f)
         elif suffix in [".yaml", ".yml"]:
             try:
                 import yaml
 
-                with open(config_file, encoding="utf-8") as f:
+                with open(config_file, encoding="utf-8-sig") as f:
                     return yaml.safe_load(f)
             except ImportError:
                 logger.error("PyYAML package not installed. Install it with: pip install pyyaml")
