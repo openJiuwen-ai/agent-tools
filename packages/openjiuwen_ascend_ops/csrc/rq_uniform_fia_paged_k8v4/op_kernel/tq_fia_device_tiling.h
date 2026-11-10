@@ -4,6 +4,8 @@
  * (REGISTER / BEGIN_TILING_DATA_DEF layout). Do NOT include
  * register/tilingdata_base.h here — it conflicts with AscendC DT_* macros.
  */
+
+
 #ifndef TQ_FIA_DEVICE_TILING_H_
 #define TQ_FIA_DEVICE_TILING_H_
 
@@ -11,7 +13,9 @@
 
 namespace optiling {
 
-constexpr uint32_t TQ_FIA_MAX_AIC_CORE_NUM = 26;
+// 950 (A5) launches up to 28 AIC cores (56 AIV blocks); the 910b-era 26
+// under-sizes the split tables, so cores 26+ would read out of range.
+constexpr uint32_t TQ_FIA_MAX_AIC_CORE_NUM = 32;
 
 struct TqFiaBaseParams {
     uint32_t bSize;

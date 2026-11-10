@@ -837,7 +837,11 @@ __aicore__ inline void RqUniformKvQuantSparseFlashAttentionMla<QSFAT>::ComputeMm
         kvSfaKernelSplitInfo.nBufferStartM = i * kvSfaKernelConstInfo.nBufferMBaseSize;
         kvSfaKernelSplitInfo.nBufferDealM =
             (i + 1 != nBufferLoopTimes) ? kvSfaKernelConstInfo.nBufferMBaseSize : nBufferTail;
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        CrossCoreWaitFlag<ConstInfo::QSFA_SYNC_MODE2, PIPE_MTE2>(kvSfaKernelConstInfo.syncV1C2);
+#else
         CrossCoreWaitFlag(kvSfaKernelConstInfo.syncV1C2);
+#endif
         matmulService.ComputeMm2(kvSfaKernelRunInfo, kvSfaKernelSplitInfo);
         CrossCoreSetFlag<ConstInfo::QSFA_SYNC_MODE2, PIPE_FIX>(kvSfaKernelConstInfo.syncC2V2);
     }
@@ -932,10 +936,17 @@ __aicore__ inline void RqUniformKvQuantSparseFlashAttentionMla<QSFAT>::ProcessBa
     }
     if ASCEND_IS_AIV {
         if constexpr (TEMPLATE_MODE == V_TEMPLATE) {
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+            CrossCoreWaitFlag<ConstInfo::QSFA_SYNC_MODE2, PIPE_MTE2>(3);
+            CrossCoreWaitFlag<ConstInfo::QSFA_SYNC_MODE2, PIPE_MTE2>(3);
+            CrossCoreWaitFlag<ConstInfo::QSFA_SYNC_MODE2, PIPE_MTE2>(3);
+            CrossCoreWaitFlag<ConstInfo::QSFA_SYNC_MODE2, PIPE_MTE2>(3);
+#else
             CrossCoreWaitFlag(3);
             CrossCoreWaitFlag(3);
             CrossCoreWaitFlag(3);
             CrossCoreWaitFlag(3);
+#endif
         }
     }
 }
@@ -953,12 +964,20 @@ __aicore__ inline void RqUniformKvQuantSparseFlashAttentionMla<QSFAT>::PreloadPi
     if (extraInfo0.isValid) {
         if ASCEND_IS_AIC {
             if constexpr (TEMPLATE_MODE == V_TEMPLATE) {
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+                CrossCoreWaitFlag<ConstInfo::QSFA_SYNC_MODE2, PIPE_MTE2>(kvSfaKernelConstInfo.syncV0C1);
+#else
                 CrossCoreWaitFlag(kvSfaKernelConstInfo.syncV0C1);
+#endif
             }
             ComputeMm1(extraInfo0);
         } else {
             if constexpr (TEMPLATE_MODE == V_TEMPLATE) {
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+                CrossCoreWaitFlag<ConstInfo::QSFA_SYNC_MODE2, PIPE_MTE2>(3);
+#else
                 CrossCoreWaitFlag(3);
+#endif
                 kvSfaKernelVectorService.MergeKv(extraInfo0);
                 CrossCoreSetFlag<ConstInfo::QSFA_SYNC_MODE2, PIPE_MTE3>(kvSfaKernelConstInfo.syncV0C1);
             }

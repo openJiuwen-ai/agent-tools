@@ -512,6 +512,25 @@ __aicore__ inline void QSFAMatmulService<QSFAT>::LoadDataMm1A(LocalTensor<K_ROPE
                                                               uint32_t kSplitSize, uint32_t mSize, uint32_t kSize)
 {
     LocalTensor<K_ROPE_T> srcTensor = aL1Tensor[mSize * kSplitSize * idx];
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    // 3510: the conv-style LoadData 3D path is not reliable there; load the
+    // same [mSize x kSize] tile with an explicit V2 2D load instead. The L1
+    // staging (CopyGmToL1 Nd2Nz, dstNzC0Stride = mAlign) is k-outer NZ:
+    // fractal (m_i, k_j) sits at k_j*mFract*512B + m_i*512B, so a dense
+    // single V2 call with srcStride = dstStride = mFract covers the tile.
+    AscendC::LoadData2DParamsV2 aLoadV2;
+    aLoadV2.mStartPosition = 0;
+    aLoadV2.kStartPosition = 0;
+    const uint32_t mFract = mSize / BLOCK_CUBE;
+    const uint32_t kFract = kSize / (32U / sizeof(K_ROPE_T));
+    aLoadV2.mStep = mFract;
+    aLoadV2.kStep = kFract;
+    aLoadV2.srcStride = mFract;
+    aLoadV2.dstStride = mFract;
+    aLoadV2.ifTranspose = false;
+    aLoadV2.sid = 0;
+    AscendC::LoadData(aL0Tensor, srcTensor, aLoadV2);
+#else
     LoadData3DParamsV2<K_ROPE_T> loadData3DParams;
     // SetFmatrixParams
     loadData3DParams.l1H = mSize / 16; // Hin=M1=8
@@ -538,6 +557,7 @@ __aicore__ inline void QSFAMatmulService<QSFAT>::LoadDataMm1A(LocalTensor<K_ROPE
     loadData3DParams.channelSize = kSize; // Cin=K
     loadData3DParams.enTranspose = 0;
     LoadData<K_ROPE_T, LOAD3DV2_CONFIG>(aL0Tensor, srcTensor, loadData3DParams);
+#endif
 }
 
 template <typename QSFAT>
@@ -933,8 +953,27 @@ __aicore__ inline void QSFAMatmulService<QSFAT>::ComputeMm2(const RunInfo &info,
                     loadData3DParamsForB.fMatrixCtrl = 0;
                     // 源操作数的通道数。膨胀系数为1时，目的weight为filterW*filterH*channelSize
                     loadData3DParamsForB.channelSize = nL1SizeAlign;
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+                    // 3510: the conv-style LoadData 3D path misreads L1 there
+                    // (fia-battle verified). Explicit V2 transposed load (k8v4
+                    // B recipe): L1 staging is token-major NZ, fractal
+                    // (token_i, dim_j) at (token_i + dim_j*nBlocks)*256, so
+                    // mStep = kL0Size/16, kStep = nL1Size/16, srcStride =
+                    // kL0SizeAlign/16, dstStride = nL1Size/16.
+                    AscendC::LoadData2DParamsV2 bLoadV2;
+                    bLoadV2.mStartPosition = 0;
+                    bLoadV2.kStartPosition = 0;
+                    bLoadV2.mStep = kL0SizeAlign / 16U;
+                    bLoadV2.kStep = nL1SizeAlign / 16U;
+                    bLoadV2.srcStride = kL0SizeAlign / 16U;
+                    bLoadV2.dstStride = nL1SizeAlign / 16U;
+                    bLoadV2.ifTranspose = true;
+                    bLoadV2.sid = 0;
+                    AscendC::LoadData(bL0Tensor, bL1Tensor[qsfaKL0 * qsfaBaseK * qsfaBaseN], bLoadV2);
+#else
                     LoadData<K_ROPE_T, LOAD3DV2_CONFIG>(bL0Tensor, bL1Tensor[qsfaKL0 * qsfaBaseK * qsfaBaseN],
                                                         loadData3DParamsForB);
+#endif
                     LocalTensor<K_ROPE_T> aL0Tensor =
                         aL0TensorPingPong[(abL0BufIter % 2) * (L0A_PP_SIZE / sizeof(K_ROPE_T))];
                     LoadData3DParamsV2<K_ROPE_T> loadData3DParamsForA;
@@ -961,8 +1000,24 @@ __aicore__ inline void QSFAMatmulService<QSFAT>::ComputeMm2(const RunInfo &info,
                     loadData3DParamsForA.fMatrixCtrl = 0;
                     // 源操作数的通道数。膨胀系数为1时，目的weight为filterW*filterH*channelSize
                     loadData3DParamsForA.channelSize = kL0SizeAlign;
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+                    // 3510: conv-style 3D misreads L1; explicit V2 dense load
+                    // over the standard-NZ A staging (k8v4 A recipe: srcStride
+                    // = dstStride = mFract).
+                    AscendC::LoadData2DParamsV2 aLoadV2;
+                    aLoadV2.mStartPosition = 0;
+                    aLoadV2.kStartPosition = 0;
+                    aLoadV2.mStep = mL1SizeAlign / 16U;
+                    aLoadV2.kStep = kL0SizeAlign / 16U;
+                    aLoadV2.srcStride = mL1SizeAlign / 16U;
+                    aLoadV2.dstStride = mL1SizeAlign / 16U;
+                    aLoadV2.ifTranspose = false;
+                    aLoadV2.sid = 0;
+                    AscendC::LoadData(aL0Tensor, aL1Tensor[qsfaKL0 * qsfaBaseK * mL1SizeAlign], aLoadV2);
+#else
                     LoadData<K_ROPE_T, LOAD3DV2_CONFIG>(aL0Tensor, aL1Tensor[qsfaKL0 * qsfaBaseK * mL1SizeAlign],
                                                         loadData3DParamsForA);
+#endif
                     SetFlag<HardEvent::MTE1_M>(Mte1MmABEventId(abL0BufIter % 2));
                     WaitFlag<HardEvent::MTE1_M>(Mte1MmABEventId(abL0BufIter % 2));
 

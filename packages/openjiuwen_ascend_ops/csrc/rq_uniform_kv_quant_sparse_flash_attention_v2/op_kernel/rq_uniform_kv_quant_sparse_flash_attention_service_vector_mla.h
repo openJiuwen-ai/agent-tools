@@ -1275,12 +1275,20 @@ __aicore__ inline void QSFAVectorService<QSFAT>::ProcessVec1L(const RunInfo &kvV
                                       kvVecSplitInfo.nBufferDealM :
                                       (((kvVecSplitInfo.nBufferDealM + 15) / 16 + 1) / 2 * 16);
         kvVecSplitInfo.vecStartM = 0;
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        if (GetSubBlockIdx() == 1) {
+#else
         if (GetBlockIdx() % 2 == 1) {
+#endif
             kvVecSplitInfo.vecStartM = kvVecSplitInfo.vecDealM;
             kvVecSplitInfo.vecDealM = kvVecSplitInfo.nBufferDealM - kvVecSplitInfo.vecDealM;
         }
 
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        CrossCoreWaitFlag<ConstInfo::QSFA_SYNC_MODE2, PIPE_MTE2>(kvVecConstInfo.syncC1V1);
+#else
         CrossCoreWaitFlag(kvVecConstInfo.syncC1V1);
+#endif
         // vec1 compute
         ProcessVec1SingleBuf(kvVecInfo, kvVecSplitInfo);
         CrossCoreSetFlag<ConstInfo::QSFA_SYNC_MODE2, PIPE_MTE3>(kvVecConstInfo.syncV1C2);
@@ -1421,11 +1429,19 @@ __aicore__ inline void QSFAVectorService<QSFAT>::ProcessVec2L(const RunInfo &kvV
                                       kvVecSplitInfo.nBufferDealM :
                                       (((kvVecSplitInfo.nBufferDealM + 15) / 16 + 1) / 2 * 16);
         kvVecSplitInfo.vecStartM = 0;
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        if (GetSubBlockIdx() == 1) {
+#else
         if (GetBlockIdx() % 2 == 1) {
+#endif
             kvVecSplitInfo.vecStartM = kvVecSplitInfo.vecDealM;
             kvVecSplitInfo.vecDealM = kvVecSplitInfo.nBufferDealM - kvVecSplitInfo.vecDealM;
         }
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        CrossCoreWaitFlag<ConstInfo::QSFA_SYNC_MODE2, PIPE_MTE2>(kvVecConstInfo.syncC2V2);
+#else
         CrossCoreWaitFlag(kvVecConstInfo.syncC2V2);
+#endif
         ProcessVec2SingleBuf(kvVecInfo, kvVecSplitInfo);
     }
 }

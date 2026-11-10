@@ -409,7 +409,15 @@ __aicore__ inline void FiaKernelTurboQuantP0<FIAT, CubeBlockType, VecBlockType, 
 
     if ASCEND_IS_AIV {
         tmpBlockIdx = GetBlockIdx();
+        // Mix(1,2) AIV logic id = group * subblockdim + subIdx on both 2201
+        // and 3510 (dav_c220/dav_3510 GetBlockIdxImpl). Query the ratio
+        // instead of hard-coding 2 so the AIC pairing survives any
+        // sub-block-dim change on 950 mixed scheduling.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        aiCoreIdx = tmpBlockIdx / GetSubBlockNum();
+#else
         aiCoreIdx = tmpBlockIdx / 2;
+#endif
     } else {
         tmpBlockIdx = GetBlockIdx();
         aiCoreIdx = tmpBlockIdx;
@@ -838,6 +846,7 @@ __aicore__ inline TASK_DEAL_MODE FiaKernelTurboQuantP0<FIAT, CubeBlockType, VecB
         actSeqLensQ = qActSeqLensParser.GetActualSeqLength(bIdx);
     }
 
+
     uint64_t s2LoopTimes = (actSeqLensKv + constInfo.s2BaseSize - 1) / constInfo.s2BaseSize;
     uint64_t gS1Size = actSeqLensQ * constInfo.gSize;
     uint64_t gS1LoopTimes = (gS1Size + constInfo.mBaseSize - 1) / constInfo.mBaseSize;
@@ -1047,6 +1056,7 @@ __aicore__ inline void FiaKernelTurboQuantP0<FIAT, CubeBlockType, VecBlockType, 
     RunInfo &extraInfo0 = extraInfo[loop % FIA_PRELOAD_TASK_CACHE_SIZE];
     RunInfo &extraInfo2 = extraInfo[(loop + 2) % FIA_PRELOAD_TASK_CACHE_SIZE];
     RunInfo &extraInfo1 = extraInfo[(loop + 1) % FIA_PRELOAD_TASK_CACHE_SIZE];
+
 
     // Pipeline: DequantK → MM1 (extraInfo0)
     if (extraInfo0.isValid) {

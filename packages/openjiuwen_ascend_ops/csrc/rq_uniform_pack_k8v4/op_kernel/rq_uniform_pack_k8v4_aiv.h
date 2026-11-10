@@ -31,6 +31,12 @@ public:
                 static_cast<uint16_t>(buffer * TQ_MANUAL_SYNC_PP_STRIDE +
                                       TQ_MANUAL_SYNC_C_FREE));
         }
+        // 950 entry handshake: tell the AIC this pair's launch-entry state
+        // (C_FREE resets above) is posted. Both subcores set; the AIC's
+        // ForBothAiv wait consumes the pair.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        TqCrossCoreSet<PIPE_MTE2>(TQ_MANUAL_SYNC_ENTRY_READY);
+#endif
 
         uint32_t manualTileOrdinal = 0;
         const uint32_t subBlocksPerBlock = op.blockSize_ / TQ_BLOCK_ROWS;
@@ -94,6 +100,11 @@ public:
             }
         }
         DrainStream(aivSlice, hasPending, pendingDesc, pendingInputBuffer);
+        // 950 exit handshake: this subcore's Y-cache writes are drained;
+        // tell the AIC it may retire.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        TqCrossCoreSet<PIPE_MTE2>(TQ_MANUAL_SYNC_AIV_DONE);
+#endif
     }
 
     __aicore__ inline void PackApplyRowBrcbSub(

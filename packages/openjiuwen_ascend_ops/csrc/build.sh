@@ -62,6 +62,16 @@ fi
 # common_fia_split (SplitCore) is compiled into optiling by FIA k8v4.
 CUSTOM_OPS="rq_uniform_pack_k8v4;rq_uniform_pack_k4v4;rq_uniform_fia_paged_k8v4;rq_uniform_fia_paged_k4v4;rq_uniform_fia_paged_k8v4_msd;rq_uniform_fia_paged_k4v4_msd;rq_uniform_pack_mla_latent;rq_uniform_pack_sfa;rq_uniform_kv_quant_sparse_flash_attention_v2;rq_uniform_dequant_mla_latent;rq_uniform_fia_mla_latent"
 
+if [ "${SOC_VERSION}" = "ascend950" ]; then
+    # dav_3510 advanced-matmul L1->L0 is LoadData2D-v2 only, which bans int4b_t
+    # (Us2 MSD packs V as int4 straight into the BMM). Exclude both MSD ops on
+    # 950; decode stays available via the non-MSD FIA ops (flash-decode variant).
+    EXCLUDE_950="rq_uniform_fia_paged_k8v4_msd rq_uniform_fia_paged_k4v4_msd"
+    for op in ${EXCLUDE_950}; do
+        CUSTOM_OPS=$(printf '%s' "${CUSTOM_OPS}" | tr ';' '\n' | grep -v -x "${op}" | paste -sd';' -)
+    done
+fi
+
 # Fetch catlass dependency (git submodule, same pattern as vllm-ascend build_aclnn.sh)
 CATLASS_PATH="${CSRC_DIR}/third_party/catlass/include"
 if [ ! -d "${CATLASS_PATH}" ]; then

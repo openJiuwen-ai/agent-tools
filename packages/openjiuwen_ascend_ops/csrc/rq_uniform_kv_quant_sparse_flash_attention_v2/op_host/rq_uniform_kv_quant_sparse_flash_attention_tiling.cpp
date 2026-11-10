@@ -1193,10 +1193,6 @@ static ge::graphStatus AssertMlaSchemaLimits(const CheckCtx &ctx)
     if (RunAttrI32EqGates(ctx.opName, i32Gates, sizeof(i32Gates) / sizeof(i32Gates[0])) != ge::GRAPH_SUCCESS) {
         return ge::GRAPH_FAILED;
     }
-    if (ctx.info.isA5) {
-        return FailValueReason(ctx.opName, "platform", "A5",
-                               "Schema A kv_quant is supported on Atlas A2/A3 (910B) only");
-    }
     const AttrI64EqGate i64Gates[] = {
         {"preTokenLimit", ctx.preTokens, INT64_MAX, "Pre_tokens should be INT64_MAX"},
         {"nextTokenLimit", ctx.nextTokens, INT64_MAX, "Next_tokens should be INT64_MAX"},
@@ -1481,7 +1477,11 @@ static ge::graphStatus BindPlatformMeta(ParseCtx &ctx)
     }
     auto qsfaAscendcPlat = platform_ascendc::PlatformAscendC(ctx.platformInfo);
     const uint32_t qsfaAivNum = qsfaAscendcPlat.GetCoreNumAiv();
-    const uint32_t qsfaAicNum = qsfaAscendcPlat.GetCoreNumAic();
+    uint32_t qsfaAicNum = qsfaAscendcPlat.GetCoreNumAic();
+    // Split tables are sized QSFA_MAX_AIC_CORE_NUM; clamp instead of overrunning.
+    if (qsfaAicNum > QSFA_MAX_AIC_CORE_NUM) {
+        qsfaAicNum = QSFA_MAX_AIC_CORE_NUM;
+    }
     if (qsfaAicNum == 0 || qsfaAivNum == 0) {
         OPS_REPORT_VECTOR_INNER_ERR(ctx.opName, "num of core obtained is 0.");
         return GRAPH_FAILED;
@@ -2271,13 +2271,16 @@ void QSFAMlaTiling::GetWorkspaceSize()
         return total;
     };
 
+    push(libapiSize_);
     if (qsfaInfo_->isA5) {
-        push(libapiSize_);
+        // A5-only extra terms. The kernel writes the same mm/bmm2/soft/ring
+        // regions as on A2/A3, so the common terms below must be included
+        // too - the former A5 early-return under-sized the workspace and the
+        // Fixpipe writes ran past its end (MTE DDR out of range).
         constexpr uint32_t kTriple = 3U;
         constexpr uint32_t kS2 = 128U;
         constexpr uint32_t kD = 576U;
-        const auto plat = platform_ascendc::PlatformAscendC(qsfaInfo_->platMeta);
-        const uint32_t aic = plat.GetCoreNumAic();
+        const uint32_t aic = coreNum_;
         if (qsfaInfo_->gSize > 64) {
             push(static_cast<uint64_t>(kS2) * kD * BytesOfDtype(qsfaInfo_->inputQType) * kTriple * (aic >> 1U));
         }
@@ -2286,9 +2289,6 @@ void QSFAMlaTiling::GetWorkspaceSize()
                 (qsfaInfo_->qLayout == QSFALayout::TND) ? qsfaInfo_->s1Size : (qsfaInfo_->bSize * qsfaInfo_->s1Size);
             push(static_cast<uint64_t>(span) * static_cast<uint32_t>(qsfaInfo_->sparseBlockCount) * sizeof(int64_t));
         }
-        workspaceSize_ = sumTerms();
-        CalcFDWorkSpace(cores);
-        return;
     }
 
     constexpr uint32_t kMmB = 4U;
@@ -2300,7 +2300,6 @@ void QSFAMlaTiling::GetWorkspaceSize()
     const uint32_t preload = kPreloadNum;
     const uint64_t c64 = cores;
 
-    push(libapiSize_);
     push(preload * mmResUbSize_ * c64 * kMmB);
     push(preload * static_cast<uint64_t>(static_cast<float>(mmResUbSize_ * c64 * kVecB) * kRatio));
     push(preload * bmm2ResUbSize_ * c64 * kBmm2B);
@@ -2334,6 +2333,10 @@ ge::graphStatus QSFAMlaTiling::GetPlatformInfo()
     }
     auto qsfaAscendcPlatform = platform_ascendc::PlatformAscendC(plat);
     aicNum_ = qsfaAscendcPlatform.GetCoreNumAic();
+    // Split tables are sized QSFA_MAX_AIC_CORE_NUM; clamp instead of overrunning.
+    if (aicNum_ > QSFA_MAX_AIC_CORE_NUM) {
+        aicNum_ = QSFA_MAX_AIC_CORE_NUM;
+    }
     aivNum_ = qsfaAscendcPlatform.GetCoreNumAiv();
     if (aicNum_ == 0 || aivNum_ == 0) {
         OPS_REPORT_VECTOR_INNER_ERR(qsfaInfo_->opName, "num of core obtained is 0.");

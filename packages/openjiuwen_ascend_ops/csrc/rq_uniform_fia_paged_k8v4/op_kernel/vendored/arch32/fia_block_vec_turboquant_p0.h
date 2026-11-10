@@ -18,7 +18,13 @@
 #include "tq_dequant_device.h"
 
 constexpr uint32_t TQ_VEC_DEQ_K0_READY_VEC = 14U;
+// 3510 restricts mode-2 CrossCore flagId to 0-15; the V-ready pair uses the
+// free 12/13 slots there. 910b keeps the original 16.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+constexpr uint32_t TQ_VEC_DEQ_V0_READY_VEC = 12U;
+#else
 constexpr uint32_t TQ_VEC_DEQ_V0_READY_VEC = 16U;
+#endif
 constexpr uint32_t TQ_VEC_OUTPUT_PI_READY_VEC = 10U;
 constexpr uint32_t TQ_CUBE_OUTPUT_PI_DONE_VEC = 11U;
 constexpr float TQ_MSE_SCALE = 0.0026f;
@@ -389,7 +395,13 @@ template <typename FIAT> __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::S
         mSplitInfo.vecDealM = ((mSplitInfo.nBufferDealM + 15) / 16 + 1) / 2 * 16;
     }
     mSplitInfo.vecStartM = 0;
+    // Sub-block id via SPR query (get_subblockid) rather than GetBlockIdx()%2:
+    // identical on 2201, and stays correct if the 950 mix ratio ever changes.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    if (GetSubBlockIdx() == 1) {
+#else
     if (GetBlockIdx() % 2 == 1) {
+#endif
         // VEC1处理的M大小
         mSplitInfo.vecStartM = mSplitInfo.vecDealM;
         mSplitInfo.vecDealM = mSplitInfo.nBufferDealM - mSplitInfo.vecDealM;
@@ -892,6 +904,7 @@ __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::Bmm2FDDataCopyOut(const Ru
                       info.tndCoreStartKVSplitPos * constInfo.mBaseSize * constInfo.headDim + // 份数offset
                       wsMStart * actualColumnCount;                                             // m轴offset
     GlobalTensor<T> dst = accumOutGm[offset];
+
     DataCopyExtParams dataCopyParams;
     dataCopyParams.blockCount = dealRowCount;
     dataCopyParams.blockLen = actualColumnCount * sizeof(T);
@@ -1025,6 +1038,7 @@ __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::ComputeLogSumExpAndCopyToG
                        info.tndCoreStartKVSplitPos * constInfo.mBaseSize + // 份数offset
                        mSplitInfo.nBufferStartM + mSplitInfo.vecStartM) *
                       fa_base_vector::FP32_BLOCK_ELEMENT_NUM; // m轴offset
+
     if constexpr (SOFTMAX_WITH_BRC) {              
         DataCopy(lseSumFdGm[offset], softmaxSumUb[baseOffset], size);
         DataCopy(lseMaxFdGm[offset], softmaxMaxUb[baseOffset], size);       
@@ -1205,7 +1219,14 @@ template <typename FIAT> __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::C
 {
     DequantV(info);
     SetMSplitInfo(info.actMBaseSize);
+    // 950: CrossCoreWaitFlag's pipe param is live (910b blocked ALL pipes);
+    // the default PIPE_S does not gate the AIV's MTE2 read of the cube-written
+    // GM result. Explicitly block the consuming stream.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    CrossCoreWaitFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE2>(constInfo.syncC1V1);
+#else
     CrossCoreWaitFlag(constInfo.syncC1V1);
+#endif
     ProcessVec1SingleBuf(info);
     CrossCoreSetFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE3>(constInfo.syncV1C2);
 }
@@ -1213,7 +1234,13 @@ template <typename FIAT> __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::C
 template <typename FIAT> __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::ComputeVec2(const RunInfo &info)
 {
     SetMSplitInfo(info.actMBaseSize);
+    // 950: explicit mode+pipe, see the ComputeVec1 note. Without this the
+    // mm2ResGm read below can race ahead of the cube's Fixpipe.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    CrossCoreWaitFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE2>(constInfo.syncC2V2);
+#else
     CrossCoreWaitFlag(constInfo.syncC2V2);
+#endif
     const bool useCubePi = piApplyEnabled_ &&
         (TQ_PI_OUTPUT_CUBE != 0) && info.isLastS2Loop &&
         info.actMBaseSize >= TQ_PI_OUTPUT_CUBE_MIN_M;
@@ -1222,7 +1249,12 @@ template <typename FIAT> __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::C
         // FIA_SYNC_MODE2 waits for both AIV subcores, so the full M tile is ready.
         CrossCoreSetFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE3>(
             TQ_VEC_OUTPUT_PI_READY_VEC);
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        CrossCoreWaitFlag<ConstInfo::FIA_SYNC_MODE2, PIPE_MTE2>(
+            TQ_CUBE_OUTPUT_PI_DONE_VEC);
+#else
         CrossCoreWaitFlag(TQ_CUBE_OUTPUT_PI_DONE_VEC);
+#endif
         CopyCubePiResult(info);
     } else {
         ProcessVec2SingleBuf(info);
@@ -1298,7 +1330,8 @@ __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::DequantK(const RunInfo &in
     // Note: AIV↔AIV MODE2 join before Cube notify deadlocks on 910B.
     // Flag ID stays on loop%2 (pipeline handshake). Data slot may be s2Idx.
     const uint32_t slot = ResolveDequantWsSlot(info);
-    if (!ShouldSkipDequant(info, true)) {
+    const bool deqSkip = ShouldSkipDequant(info, true);
+    if (!deqSkip) {
         DequantKvImpl(info, true, slot);
         MarkDequantCached(info, true, slot);
     }
@@ -1373,9 +1406,12 @@ __aicore__ inline void FiaBlockVecTurboQuantP0<FIAT>::DequantKvImpl(const RunInf
     // Dual-AIV element half-split at any PA position.  Both subcores own a
     // contiguous, disjoint WS range.  Do NOT block-align the cut: that only
     // masks mid-block tails and fails when s2Count <= block_size.
-    // Correctness: V_MTE2 before meta/codes MTE2 (ablation: V_MTE3 dual-event
-    // / drain-before-prefetch not required for NaN).
+    // Correctness: V_MTE2 before meta/codes MTE2.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    uint32_t subCoreId = static_cast<uint32_t>(GetSubBlockIdx());
+#else
     uint32_t subCoreId = GetBlockIdx() % 2U;
+#endif
     uint32_t split = s2Count / 2U;
     uint32_t siStart = (subCoreId == 0U) ? 0U : split;
     uint32_t siEnd = (subCoreId == 0U) ? split : s2Count;
