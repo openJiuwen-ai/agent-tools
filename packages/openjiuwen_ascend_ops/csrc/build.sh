@@ -21,8 +21,20 @@ PACKAGE_DIR=$(dirname "${CURRENT_DIR}")  # packages/openjiuwen_ascend_ops
 PYSRC_DIR="${PACKAGE_DIR}/pysrc/openjiuwentools/openjiuwen_ascend_ops"
 CSRC_DIR="${CURRENT_DIR}"
 
-SOC_VERSION=${1:-ascend910b}
+# Prefer positional arg; otherwise honor SOC_VERSION env.
+SOC_VERSION=${1:-${SOC_VERSION:-ascend910b}}
+# CANN 9.2+: A5 OPP/OpDef name is ascend950 (ASCEND910_95 is a deprecated alias).
+# Building with ascend910_95 looks for missing aic-ascend910_95-ops-info.ini.
+case "${SOC_VERSION}" in
+    ascend910_95|ascend910_95*|ASCEND910_95*|ascend950*)
+        if [[ "${SOC_VERSION}" != "ascend950" ]]; then
+            echo "Note: normalizing SOC_VERSION=${SOC_VERSION} -> ascend950 (CANN A5)"
+            SOC_VERSION=ascend950
+        fi
+        ;;
+esac
 INSTALL_PATH=${2:-$(dirname "$(dirname "${PACKAGE_DIR}")")/ztmp/cann_ops_install}
+echo "ASCEND_COMPUTE_UNIT=${SOC_VERSION}"
 
 # Host .so layout follows the machine that runs the build: linux/x86_64 or linux/aarch64.
 HOST_ARCH=$(uname -m)
@@ -60,7 +72,19 @@ fi
 # Hard-renamed to rq_uniform_* (incl. rq_uniform_fia_mla_latent for absorb).
 # SFA v1 dir is NOT in CUSTOM_OPS (not a shipped op); v2 still -I's its op_host/op_kernel.
 # common_fia_split (SplitCore) is compiled into optiling by FIA k8v4.
-CUSTOM_OPS="rq_uniform_pack_k8v4;rq_uniform_pack_k4v4;rq_uniform_fia_paged_k8v4;rq_uniform_fia_paged_k4v4;rq_uniform_fia_paged_k8v4_msd;rq_uniform_fia_paged_k4v4_msd;rq_uniform_pack_mla_latent;rq_uniform_pack_sfa;rq_uniform_kv_quant_sparse_flash_attention_v2;rq_uniform_dequant_mla_latent;rq_uniform_fia_mla_latent"
+CUSTOM_OPS_A2="rq_uniform_pack_k8v4;rq_uniform_pack_k4v4;rq_uniform_fia_paged_k8v4;rq_uniform_fia_paged_k4v4;rq_uniform_fia_paged_k8v4_msd;rq_uniform_fia_paged_k4v4_msd;rq_uniform_pack_mla_latent;rq_uniform_pack_sfa;rq_uniform_kv_quant_sparse_flash_attention_v2;rq_uniform_dequant_mla_latent;rq_uniform_fia_mla_latent"
+# A5 (ascend950): only ops with op_kernel/arch35. Arch32 FIA/MLA vendored kernels
+# fail opc on DAV_3510 (internal header #warning as -Werror via kernel_event.h).
+CUSTOM_OPS_A5="rq_uniform_pack_k8v4"
+# Override with CUSTOM_OPS=... if needed.
+if [ -n "${CUSTOM_OPS:-}" ]; then
+    :
+elif [ "${SOC_VERSION}" = "ascend950" ]; then
+    CUSTOM_OPS="${CUSTOM_OPS_A5}"
+else
+    CUSTOM_OPS="${CUSTOM_OPS_A2}"
+fi
+echo "ASCEND_OP_NAME=${CUSTOM_OPS}"
 
 # Fetch catlass dependency (git submodule, same pattern as vllm-ascend build_aclnn.sh)
 CATLASS_PATH="${CSRC_DIR}/third_party/catlass/include"

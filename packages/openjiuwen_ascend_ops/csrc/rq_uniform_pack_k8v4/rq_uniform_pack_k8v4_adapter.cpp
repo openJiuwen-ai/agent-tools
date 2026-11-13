@@ -1,3 +1,4 @@
+#include <limits>
 #include <torch/extension.h>
 #include <torch/library.h>
 #include <torch_npu/csrc/core/npu/NPUStream.h>
@@ -15,23 +16,22 @@ void rq_uniform_pack_k8v4(
     const at::Tensor &value,
     const at::Tensor &slot_mapping,
     const at::Tensor &query_start_loc,
-    const at::Tensor &rotation_t,
+    const c10::optional<at::Tensor> &rotation_t,
     at::Tensor &key_cache,
     at::Tensor &value_cache,
     int64_t num_reqs,
-    int64_t block_size) {
+    int64_t block_size,
+    int64_t quant_mode) {
     constexpr int64_t kBlockRows = 16;
-    constexpr int64_t kKeyGroupRows = 2;
-    constexpr int64_t kValueGroupRows = 4;
+    constexpr int64_t kQuantModeUniform = 0;
+    constexpr int64_t kQuantModeK8Fp8 = 1;
     TORCH_CHECK(key.is_privateuseone() && value.is_privateuseone(), "key/value must be on NPU");
     TORCH_CHECK(slot_mapping.is_privateuseone(), "slot_mapping must be on NPU");
     TORCH_CHECK(query_start_loc.is_privateuseone(), "query_start_loc must be on NPU");
-    TORCH_CHECK(rotation_t.is_privateuseone(), "rotation_t must be on NPU");
     TORCH_CHECK(key_cache.is_privateuseone() && value_cache.is_privateuseone(),
                 "key_cache/value_cache must be on NPU");
     TORCH_CHECK(key.device() == value.device() && key.device() == slot_mapping.device() &&
                     key.device() == query_start_loc.device() &&
-                    key.device() == rotation_t.device() &&
                     key.device() == key_cache.device() && key.device() == value_cache.device(),
                 "all tensors must be on the same NPU device");
     TORCH_CHECK(key.scalar_type() == value.scalar_type(),
@@ -40,15 +40,37 @@ void rq_uniform_pack_k8v4(
                 "RqUniform pack accepts fp16/bf16 key/value");
     TORCH_CHECK(slot_mapping.scalar_type() == at::kInt, "slot_mapping must be int32");
     TORCH_CHECK(query_start_loc.scalar_type() == at::kInt, "query_start_loc must be int32");
+    TORCH_CHECK(quant_mode == kQuantModeUniform || quant_mode == kQuantModeK8Fp8,
+                "quant_mode must be 0 (UNIFORM) or 1 (TQ_K8_FP8)");
     const int64_t head_size = key.size(-1);
     TORCH_CHECK(head_size == 128 || head_size == 256,
                 "RqUniform pack supports head_size=128 or 256");
-    const int64_t kKeyBlockStride = kBlockRows * (head_size + 4);
+    const int64_t kKeyBytesPerRow =
+        quant_mode == kQuantModeK8Fp8 ? head_size : (head_size + 4);
+    const int64_t kKeyBlockStride = kBlockRows * kKeyBytesPerRow;
     const int64_t kValBlockStride = kBlockRows * (head_size / 2 + 4);
-    TORCH_CHECK(rotation_t.scalar_type() == key.scalar_type() &&
-                    rotation_t.dim() == 2 && rotation_t.size(0) == head_size &&
-                    rotation_t.size(1) == head_size,
-                "rotation_t must be [D,D] matching key/value dtype and head_size");
+
+    c10::optional<at::Tensor> rotation_opt = rotation_t;
+    if (quant_mode == kQuantModeUniform) {
+        TORCH_CHECK(rotation_opt.has_value() && rotation_opt->defined(),
+                    "rotation_t is required when quant_mode=0 (UNIFORM)");
+        const at::Tensor &rotation = *rotation_opt;
+        TORCH_CHECK(rotation.is_privateuseone(), "rotation_t must be on NPU");
+        TORCH_CHECK(rotation.device() == key.device(),
+                    "rotation_t must be on the same NPU device as key");
+        TORCH_CHECK(rotation.scalar_type() == key.scalar_type() &&
+                        rotation.dim() == 2 && rotation.size(0) == head_size &&
+                        rotation.size(1) == head_size,
+                    "rotation_t must be [D,D] matching key/value dtype and head_size");
+    } else if (rotation_opt.has_value() && rotation_opt->defined()) {
+        const at::Tensor &rotation = *rotation_opt;
+        TORCH_CHECK(rotation.is_privateuseone(), "rotation_t must be on NPU when provided");
+        TORCH_CHECK(rotation.device() == key.device(),
+                    "rotation_t must be on the same NPU device as key when provided");
+    } else {
+        rotation_opt = c10::nullopt;
+    }
+
     TORCH_CHECK(key_cache.scalar_type() == at::kByte && value_cache.scalar_type() == at::kByte,
                 "key_cache/value_cache must be uint8");
     TORCH_CHECK(key_cache.dim() == 3 && value_cache.dim() == 3,
@@ -61,7 +83,8 @@ void rq_uniform_pack_k8v4(
     TORCH_CHECK(block_size % kBlockRows == 0,
                 "RqUniform k8v4 cache layout requires block_size to be a multiple of 16");
     TORCH_CHECK(key_cache.size(2) == (block_size / kBlockRows) * kKeyBlockStride,
-                "key_cache last dim must equal (block_size / 16) * key_tile");
+                "key_cache last dim must equal (block_size / 16) * key_tile "
+                "(mode0: 16*(D+4), mode1: 16*D)");
     TORCH_CHECK(value_cache.size(2) == (block_size / kBlockRows) * kValBlockStride,
                 "value_cache last dim must equal (block_size / 16) * val_tile");
     TORCH_CHECK(key_cache.is_contiguous() && value_cache.is_contiguous(),
@@ -94,7 +117,14 @@ void rq_uniform_pack_k8v4(
     at::Tensor value_work = value;
     at::Tensor slot_work = slot_mapping;
     at::Tensor query_start_work = query_start_loc;
-    at::Tensor rotation_work = rotation_t;
+    c10::optional<at::Tensor> rotation_work = c10::nullopt;
+    if (rotation_opt.has_value() && rotation_opt->defined()) {
+        at::Tensor rot = *rotation_opt;
+        if (!rot.is_contiguous()) {
+            rot = rot.contiguous();
+        }
+        rotation_work = rot;
+    }
     if (!key_strided_copy_supported) {
         if (!key_work.is_contiguous()) {
             key_work = key_work.contiguous();
@@ -117,14 +147,9 @@ void rq_uniform_pack_k8v4(
     if (!query_start_work.is_contiguous()) {
         query_start_work = query_start_work.contiguous();
     }
-    if (!rotation_work.is_contiguous()) {
-        rotation_work = rotation_work.contiguous();
-    }
 
     uint32_t vec_per_core = 128;
     if (n_vec < 128) {
-        // Decode/chunked-prefill paths usually pack a handful of KV rows per
-        // step; vecPerCore=2 matches the ori TurboQuant tuning (~41 us vs ~44).
         vec_per_core = static_cast<uint32_t>(n_vec <= 16 ? 2 : ((n_vec + 15) / 16) * 16);
         if (vec_per_core == 0) {
             vec_per_core = 16;
@@ -136,9 +161,6 @@ void rq_uniform_pack_k8v4(
     const int64_t key_stride_head = key_work.stride(1);
     const int64_t value_stride_token = value_work.stride(0);
     const int64_t value_stride_head = value_work.stride(1);
-    // ConvertType passes tensor storage_offset to ACL, and the GM_ADDR seen by
-    // the AscendC kernel is already at the logical tensor view. Keep the
-    // kernel-side offset at zero to avoid applying storage_offset twice.
     const int64_t key_storage_offset = 0;
     const int64_t value_storage_offset = 0;
     constexpr int64_t kMaxKernelStride = std::numeric_limits<uint32_t>::max();
@@ -154,7 +176,7 @@ void rq_uniform_pack_k8v4(
         aclnnRqUniformPackK8v4,
         key_work,
         value_work,
-        rotation_work,
+        rotation_work,  // nullopt when quant_mode=1 and caller omitted rotation
         slot_work,
         query_start_work,
         n_vec,
@@ -169,6 +191,7 @@ void rq_uniform_pack_k8v4(
         value_stride_head,
         key_storage_offset,
         value_storage_offset,
+        quant_mode,
         key_cache,
         value_cache);
 }

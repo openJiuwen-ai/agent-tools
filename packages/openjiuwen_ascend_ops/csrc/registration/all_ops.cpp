@@ -24,7 +24,7 @@ void register_all_ops() {
 
     (*g_registry)
         .op(c10::RegisterOperators::options()
-            .schema("openjiuwen::rq_uniform_pack_k8v4(Tensor key, Tensor value, Tensor slot_mapping, Tensor query_start_loc, Tensor rotation_t, Tensor key_cache, Tensor value_cache, int num_reqs, int block_size) -> ()")
+            .schema("openjiuwen::rq_uniform_pack_k8v4(Tensor key, Tensor value, Tensor slot_mapping, Tensor query_start_loc, Tensor? rotation_t, Tensor key_cache, Tensor value_cache, int num_reqs, int block_size, int quant_mode=0) -> ()")
             .kernel(c10::DispatchKey::PrivateUse1, &openjiuwen_ascend_ops::rq_uniform_pack_k8v4))
         .op(c10::RegisterOperators::options()
             .schema("openjiuwen::rq_uniform_pack_k4v4(Tensor key, Tensor value, Tensor slot_mapping, Tensor query_start_loc, Tensor rotation_t, Tensor key_cache, Tensor value_cache, int num_reqs, int block_size) -> ()")

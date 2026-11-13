@@ -63,7 +63,7 @@ memcheck 专属：
 
 ## 4. 标准流程
 
-1. 选择适用场景（Kernel 直调 `<<<>>>` / aclnn 单算子 API / PyTorch TorchAir / Triton-Ascend）。本仓库是 aclnn 单算子 API 场景（源仓库用 `tools/rq_uniform_pack_k8v4_perf` 作为 host runner，该工具未迁入）。
+1. 选择适用场景（Kernel 直调 `<<<>>>` / aclnn 单算子 API / PyTorch TorchAir / Triton-Ascend）。本仓库是 aclnn 单算子 API 场景（host runner 在 `packages/openjiuwen_ascend_ops/tools/rq_uniform_pack_k8v4_perf`）。
 2. 可选：配置 `-g -sanitizer` 编译选项重新编译算子（设 `RQ_UNIFORM_PACK_K8V4_DEBUG_LINE=ON` 后重跑 `csrc/build.sh`）。
 3. 运行 `mssanitizer` 命令。
 4. 解读 `--log-file` 报告或 `mindstudio_sanitizer_log/` 下的详细日志。

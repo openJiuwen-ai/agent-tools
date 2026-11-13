@@ -22,6 +22,9 @@ constexpr uint64_t TQ_MANUAL_BRIDGE_BYTES = 2;  // sizeof(half) on the GM bridge
 constexpr size_t TQ_LIBAPI_WORKSPACE_FALLBACK = 16 * 1024 * 1024;
 constexpr uint32_t TQ_PACK_TILING_KEY_DEFAULT = 0;
 constexpr uint32_t TQ_PACK_TILING_KEY_LARGE_CONTIG = 1;
+constexpr uint32_t TQ_PACK_TILING_KEY_A5_FP8 = 2;
+constexpr uint32_t TQ_QUANT_MODE_UNIFORM = 0;
+constexpr uint32_t TQ_QUANT_MODE_K8_FP8 = 1;
 constexpr int32_t TQ_PACK_MAX_BASEM = 32;
 constexpr uint32_t TQ_PACK_MAX_BATCH_M = 64;
 constexpr uint32_t TQ_PACK_LARGE_MIN_TOKENS = 128;
@@ -137,6 +140,7 @@ static ge::graphStatus RqUniformPackK8v4TilingFunc(gert::TilingContext* context)
     const int64_t* valueStrideHeadPtr = attrs->GetAttrPointer<int64_t>(9);
     const int64_t* keyStorageOffsetPtr = attrs->GetAttrPointer<int64_t>(10);
     const int64_t* valueStorageOffsetPtr = attrs->GetAttrPointer<int64_t>(11);
+    const int64_t* quantModePtr = attrs->GetAttrPointer<int64_t>(12);
     if (nVecPtr == nullptr || vecPerCorePtr == nullptr || numHeadsPtr == nullptr ||
         blockSizePtr == nullptr || numBlocksPtr == nullptr || numReqsPtr == nullptr ||
         keyStrideTokenPtr == nullptr || keyStrideHeadPtr == nullptr ||
@@ -156,6 +160,13 @@ static ge::graphStatus RqUniformPackK8v4TilingFunc(gert::TilingContext* context)
     const uint32_t keyStrideHead = static_cast<uint32_t>(*keyStrideHeadPtr);
     const uint32_t valueStrideToken = static_cast<uint32_t>(*valueStrideTokenPtr);
     const uint32_t valueStrideHead = static_cast<uint32_t>(*valueStrideHeadPtr);
+    const uint32_t quantMode = quantModePtr == nullptr
+                                   ? TQ_QUANT_MODE_UNIFORM
+                                   : static_cast<uint32_t>(*quantModePtr);
+    if (quantMode != TQ_QUANT_MODE_UNIFORM && quantMode != TQ_QUANT_MODE_K8_FP8) {
+        OPS_LOG_E(nodeName, "quant_mode must be 0 (UNIFORM) or 1 (TQ_K8_FP8), got %u", quantMode);
+        return ge::GRAPH_FAILED;
+    }
     if (*keyStorageOffsetPtr < 0 || *valueStorageOffsetPtr < 0) {
         OPS_LOG_E(nodeName, "key/value storage offsets must be non-negative");
         return ge::GRAPH_FAILED;
@@ -192,23 +203,137 @@ static ge::graphStatus RqUniformPackK8v4TilingFunc(gert::TilingContext* context)
     }
 
     auto ascendcPlatform = platform_ascendc::PlatformAscendC(context->GetPlatformInfo());
-    matmul_tiling::MultiCoreMatmulTiling tilingApi(ascendcPlatform);
     auto keyDesc = context->GetInputDesc(0);
     auto valueDesc = context->GetInputDesc(1);
-    auto rotationDesc = context->GetInputDesc(2);
-    if (keyDesc == nullptr || valueDesc == nullptr || rotationDesc == nullptr) {
-        OPS_LOG_E(nodeName, "input desc is null");
+    auto rotationDesc = context->GetOptionalInputDesc(2);
+    if (keyDesc == nullptr || valueDesc == nullptr) {
+        OPS_LOG_E(nodeName, "key/value input desc is null");
         return ge::GRAPH_FAILED;
     }
     const ge::DataType dataType = keyDesc->GetDataType();
     if ((dataType != ge::DT_FLOAT16 && dataType != ge::DT_BF16) ||
-        valueDesc->GetDataType() != dataType ||
-        rotationDesc->GetDataType() != dataType) {
-        OPS_LOG_E(nodeName, "key/value/rotation_t must share fp16 or bf16 dtype");
+        valueDesc->GetDataType() != dataType) {
+        OPS_LOG_E(nodeName, "key/value must share fp16 or bf16 dtype");
         return ge::GRAPH_FAILED;
     }
-    const matmul_tiling::DataType mmDataType = ToMatmulDtype(dataType);
+    if (quantMode == TQ_QUANT_MODE_UNIFORM) {
+        if (rotationDesc == nullptr) {
+            OPS_LOG_E(nodeName, "rotation_t is required when quant_mode=0 (UNIFORM)");
+            return ge::GRAPH_FAILED;
+        }
+        if (rotationDesc->GetDataType() != dataType) {
+            OPS_LOG_E(nodeName, "rotation_t dtype must match key/value");
+            return ge::GRAPH_FAILED;
+        }
+    }
 
+    // NpuArch lives in the global namespace (platform/soc_spec.h), not platform_ascendc::.
+    const bool isA5 = ascendcPlatform.GetCurNpuArch() == NpuArch::DAV_3510;
+    if (quantMode == TQ_QUANT_MODE_K8_FP8 && !isA5) {
+        OPS_LOG_E(nodeName, "quant_mode=1 (TQ_K8_FP8) requires A5 (DAV_3510)");
+        return ge::GRAPH_FAILED;
+    }
+
+    size_t* workspaces = context->GetWorkspaceSizes(1);
+    if (workspaces == nullptr) {
+        OPS_LOG_E(nodeName, "workspace size buffer is null");
+        return ge::GRAPH_FAILED;
+    }
+    size_t libapiSize = ascendcPlatform.GetLibApiWorkSpaceSize();
+    if (libapiSize == 0) {
+        libapiSize = TQ_LIBAPI_WORKSPACE_FALLBACK;
+    }
+
+    auto rawTiling = context->GetRawTilingData();
+    if (rawTiling == nullptr) {
+        OPS_LOG_E(nodeName, "raw tiling buffer is null");
+        return ge::GRAPH_FAILED;
+    }
+
+    if (quantMode == TQ_QUANT_MODE_K8_FP8) {
+        // A5 pure-AIV path: no Cube / GM bridge. Use distinct tiling-data class
+        // registered for tiling key 2 (cannot reuse key-0 class name).
+        RqUniformPackK8v4A5TilingData tilingData {};
+        tilingData.set_nVec(nVec);
+        tilingData.set_vecPerCore(vecPerCore);
+        tilingData.set_numHeads(numHeads);
+        tilingData.set_blockSize(blockSize);
+        tilingData.set_numBlocks(numBlocks);
+        tilingData.set_numReqs(numReqs);
+        tilingData.set_keyStrideToken(keyStrideToken);
+        tilingData.set_keyStrideHead(keyStrideHead);
+        tilingData.set_valueStrideToken(valueStrideToken);
+        tilingData.set_valueStrideHead(valueStrideHead);
+        tilingData.set_keyStorageOffset(keyStorageOffset);
+        tilingData.set_valueStorageOffset(valueStorageOffset);
+        tilingData.set_quantMode(quantMode);
+        tilingData.set_packD(keyStrideHead);
+
+        uint64_t ubSize = 0;
+        ascendcPlatform.GetCoreMemSize(platform_ascendc::CoreMemType::UB, ubSize);
+
+        const uint32_t aivNum = ascendcPlatform.GetCoreNumAiv();
+        if (aivNum == 0) {
+            OPS_LOG_E(nodeName, "invalid AIV count for A5 FP8 pack: aiv=%u", aivNum);
+            return ge::GRAPH_FAILED;
+        }
+        // Stripe (chunk, head) across AIVs. nVec is the upper bound on items
+        // (one token per chunk). workId 0 stays on core 0, so a short shape
+        // does not leave the first core empty the way a token-range split did.
+        const uint32_t numTokensA5 = numHeads == 0 ? 0 : nVec / numHeads;
+        const uint32_t workBound = numTokensA5 == 0 ? 1U : nVec;
+        const uint32_t dataCores = std::min(aivNum, workBound);
+        tilingData.set_dataCores(dataCores);
+        const uint32_t blockDim = ascendcPlatform.CalcTschBlockDim(dataCores, 0, dataCores);
+        workspaces[0] = libapiSize;
+
+        if (rawTiling->GetCapacity() < tilingData.GetDataSize()) {
+            OPS_LOG_E(nodeName, "raw tiling buffer is too small for A5 tiling");
+            return ge::GRAPH_FAILED;
+        }
+        tilingData.SaveToBuffer(rawTiling->GetData(), rawTiling->GetCapacity());
+        rawTiling->SetDataSize(tilingData.GetDataSize());
+        context->SetBlockDim(blockDim);
+        context->SetTilingKey(TQ_PACK_TILING_KEY_A5_FP8);
+        OPS_LOG_I(nodeName,
+                  "A5 FP8 tiling: key=%u blockDim=%u dataSize=%zu capacity=%zu "
+                  "ubSize=%lu libapiWs=%zu",
+                  TQ_PACK_TILING_KEY_A5_FP8, blockDim,
+                  static_cast<size_t>(tilingData.GetDataSize()),
+                  static_cast<size_t>(rawTiling->GetCapacity()),
+                  static_cast<unsigned long>(ubSize), workspaces[0]);
+        OPS_LOG_I(nodeName,
+                  "A5 FP8 fields: nVec=%u vecPerCore=%u numHeads=%u numTokens=%u "
+                  "blockSize=%u numBlocks=%u numReqs=%u dataCores=%u aivNum=%u "
+                  "packD=%u "
+                  "keyStride(token=%u,head=%u) valueStride(token=%u,head=%u) "
+                  "keyOff=%lu valueOff=%lu quantMode=%u",
+                  nVec, vecPerCore, numHeads, numTokensA5, blockSize, numBlocks, numReqs,
+                  dataCores, aivNum, keyStrideHead,
+                  keyStrideToken, keyStrideHead, valueStrideToken, valueStrideHead,
+                  static_cast<unsigned long>(keyStorageOffset),
+                  static_cast<unsigned long>(valueStorageOffset), quantMode);
+        return ge::GRAPH_SUCCESS;
+    }
+
+    RqUniformPackK8v4TilingData tilingData {};
+    tilingData.set_nVec(nVec);
+    tilingData.set_vecPerCore(vecPerCore);
+    tilingData.set_numHeads(numHeads);
+    tilingData.set_blockSize(blockSize);
+    tilingData.set_numBlocks(numBlocks);
+    tilingData.set_numReqs(numReqs);
+    tilingData.set_keyStrideToken(keyStrideToken);
+    tilingData.set_keyStrideHead(keyStrideHead);
+    tilingData.set_valueStrideToken(valueStrideToken);
+    tilingData.set_valueStrideHead(valueStrideHead);
+    tilingData.set_keyStorageOffset(keyStorageOffset);
+    tilingData.set_valueStorageOffset(valueStorageOffset);
+    tilingData.set_quantMode(quantMode);
+    tilingData.set_packD(keyStrideHead);
+
+    matmul_tiling::MultiCoreMatmulTiling tilingApi(ascendcPlatform);
+    const matmul_tiling::DataType mmDataType = ToMatmulDtype(dataType);
     const uint32_t mPad = AlignUp16(vecPerCore);
     tilingApi.SetDim(2);
     tilingApi.SetAType(
@@ -230,7 +355,6 @@ static ge::graphStatus RqUniformPackK8v4TilingFunc(gert::TilingContext* context)
         matmul_tiling::CubeFormat::ND,
         mmDataType);
 
-    RqUniformPackK8v4TilingData tilingData {};
     ge::graphStatus tilingStatus = FillKfcCubeTiling(
         ascendcPlatform, tilingApi, mPad, tilingData.cubeTiling);
     if (tilingStatus != ge::GRAPH_SUCCESS) {
@@ -238,21 +362,6 @@ static ge::graphStatus RqUniformPackK8v4TilingFunc(gert::TilingContext* context)
         return ge::GRAPH_FAILED;
     }
 
-    tilingData.set_nVec(nVec);
-    tilingData.set_vecPerCore(vecPerCore);
-    tilingData.set_numHeads(numHeads);
-    tilingData.set_blockSize(blockSize);
-    tilingData.set_numBlocks(numBlocks);
-    tilingData.set_numReqs(numReqs);
-    tilingData.set_keyStrideToken(keyStrideToken);
-    tilingData.set_keyStrideHead(keyStrideHead);
-    tilingData.set_valueStrideToken(valueStrideToken);
-    tilingData.set_valueStrideHead(valueStrideHead);
-    tilingData.set_keyStorageOffset(keyStorageOffset);
-    tilingData.set_valueStorageOffset(valueStorageOffset);
-
-    // MIX 1C2V per data-parallel group.  Use all physical groups that the
-    // current SOC can provide instead of fixing the kernel to 16 groups.
     const uint32_t kfcAicNum = 1;
     const uint32_t kfcAivNum = 2;
     const uint32_t aicNum = ascendcPlatform.GetCoreNumAic();
@@ -277,29 +386,6 @@ static ge::graphStatus RqUniformPackK8v4TilingFunc(gert::TilingContext* context)
         ? TQ_PACK_TILING_KEY_LARGE_CONTIG
         : TQ_PACK_TILING_KEY_DEFAULT;
 
-    auto rawTiling = context->GetRawTilingData();
-    if (rawTiling == nullptr || rawTiling->GetCapacity() < tilingData.GetDataSize()) {
-        OPS_LOG_E(nodeName, "raw tiling buffer is null or too small");
-        return ge::GRAPH_FAILED;
-    }
-    tilingData.SaveToBuffer(rawTiling->GetData(), rawTiling->GetCapacity());
-    rawTiling->SetDataSize(tilingData.GetDataSize());
-
-    size_t* workspaces = context->GetWorkspaceSizes(1);
-    if (workspaces == nullptr) {
-        OPS_LOG_E(nodeName, "workspace size buffer is null");
-        return ge::GRAPH_FAILED;
-    }
-    // Workspace = system/libapi workspace (platform-provided, NOT hardcoded) +
-    // this op's own manual C-bridge region. The libapi size backs SetSysWorkspace
-    // /GetSysWorkSpacePtr; the manual region backs cWorkGm (kernel indexes
-    // rawWorkspace + TQ_MANUAL_WORKSPACE_BYTE_OFFSET). Under-allocating the
-    // manual region makes the AIC Fixpipe / AIV DataCopy walk off the end of
-    // cWorkGm into unallocated GM (the BATCH_M=64 aicore exception).
-    size_t libapiSize = ascendcPlatform.GetLibApiWorkSpaceSize();
-    if (libapiSize == 0) {
-        libapiSize = TQ_LIBAPI_WORKSPACE_FALLBACK;
-    }
     const uint64_t manualBytesPerCore =
         TQ_MANUAL_WORKSPACE_BUFFER_COUNT_HOST *
         (TQ_MANUAL_ROT_TILE_M_HOST * static_cast<uint64_t>(keyStrideHead)) *
@@ -308,14 +394,21 @@ static ge::graphStatus RqUniformPackK8v4TilingFunc(gert::TilingContext* context)
         TQ_MANUAL_WORKSPACE_BYTE_OFFSET_HOST +
         static_cast<uint64_t>(dataCores) * manualBytesPerCore;
     workspaces[0] = static_cast<size_t>(libapiSize + manualWorkspaceBytes);
-    context->SetBlockDim(blockDim);
-    context->SetTilingKey(tilingKey);
     OPS_LOG_I(nodeName,
-              "BR-pack-k8v4 tiling: nVec=%u vecPerCore=%u heads=%u blockSize=%u "
+              "path=full quant_mode=0 nVec=%u vecPerCore=%u heads=%u blockSize=%u "
               "blocks=%u reqs=%u dataCores=%u libapi=%zu manual=%lu ws=%zu key=%u",
               nVec, vecPerCore, numHeads, blockSize, numBlocks, numReqs,
               dataCores, libapiSize, static_cast<unsigned long>(manualWorkspaceBytes),
               workspaces[0], tilingKey);
+
+    if (rawTiling->GetCapacity() < tilingData.GetDataSize()) {
+        OPS_LOG_E(nodeName, "raw tiling buffer is too small");
+        return ge::GRAPH_FAILED;
+    }
+    tilingData.SaveToBuffer(rawTiling->GetData(), rawTiling->GetCapacity());
+    rawTiling->SetDataSize(tilingData.GetDataSize());
+    context->SetBlockDim(blockDim);
+    context->SetTilingKey(tilingKey);
     return ge::GRAPH_SUCCESS;
 }
 

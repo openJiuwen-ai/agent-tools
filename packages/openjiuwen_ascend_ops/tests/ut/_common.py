@@ -13,11 +13,16 @@ HEAD_SIZE = 128
 BLOCK_SIZE = 16
 SEED = 2026
 
-# k8v4: key int8 Scheme A (D+4)/row; value int4 (D/2+4)/row
+# k8v4 mode0: key int8 Scheme A (D+4)/row; value int4 (D/2+4)/row
 K8V4_KEY_BYTES_PER_ROW = HEAD_SIZE + 4  # 132
 K8V4_VAL_BYTES_PER_ROW = HEAD_SIZE // 2 + 4  # 68
 K8V4_KEY_TILE = 16 * K8V4_KEY_BYTES_PER_ROW  # 2112
 K8V4_VAL_TILE = 16 * K8V4_VAL_BYTES_PER_ROW  # 1088
+# k8v4 mode1 (A5 TQ_K8_FP8): key fp8 only D/row; value same U4
+K8V4_KEY_BYTES_PER_ROW_FP8 = HEAD_SIZE  # 128
+K8V4_KEY_TILE_FP8 = 16 * K8V4_KEY_BYTES_PER_ROW_FP8  # 2048
+QUANT_MODE_UNIFORM = 0
+QUANT_MODE_K8_FP8 = 1
 
 # k4v4: key+value both int4 (D/2+4)/row
 K4V4_BYTES_PER_ROW = HEAD_SIZE // 2 + 4  # 68
@@ -107,6 +112,35 @@ def decode_k8v4_key_row(
     return base + code * step
 
 
+def decode_k8v4_key_row_fp8(
+    block: torch.Tensor,
+    pos: int,
+    *,
+    head_size: int,
+) -> torch.Tensor:
+    """mode1: Key codes are raw float8_e4m3fn bytes, no meta."""
+    raw = block[pos * head_size:(pos + 1) * head_size].contiguous()
+    return raw.view(torch.float8_e4m3fn).float()
+
+
+def encode_k8v4_key_fp8_cpu(rows: torch.Tensor) -> torch.Tensor:
+    """CPU golden for TQ_K8_FP8 Key: cast to float8_e4m3fn → uint8 bytes."""
+    return rows.float().to(torch.float8_e4m3fn).view(torch.uint8).contiguous()
+
+
+def encode_value_u4_cpu(rows: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """CPU golden for signed int4 Value (matches pack EncodeValueBatch)."""
+    ymin = rows.amin(-1)
+    ymax = rows.amax(-1)
+    step = ((ymax - ymin) / 15.0).clamp_min(1e-6)
+    q = torch.round((rows - ymin.unsqueeze(-1)) / step.unsqueeze(-1)).clamp(0, 15)
+    signed = (q - 8).to(torch.int8)
+    low = signed[..., 0::2] & 0x0F
+    high = signed[..., 1::2] & 0x0F
+    packed = (low | (high << 4)).to(torch.uint8)
+    return packed, ymin.to(torch.float16), step.to(torch.float16)
+
+
 def build_block_table(num_tokens: int, block_size: int = BLOCK_SIZE) -> tuple[torch.Tensor, int]:
     nblocks = (num_tokens + block_size - 1) // block_size
     return torch.arange(nblocks, dtype=torch.int32).reshape(1, -1), nblocks
@@ -117,11 +151,12 @@ def pack_kv(
     pack_name: str,
     key: torch.Tensor,
     value: torch.Tensor,
-    rotation_t: torch.Tensor,
+    rotation_t: torch.Tensor | None,
     *,
     key_stride: int,
     val_stride: int,
     block_size: int = BLOCK_SIZE,
+    quant_mode: int = QUANT_MODE_UNIFORM,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     device = key.device
     t, h = key.shape[0], key.shape[1]
@@ -133,14 +168,24 @@ def pack_kv(
         value,
         torch.arange(t, dtype=torch.int32, device=device),
         torch.tensor([0, t], dtype=torch.int32, device=device),
-        rotation_t,
+        rotation_t,  # optional when quant_mode=1 (A5 FP8)
         key_cache,
         value_cache,
         1,
         block_size,
+        quant_mode,
     )
     torch.npu.synchronize()
     return key_cache, value_cache
+
+
+def key_tile_bytes(head_size: int, quant_mode: int = QUANT_MODE_UNIFORM) -> int:
+    row = head_size if quant_mode == QUANT_MODE_K8_FP8 else head_size + 4
+    return 16 * row
+
+
+def val_tile_bytes(head_size: int) -> int:
+    return 16 * (head_size // 2 + 4)
 
 
 def golden_decode_attn(

@@ -1,8 +1,13 @@
-"""UT for rq_uniform_pack_k8v4: contract + golden QDQ + perf."""
+"""UT for rq_uniform_pack_k8v4 mode0 (A2/A3 UNIFORM Haar+SchemeA).
+
+A5 TQ_K8_FP8 (quant_mode=1) lives in test_rq_uniform_pack_k8v4_a5.py —
+run that file alone on ascend950 to avoid MIX-path interference.
+"""
 
 from __future__ import annotations
 
 import logging
+
 import pytest
 import torch
 
@@ -18,7 +23,32 @@ def test_pack_k8v4_layout_contract():
     assert C.K8V4_KEY_TILE == 2112
     assert C.K8V4_VAL_TILE == 1088
     assert C.K8V4_KEY_BYTES_PER_ROW == 132
+    assert C.key_tile_bytes(C.HEAD_SIZE, C.QUANT_MODE_UNIFORM) == 2112
+    assert C.val_tile_bytes(C.HEAD_SIZE) == 1088
     assert C.BLOCK_SIZE % 16 == 0
+
+
+def test_pack_k8v4_value_u4_cpu_golden():
+    torch.manual_seed(C.SEED + 1)
+    rows = torch.randn(4, C.HEAD_SIZE, dtype=torch.float32)
+    packed, vmin, vstep = C.encode_value_u4_cpu(rows)
+    assert packed.shape == (4, C.HEAD_SIZE // 2)
+    block = torch.zeros(C.BLOCK_SIZE * C.K8V4_VAL_BYTES_PER_ROW, dtype=torch.uint8)
+    for pos in range(4):
+        block[pos * (C.HEAD_SIZE // 2):(pos + 1) * (C.HEAD_SIZE // 2)] = packed[pos]
+        # 0-dim half cannot .view(uint8); keep a 1-element tensor.
+        block[
+            C.BLOCK_SIZE * (C.HEAD_SIZE // 2) + pos * 2:
+            C.BLOCK_SIZE * (C.HEAD_SIZE // 2) + pos * 2 + 2
+        ] = vmin[pos:pos + 1].contiguous().view(torch.uint8)
+        block[
+            C.BLOCK_SIZE * (C.HEAD_SIZE // 2 + 2) + pos * 2:
+            C.BLOCK_SIZE * (C.HEAD_SIZE // 2 + 2) + pos * 2 + 2
+        ] = vstep[pos:pos + 1].contiguous().view(torch.uint8)
+    y = C.decode_int4_row(
+        block, 0, block_size=C.BLOCK_SIZE, head_size=C.HEAD_SIZE, dtype=torch.float16
+    )
+    assert (y - rows[0]).abs().mean().item() < 0.35
 
 
 def test_pack_k8v4_registered(openjiuwen_ops):
@@ -27,7 +57,7 @@ def test_pack_k8v4_registered(openjiuwen_ops):
 
 @pytest.mark.npu
 @pytest.mark.golden
-def test_pack_k8v4_golden_qdq(openjiuwen_ops, npu_device):
+def test_pack_k8v4_golden_qdq_mode0(openjiuwen_ops, npu_device):
     require_op(openjiuwen_ops, OP)
     device = npu_device
     dtype = torch.float16
@@ -44,6 +74,7 @@ def test_pack_k8v4_golden_qdq(openjiuwen_ops, npu_device):
         eye,
         key_stride=C.K8V4_KEY_TILE,
         val_stride=C.K8V4_VAL_TILE,
+        quant_mode=C.QUANT_MODE_UNIFORM,
     )
     bt, _ = C.build_block_table(t)
     key_cpu, val_cpu = key.float().cpu(), value.float().cpu()
@@ -56,14 +87,13 @@ def test_pack_k8v4_golden_qdq(openjiuwen_ops, npu_device):
         yv = C.decode_int4_row(
             value_cache[blk, 0].cpu(), off, block_size=C.BLOCK_SIZE, head_size=C.HEAD_SIZE, dtype=dtype
         )
-        # Scheme A / int4 QDQ: relative error stays bounded under identity R.
         assert (yk - key_cpu[pos, 0]).abs().mean().item() < 0.15
         assert (yv - val_cpu[pos, 0]).abs().mean().item() < 0.25
 
 
 @pytest.mark.npu
 @pytest.mark.perf
-def test_pack_k8v4_perf(openjiuwen_ops, npu_device):
+def test_pack_k8v4_perf_mode0(openjiuwen_ops, npu_device):
     require_op(openjiuwen_ops, OP)
     device = npu_device
     dtype = torch.float16
@@ -79,9 +109,9 @@ def test_pack_k8v4_perf(openjiuwen_ops, npu_device):
 
     def run():
         getattr(openjiuwen_ops, OP)(
-            key, value, slots, qsl, rot, key_cache, value_cache, 1, C.BLOCK_SIZE
+            key, value, slots, qsl, rot, key_cache, value_cache, 1, C.BLOCK_SIZE, 0
         )
 
     ms = C.timed_ms(run, warmup=2, iters=8)
     assert ms > 0.0
-    logger.info(f"[perf] {OP}: {ms:.3f} ms (T={t}, H={h})")
+    logger.info("[perf] %s mode0: %.3f ms (T=%d, H=%d)", OP, ms, t, h)

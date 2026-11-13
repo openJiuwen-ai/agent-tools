@@ -25,8 +25,9 @@ public:
             .Format({ge::FORMAT_ND, ge::FORMAT_ND})
             .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND})
             .IgnoreContiguous();
+        // Required for quant_mode=0 (Haar); unused / optional for quant_mode=1 (A5 FP8).
         this->Input("rotation_t")
-            .ParamType(REQUIRED)
+            .ParamType(OPTIONAL)
             .DataType({ge::DT_FLOAT16, ge::DT_BF16})
             .Format({ge::FORMAT_ND, ge::FORMAT_ND})
             .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND})
@@ -65,6 +66,8 @@ public:
         this->Attr("value_stride_head").Int();
         this->Attr("key_storage_offset").Int();
         this->Attr("value_storage_offset").Int();
+        // 0=UNIFORM (A2/A3 Haar+SchemeA), 1=TQ_K8_FP8 (A5 pure AIV)
+        this->Attr("quant_mode").AttrType(REQUIRED).Int(0);
 
         OpAICoreConfig aicoreConfig;
         aicoreConfig.DynamicCompileStaticFlag(true)
@@ -80,6 +83,9 @@ public:
 
         this->AICore().AddConfig("ascend910_93", aicoreConfig);
         this->AICore().AddConfig("ascend910b", aicoreConfigA2);
+#ifdef VLLM_ASCEND_950_SOC_CONFIG
+        this->AICore().AddConfig(VLLM_ASCEND_950_SOC_CONFIG, aicoreConfig);
+#endif
     }
 };
 

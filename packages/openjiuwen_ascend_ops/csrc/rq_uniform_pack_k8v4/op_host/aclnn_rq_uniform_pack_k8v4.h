@@ -26,6 +26,7 @@ aclnnStatus aclnnRqUniformPackK8v4GetWorkspaceSize(
     int64_t valueStrideHead,
     int64_t keyStorageOffset,
     int64_t valueStorageOffset,
+    int64_t quantMode,
     const aclTensor* keyCache,
     const aclTensor* valueCache,
     uint64_t* workspaceSize,

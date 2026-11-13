@@ -111,6 +111,10 @@ static constexpr uint32_t TQ_VAL_ENCODED_BATCH_BYTES =
     TQ_VAL_ENCODED_VSTEP_BATCH_BYTE_OFFSET +
     TQ_VECTOR_BATCH * sizeof(uint16_t);
 
+// quant_mode: 0=UNIFORM (A2/A3 Haar+SchemeA), 1=TQ_K8_FP8 (A5, no Key meta)
+static constexpr uint32_t TQ_QUANT_MODE_UNIFORM = 0;
+static constexpr uint32_t TQ_QUANT_MODE_K8_FP8 = 1;
+
 __aicore__ inline uint32_t TqKeyCodeBytes(uint32_t packD)
 {
     return packD;
@@ -123,9 +127,21 @@ __aicore__ inline uint32_t TqKeyRowBytes(uint32_t packD)
 {
     return packD + 2U * TQ_ROW_META_BYTES;
 }
+__aicore__ inline uint32_t TqKeyRowBytes(uint32_t packD, uint32_t quantMode)
+{
+    return quantMode == TQ_QUANT_MODE_K8_FP8 ? packD : TqKeyRowBytes(packD);
+}
 __aicore__ inline uint32_t TqValRowBytes(uint32_t packD)
 {
     return packD / 2U + 2U * TQ_ROW_META_BYTES;
+}
+__aicore__ inline uint32_t TqKeyTileBytes(uint32_t packD, uint32_t quantMode)
+{
+    return TQ_BLOCK_ROWS * TqKeyRowBytes(packD, quantMode);
+}
+__aicore__ inline uint32_t TqValTileBytes(uint32_t packD)
+{
+    return TQ_BLOCK_ROWS * TqValRowBytes(packD);
 }
 __aicore__ inline uint32_t TqKeyEncodedBaseOff(uint32_t packD)
 {

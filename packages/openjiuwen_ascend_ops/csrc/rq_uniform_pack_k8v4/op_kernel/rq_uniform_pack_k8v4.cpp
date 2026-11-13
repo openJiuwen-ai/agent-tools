@@ -1,12 +1,7 @@
 // Fused rq-uniform pack for KV cache (fp16/bf16).
 //
-// Reference (Python):
-//   y = x @ R^T                           # batched [M, D] @ [D, D]
-//   key:   sign reversal + 7-bit uniform quantization
-//   value: 4-bit uniform quantization, processed four rows at a time
-//
-// Per AICore: rotate all assigned rows with one matmul [M,128]@[128,128],
-// not M separate M=1 matmuls (avoids Cube padding waste).
+// tilingKey 0/1: A2/A3 MIX_AIC_1_2 — Haar rotate + Scheme A Key + U4 Value
+// tilingKey 2:   A5 AIV_ONLY — TQ_K8_FP8 Key (no rotate) + U4 Value
 
 #include "kernel_operator.h"
 #include "kernel_tiling/kernel_tiling.h"
@@ -15,6 +10,11 @@
 #include "rq_uniform_pack_k8v4_common.h"
 #include "rq_uniform_pack_k8v4_aiv.h"
 #include "rq_uniform_pack_k8v4_aic.h"
+// fp8 Cast is dav_3510 only. ascend910b (NPU_ARCH 2201) compiles this same
+// translation unit and has no __fp8e4m3 CastIntrinsicsImpl.
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+#include "arch35/pack_k8v4_aiv.h"
+#endif
 
 using namespace AscendC;
 
@@ -28,6 +28,45 @@ extern "C" __global__ __aicore__ void rq_uniform_pack_k8v4(
     GM_ADDR value_cache,
     GM_ADDR workspace,
     GM_ADDR tiling) {
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    if (TILING_KEY_IS(2)) {
+        KERNEL_TASK_TYPE(2, KERNEL_TYPE_AIV_ONLY);
+        GET_TILING_DATA_WITH_STRUCT(
+            RqUniformPackK8v4A5TilingData, tilingData, tiling);
+        auto* wsPtr = reinterpret_cast<__gm__ uint8_t*>(workspace);
+        if (wsPtr != nullptr) {
+            AscendC::SetSysWorkspace(wsPtr);
+        }
+        const uint32_t numTokens =
+            tilingData.numHeads == 0 ? 0 : tilingData.nVec / tilingData.numHeads;
+        const uint32_t packD =
+            tilingData.packD != 0 ? tilingData.packD : tilingData.keyStrideHead;
+#if (defined(ORIG_DTYPE_KEY) && (ORIG_DTYPE_KEY == DT_BF16)) || \
+    (defined(DTYPE_KEY) && (DTYPE_KEY == DT_BF16))
+        rq_uniform::arch35::RunPackK8v4A5<bfloat16_t>(
+#else
+        rq_uniform::arch35::RunPackK8v4A5<half>(
+#endif
+            key,
+            value,
+            slot_mapping,
+            key_cache,
+            value_cache,
+            workspace,
+            numTokens,
+            tilingData.numHeads,
+            packD,
+            tilingData.blockSize,
+            tilingData.numBlocks,
+            tilingData.dataCores,
+            tilingData.keyStrideToken,
+            tilingData.keyStrideHead,
+            tilingData.valueStrideToken,
+            tilingData.valueStrideHead);
+        return;
+    }
+#endif
+
     if (TILING_KEY_IS(0)) {
         KERNEL_TASK_TYPE(0, KERNEL_TYPE_MIX_AIC_1_2);
     } else if (TILING_KEY_IS(1)) {

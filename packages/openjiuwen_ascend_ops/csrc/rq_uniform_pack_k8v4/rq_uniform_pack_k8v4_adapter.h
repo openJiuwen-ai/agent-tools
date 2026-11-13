@@ -10,11 +10,12 @@ void rq_uniform_pack_k8v4(
     const at::Tensor &value,
     const at::Tensor &slot_mapping,
     const at::Tensor &query_start_loc,
-    const at::Tensor &rotation_t,
+    const c10::optional<at::Tensor> &rotation_t,
     at::Tensor &key_cache,
     at::Tensor &value_cache,
     int64_t num_reqs,
-    int64_t block_size);
+    int64_t block_size,
+    int64_t quant_mode = 0);
 
 }
 
