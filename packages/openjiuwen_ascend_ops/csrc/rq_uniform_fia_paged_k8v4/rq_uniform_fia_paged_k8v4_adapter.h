@@ -13,8 +13,8 @@ at::Tensor rq_uniform_fia_paged_k8v4(
     at::IntArrayRef actual_seq_len_q,
     at::IntArrayRef actual_seq_len_kv,
     const c10::optional<at::Tensor> &atten_mask,
-    const at::Tensor &rotation_key,
-    const at::Tensor &rotation_value,
+    const c10::optional<at::Tensor> &rotation_key,
+    const c10::optional<at::Tensor> &rotation_value,
     int64_t num_heads,
     int64_t num_kv_heads,
     int64_t head_size,
@@ -23,7 +23,8 @@ at::Tensor rq_uniform_fia_paged_k8v4(
     int64_t pre_tokens,
     int64_t next_tokens,
     int64_t sparse_mode,
-    c10::optional<at::Tensor> out_opt);
+    c10::optional<at::Tensor> out_opt,
+    int64_t quant_mode = 0);
 
 }
 

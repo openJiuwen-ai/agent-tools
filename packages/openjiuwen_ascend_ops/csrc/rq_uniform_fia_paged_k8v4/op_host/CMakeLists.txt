@@ -28,6 +28,8 @@ add_ops_compile_options(
                 -I${CMAKE_CURRENT_SOURCE_DIR}/../op_kernel
                 -I${CMAKE_CURRENT_SOURCE_DIR}/../op_kernel/vendored
                 -I${CMAKE_CURRENT_SOURCE_DIR}/../op_kernel/vendored/arch32
+                -I${CMAKE_CURRENT_SOURCE_DIR}/../op_kernel/arch35
+                -I${CMAKE_CURRENT_SOURCE_DIR}/../op_kernel/arch35/common
                 -I${CMAKE_CURRENT_SOURCE_DIR}
 )
 
@@ -37,6 +39,11 @@ target_sources(op_host_aclnn PRIVATE
 
 target_sources(optiling PRIVATE
         rq_uniform_fia_paged_k8v4_tiling.cpp
+        arch35/fused_infer_attention_score_tiling_impl.cpp
+        arch35/fia_tiling_info.cpp
+        arch35/rq_fia_a5_info_parser.cpp
+        arch35/rq_fia_a5_checker.cpp
+        arch35/rq_fia_a5_tiling.cpp
         ${CMAKE_SOURCE_DIR}/common_fia_split/split_core.cpp
         # split_core.cpp is the SOLE TU providing optiling::SplitCore and lives
         # in csrc/common_fia_split (compiled by oscar_fia_paged_k2v2). This op
@@ -53,17 +60,42 @@ target_compile_definitions(optiling PRIVATE
 if (NOT BUILD_OPEN_PROJECT)
     target_sources(opmaster_ct PRIVATE
         rq_uniform_fia_paged_k8v4_tiling.cpp
+        arch35/fused_infer_attention_score_tiling_impl.cpp
+        arch35/fia_tiling_info.cpp
+        arch35/rq_fia_a5_info_parser.cpp
+        arch35/rq_fia_a5_checker.cpp
+        arch35/rq_fia_a5_tiling.cpp
     )
     target_compile_definitions(opmaster_ct PRIVATE
             BR_S2_BASICSIZE_IS_1024=${_BR_S2_BASICSIZE_IS_1024}
     )
 endif ()
 
+# err/ops_err.h lives under kv_quant_sfa_v2 (shared host-log shim). A5 builds that
+# only enable this op still need that include root.
 target_include_directories(optiling PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/arch35
+        ${CMAKE_CURRENT_SOURCE_DIR}/arch35/common
         ${CMAKE_CURRENT_SOURCE_DIR}/../op_kernel
+        ${CMAKE_CURRENT_SOURCE_DIR}/../op_kernel/arch35
+        ${CMAKE_CURRENT_SOURCE_DIR}/../op_kernel/arch35/common
         ${CMAKE_SOURCE_DIR}/common_fia_split
+        ${CMAKE_SOURCE_DIR}/rq_uniform_kv_quant_sparse_flash_attention_v2/op_host
 )
+
+if (NOT BUILD_OPEN_PROJECT)
+    target_include_directories(opmaster_ct PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/arch35
+        ${CMAKE_CURRENT_SOURCE_DIR}/arch35/common
+        ${CMAKE_CURRENT_SOURCE_DIR}/../op_kernel
+        ${CMAKE_CURRENT_SOURCE_DIR}/../op_kernel/arch35
+        ${CMAKE_CURRENT_SOURCE_DIR}/../op_kernel/arch35/common
+        ${CMAKE_SOURCE_DIR}/common_fia_split
+        ${CMAKE_SOURCE_DIR}/rq_uniform_kv_quant_sparse_flash_attention_v2/op_host
+    )
+endif ()
 
 file(GLOB _BR_FIA_PAGED_K8V4_Aclnn_header
         "${CMAKE_CURRENT_SOURCE_DIR}/aclnn_rq_uniform_fia_paged_k8v4.h")

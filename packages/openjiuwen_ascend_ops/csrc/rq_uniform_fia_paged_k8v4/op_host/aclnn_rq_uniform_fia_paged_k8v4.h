@@ -10,9 +10,10 @@ extern "C" {
 /**
  * RqUniform FIA Paged K8V4 fused attention (vllm-ascend custom op).
  *
- * key/value_cache : uint8 pack layout [num_blocks, num_kv_heads, packed_bytes]
- * rotation_key/value : fp16 [D, D]
+ * key/value_cache : uint8. quant_mode=0 is the A2 pack. quant_mode=2 is int8 BNBD.
+ * rotation_key/value : fp16 [D, D] for quant_mode=0; empty for quant_mode=2
  * atten_mask      : optional int8/fp16 mask (nullptr when sparse_mode=0)
+ * quant_mode      : 0 = A2, 2 = A5 antiquant port (scale is fixed at 1)
  */
 __attribute__((visibility("default")))
 aclnnStatus aclnnRqUniformFiaPagedK8v4GetWorkspaceSize(
@@ -33,6 +34,7 @@ aclnnStatus aclnnRqUniformFiaPagedK8v4GetWorkspaceSize(
     int64_t preTokens,
     int64_t nextTokens,
     int64_t sparseMode,
+    int64_t quantMode,
     const aclTensor* attentionOut,
     uint64_t* workspaceSize,
     aclOpExecutor** executor);

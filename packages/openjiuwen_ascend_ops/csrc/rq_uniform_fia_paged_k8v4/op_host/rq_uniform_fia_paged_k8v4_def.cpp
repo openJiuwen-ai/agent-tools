@@ -6,9 +6,12 @@
 /*
  * RqUniform FIA Paged K8V4 OpDef (standalone op: RqUniformFiaPagedK8v4).
  *
- * key/value_cache : uint8 PA pack layout [num_blocks, num_kv_heads, packed_bytes]
- * query / rotation_key / rotation_value / attention_out : fp16 or bf16
- *   (pack metadata dtype must match query dtype)
+ * key/value_cache : uint8. quant_mode=0 is the A2 pack layout.
+ *   quant_mode=2 is int8 BNBD, last dim = block_size * D, no scale input.
+ * query / attention_out : fp16 or bf16. quant_mode=2 is fp16 only.
+ * rotation_key / rotation_value : required [D, D] when quant_mode=0.
+ *   quant_mode=2 ignores them (pass empty).
+ * quant_mode: 0 = A2, 1 = reserved K8 fp8+U4 (rejected), 2 = A5 antiquant port.
  */
 
 #include "register/op_def_registry.h"
@@ -62,13 +65,13 @@ public:
             .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND})
             .AutoContiguous();
         this->Input("rotation_key")
-            .ParamType(REQUIRED)
+            .ParamType(OPTIONAL)
             .DataType({ge::DT_FLOAT16, ge::DT_BF16})
             .Format({ge::FORMAT_ND, ge::FORMAT_ND})
             .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND})
             .AutoContiguous();
         this->Input("rotation_value")
-            .ParamType(REQUIRED)
+            .ParamType(OPTIONAL)
             .DataType({ge::DT_FLOAT16, ge::DT_BF16})
             .Format({ge::FORMAT_ND, ge::FORMAT_ND})
             .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND})
@@ -89,6 +92,7 @@ public:
         this->Attr("pre_tokens").AttrType(OPTIONAL).Int(2147483647);
         this->Attr("next_tokens").AttrType(OPTIONAL).Int(2147483647);
         this->Attr("sparse_mode").AttrType(OPTIONAL).Int(0);
+        this->Attr("quant_mode").AttrType(REQUIRED).Int(0);
 
         OpAICoreConfig aicoreConfig;
         aicoreConfig.DynamicCompileStaticFlag(true)
@@ -104,6 +108,9 @@ public:
 
         this->AICore().AddConfig("ascend910_93", aicoreConfig);
         this->AICore().AddConfig("ascend910b", aicoreConfigA2);
+#ifdef VLLM_ASCEND_950_SOC_CONFIG
+        this->AICore().AddConfig(VLLM_ASCEND_950_SOC_CONFIG, aicoreConfig);
+#endif
     }
 };
 

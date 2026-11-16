@@ -10,6 +10,7 @@
 #include "tiling/tiling_api.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "rq_uniform_fia_paged_k8v4_tiling.h"
+#include "arch35/rq_fia_a5_tiling.h"
 #include "split_core.h"  // shared TU in csrc/common_fia_split (sole provider of optiling::SplitCore)
 
 #include <algorithm>
@@ -51,6 +52,7 @@ constexpr uint32_t kSInnerSizeCompressCap = 1024;
 constexpr size_t kAttrIdxPreTokens = 5;
 constexpr size_t kAttrIdxNextTokens = 6;
 constexpr size_t kAttrIdxSparseMode = 7;
+constexpr size_t kAttrIdxQuantMode = 8;
 constexpr size_t kInputIdxAttenMask = 6;
 constexpr uint32_t kBrBlockRows = 16;
 
@@ -234,6 +236,15 @@ static ge::graphStatus RqUniformFiaPagedK8v4TilingFunc(gert::TilingContext* cont
     auto attrs = context->GetAttrs();
     if (attrs == nullptr) {
         OPS_LOG_E(nodeName, "attrs is null");
+        return ge::GRAPH_FAILED;
+    }
+    const int64_t* quantModePtr = attrs->GetAttrPointer<int64_t>(kAttrIdxQuantMode);
+    const int64_t quantMode = quantModePtr == nullptr ? kRqFiaQuantModeA2 : *quantModePtr;
+    if (quantMode == kRqFiaQuantModeA5Port) {
+        return RqFiaA5PortTiling(context);
+    }
+    if (quantMode != kRqFiaQuantModeA2) {
+        OPS_LOG_E(nodeName, "quant_mode=%ld is not implemented (0=A2, 2=A5 antiquant port)", quantMode);
         return ge::GRAPH_FAILED;
     }
 
