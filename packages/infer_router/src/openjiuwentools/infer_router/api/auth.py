@@ -21,7 +21,7 @@ async def verify_api_key(credentials: HTTPAuthorizationCredentials = security):
         )
 
     if credentials.credentials != settings.api_key:
-        logger.warning(f"Invalid API key: {credentials.credentials}")
+        logger.warning(f"Invalid API key: {credentials.credentials[:4]}***")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key",
