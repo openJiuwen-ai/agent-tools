@@ -15,7 +15,6 @@
 
 import asyncio
 import time
-from typing import Any
 
 import httpx
 from loguru import logger
