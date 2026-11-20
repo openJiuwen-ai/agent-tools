@@ -862,7 +862,7 @@ class PrefixAwareAlgorithm(LoadBalancingAlgorithm):
             + self.no_hit_lru_weight * lru
         )
         logger.debug(
-            "[PrefixAware] %s: prefix=%.3f kv=%.3f queue=%.3f lru=%.3f total=%.3f",
+            "[PrefixAware] {}: prefix={:.3f} kv={:.3f} queue={:.3f} lru={:.3f} total={:.3f}",
             worker.worker_id, prefix, kv, queue, lru, total,
         )
         return total
@@ -921,7 +921,7 @@ class PrefixAwareAlgorithm(LoadBalancingAlgorithm):
         )
         elapsed_ms = (time.perf_counter() - t0) * 1000
         logger.info(
-            "[PrefixAware] Selected %s score=%.3f overlap=%.1f%% hit=%s took=%.2fms",
+            "[PrefixAware] Selected {} score={:.3f} overlap={:.1f}% hit={} took={:.2f}ms",
             best_worker.worker_id, best_score, overlap_pct, any_hit, elapsed_ms,
         )
         return best_worker
@@ -972,7 +972,7 @@ class PrefixAwareAlgorithm(LoadBalancingAlgorithm):
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
         logger.info(
-            "[PrefixAware] Selected pair %s + %s score=%.3f took=%.2fms",
+            "[PrefixAware] Selected pair {} + {} score={:.3f} took={:.2f}ms",
             best_prefill.worker_id, best_decode.worker_id,
             best_p_score + best_d_score, elapsed_ms,
         )
