@@ -15,11 +15,8 @@
   6. 流结束后 _record_stream_metrics 被回调且 usage 正确
 """
 
-import asyncio
 import json
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
