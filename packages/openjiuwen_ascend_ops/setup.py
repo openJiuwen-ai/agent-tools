@@ -1,7 +1,7 @@
 import os
 import platform
 import sys
-from setuptools import setup, Extension, find_packages
+from setuptools import setup, find_packages
 from torch.utils.cpp_extension import BuildExtension, CppExtension
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
