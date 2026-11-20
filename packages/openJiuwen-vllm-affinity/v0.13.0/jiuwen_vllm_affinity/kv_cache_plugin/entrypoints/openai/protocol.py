@@ -3,14 +3,13 @@ from pydantic import Field
 from vllm.entrypoints.chat_utils import ChatCompletionMessageParam
 from vllm.entrypoints.openai.protocol import (
     ChatCompletionNamedToolChoiceParam,
-    ChatCompletionRequest,
     ChatCompletionToolsParam,
     OpenAIBaseModel,
 )
 
 
 def register_chat_request():
-    ChatCompletionRequest.cache_sharing: bool | None
+    """v0.13.0 的 ChatCompletionRequest 无额外字段需要注册，保留空实现以对齐 patcher 调用。"""
 
 
 class ReleaseKvCacheRequest(OpenAIBaseModel):
