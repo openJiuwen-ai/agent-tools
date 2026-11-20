@@ -40,10 +40,9 @@ def _parse_tool_args(raw: Any) -> Any:
 
 def _context_event_from_tool(tool_name: str, args: Any, result: str) -> ContextEvent | None:
     if tool_name == "reload_original_context_messages":
-        handle = storage = ""
+        handle = ""
         if isinstance(args, dict):
             handle = str(args.get("offload_handle") or "")
-            storage = str(args.get("offload_type") or "")
         return ContextEvent(
             kind="reload",
             timestamp=datetime.min,

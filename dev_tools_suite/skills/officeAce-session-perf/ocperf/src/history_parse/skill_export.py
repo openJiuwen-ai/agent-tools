@@ -130,7 +130,6 @@ def _phase_exports(
     merged_tools: list[ToolExecution],
 ) -> list[PhaseExport]:
     pat_by_id = {p.phase_id: p for p in pattern.phases}
-    tool_by_idx = {i + 1: t for i, t in enumerate(merged_tools)}
 
     out: list[PhaseExport] = []
     for phase in phases:

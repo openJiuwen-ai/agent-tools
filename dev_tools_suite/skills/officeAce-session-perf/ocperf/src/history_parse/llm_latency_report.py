@@ -72,7 +72,6 @@ def render_llm_latency_html(
     t1 = max(r.output_ts for r in rounds)
     span = max(1.0, (t1 - t0).total_seconds())
     chart_w = 920
-    bar_area_h = 28
 
     rows: list[str] = []
     chart_rows: list[str] = []
@@ -84,8 +83,6 @@ def render_llm_latency_html(
         cum_out += r.output_tokens or 0
         cum_cache += r.cache_tokens or 0
         rel_start = (r.request_ts - t0).total_seconds()
-        rel_ttft_end = rel_start + r.ttft_sec
-        rel_end = rel_start + r.duration_sec
         left_pct = 100.0 * rel_start / span
         ttft_w = max(0.4, 100.0 * r.ttft_sec / span)
         infer_w = max(0.4, 100.0 * r.inference_sec / span)

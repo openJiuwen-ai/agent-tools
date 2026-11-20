@@ -283,7 +283,7 @@ def analyze_session_patterns(
             if d.kind == "tool":
                 global_by_tool[d.name.lower()].extend(d.events)
     global_dups = []
-    for name, evs in global_by_tool.items():
+    for evs in global_by_tool.values():
         if len(evs) < 2:
             continue
         rel = _classify_duplicate_group(evs)
