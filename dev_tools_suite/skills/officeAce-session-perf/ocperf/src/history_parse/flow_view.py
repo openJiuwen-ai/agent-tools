@@ -8,7 +8,6 @@ from typing import Any, Callable
 
 from history_parse.pattern_analysis import (
     EventRef,
-    PhasePatternReport,
     SessionPatternSummary,
     assign_flow_tracks,
     event_ref_from_item,

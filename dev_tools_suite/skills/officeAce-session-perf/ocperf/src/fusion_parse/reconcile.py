@@ -9,7 +9,7 @@ from typing import Any
 from full_parse.loader import load_session_from_paths
 from full_parse.trace_analysis import ToolGap
 from history_parse.analysis import build_timeline_from_history
-from history_parse.models import HistoryExtras, LLMRound as HistoryLLMRound, ToolExecution
+from history_parse.models import LLMRound as HistoryLLMRound, ToolExecution
 from history_parse.parser import load_history
 from history_parse.session import interval_union_sec
 
