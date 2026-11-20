@@ -214,7 +214,7 @@ class RouterKVBMAdapter:
                 elif target == BlockLocation.NPU:
                     self.manager.prefetch_to_npu(block_id)
             except Exception as exc:
-                logger.warning("KVBM move failed for block %s: %s", block_hash, exc)
+                logger.warning("KVBM move failed for block {}: {}", block_hash, exc)
 
     def _ensure_block_id(self, worker_id: str, block_hash: str) -> int:
         key = (worker_id, block_hash)
