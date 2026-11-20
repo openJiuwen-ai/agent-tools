@@ -141,12 +141,6 @@ def render_history_html(
 """
 
     def _tool_block(idx: int, t: ToolExecution) -> str:
-        payload = {
-            "tool_call_id": t.tool_call_id,
-            "name": t.name,
-            "arguments": t.arguments,
-            "result": t.result,
-        }
         child_cls = " timeline-child" if t.is_child_session else ""
         label = _esc(t.child_label or "child-session")
         child_badge = f'<span class="badge badge-orange">{label}</span>' if t.is_child_session else ""
@@ -402,9 +396,6 @@ def render_history_html(
     )
     lanes = collect_session_lanes(merged, root_session)
     session_tree_section = render_session_hierarchy_html(lanes, root_session, _esc)
-
-    session_start = session_start_early
-    session_end = session_end_early
 
     def _render_item(idx: int, kind: Literal["llm", "tool"], obj: LLMRound | ToolExecution) -> str:
         block = _round_block(idx, obj) if kind == "llm" else _tool_block(idx, obj)

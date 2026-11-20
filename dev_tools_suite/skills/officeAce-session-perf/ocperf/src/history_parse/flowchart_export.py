@@ -373,10 +373,7 @@ def build_timeline_html(bundle: dict[str, Any]) -> str:
         canvas_w, canvas_h = 800, 200
     else:
         starts = [_event_start(e) for e in events]
-        ends = [_event_end(e) for e in events]
         t0 = min(_naive_dt(s) for s in starts if s)
-        t1 = max(_naive_dt(e) for e in ends if e)
-        span = max(1.0, (t1 - t0).total_seconds())
         canvas_w, canvas_h, max_track = _layout_time_canvas(events)
 
         blocks: list[str] = []
@@ -433,7 +430,7 @@ def build_timeline_html(bundle: dict[str, Any]) -> str:
 
         conn: list[str] = []
         for i in range(1, len(centers)):
-            cx1, cy1, _, y1b, _prev = centers[i - 1]
+            cx1, _, _, y1b, _prev = centers[i - 1]
             cx2, cy2, _, _, curr_ev = centers[i]
             link = curr_ev.get("flow_link") or "serial"
             conn.append(_connector_svg(cx1, y1b, cx2, cy2 - 8, link))
