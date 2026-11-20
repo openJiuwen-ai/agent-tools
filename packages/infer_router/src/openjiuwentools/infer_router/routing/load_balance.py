@@ -204,9 +204,9 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
             model=route_hint.model,
         )
         logger.info(
-            "overlap_scores: %s, len tokens ids=%d, osl=%d, iat=%s,"
-            " last_w=%s, reuse_after=%s,"
-            " decode_cost=%.2f, iat_factor=%.2f, temp=%.2f",
+            "overlap_scores: {}, len tokens ids={}, osl={}, iat={},"
+            " last_w={}, reuse_after={},"
+            " decode_cost={:.2f}, iat_factor={:.2f}, temp={:.2f}",
             overlap_scores, len(token_ids), osl, iat,
             last_w, reuse_after,
             decode_cost, iat_factor, temp,
@@ -233,7 +233,7 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
             raise ValueError("No valid prefill or decode workers available")
 
         logger.info(
-            "[ALGO: CTS] Starting worker pair selection: %d prefill, %d decode, prefix_id=%s",
+            "[ALGO: CTS] Starting worker pair selection: {} prefill, {} decode, prefix_id={}",
             len(prefill_workers), len(decode_workers), route_hint.prefix_id,
         )
 
@@ -284,8 +284,8 @@ class WorkloadWeightedAlgorithm(LoadBalancingAlgorithm):
 
         t_end = time.perf_counter()
         logger.info(
-            "[ALGO: CTS] Selected %s + %s, prefill_score=%.3f, decode_score=%.3f | "
-            "context=%.2fms, scoring=%.2fms, prefix=%.2fms, total=%.2fms",
+            "[ALGO: CTS] Selected {} + {}, prefill_score={:.3f}, decode_score={:.3f} | "
+            "context={:.2f}ms, scoring={:.2f}ms, prefix={:.2f}ms, total={:.2f}ms",
             best_prefill_id, best_decode_id,
             prefill_scores[best_prefill_id], decode_scores[best_decode_id],
             (t_context - t0) * 1000, (t_scoring - t_context) * 1000,
