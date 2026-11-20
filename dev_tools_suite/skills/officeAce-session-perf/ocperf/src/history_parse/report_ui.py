@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Literal, Sequence
 
-from history_parse.models import LLMRound, SessionPath, ToolExecution
-from history_parse.session import child_info, is_measurable_tool, session_path
+from history_parse.models import SessionPath
+from history_parse.session import is_measurable_tool
 from history_parse.todo_tracker import TodoTimeline
 
 TimelineKind = Literal["llm", "tool"]

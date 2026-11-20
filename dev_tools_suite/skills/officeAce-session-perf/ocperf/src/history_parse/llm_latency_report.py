@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import json
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +10,6 @@ from ocperf.time_util import format_now
 
 from history_parse.llm_latency_metrics import (
     aggregate_llm_latency,
-    compute_tokens_per_sec,
-    compute_tpot,
     llm_round_metrics,
 )
 from history_parse.models import LLMRound
