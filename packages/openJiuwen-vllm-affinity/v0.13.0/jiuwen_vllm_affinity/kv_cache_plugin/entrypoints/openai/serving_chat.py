@@ -34,7 +34,6 @@ from vllm.tokenizers.mistral import (
     truncate_tool_call_ids,
     validate_request_params,
 )
-from vllm.v1.engine import EngineCoreRequest
 from vllm.v1.sample.logits_processor import validate_logits_processors_parameters
 
 from vllm.v1.serial_utils import bytestr

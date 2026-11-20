@@ -1,7 +1,5 @@
-from abc import ABC
 from typing import Sequence
 from vllm.engine.protocol import EngineClient
-from vllm.v1.engine import EngineCoreRequest
 from vllm.v1.serial_utils import bytestr
 
 

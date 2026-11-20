@@ -1,5 +1,4 @@
 from typing import Sequence
-from vllm.v1.engine import EngineCoreRequest
 from vllm.v1.engine.core_client import EngineCoreClient, AsyncMPClient
 from vllm.v1.serial_utils import bytestr
 

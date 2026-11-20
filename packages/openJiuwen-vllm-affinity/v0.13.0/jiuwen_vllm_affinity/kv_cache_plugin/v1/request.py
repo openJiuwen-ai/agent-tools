@@ -1,15 +1,10 @@
-from typing import TYPE_CHECKING, Callable, Mapping, Optional
-import torch
-from vllm.multimodal.inputs import MultiModalFeatureSpec
-from vllm.pooling_params import PoolingParams
-from vllm.sampling_params import SamplingParams
+from typing import TYPE_CHECKING, Callable
 from vllm.v1.core.kv_cache_utils import BlockHash
 from vllm.v1.engine import EngineCoreRequest
 from vllm.v1.request import Request
 from jiuwen_vllm_affinity.kv_cache_plugin.v1.engine.core import unpack_sharing_cache_salt
 
 if TYPE_CHECKING:
-    from vllm.lora.request import LoRARequest
     from vllm.v1.core.kv_cache_utils import BlockHash
 
 

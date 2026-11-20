@@ -1,4 +1,3 @@
-import logging
 from jiuwen_vllm_affinity.kv_cache_plugin.engine.protocol import (
     register_engine_protocol,
 )
