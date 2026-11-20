@@ -148,8 +148,8 @@ class WorkloadManager:
         load = max(0, min(100, load))
 
         logger.info(
-            "[WORKLOAD] calculated load for %s: %.2f%% "
-            "(type=%s, pending_tokens=%d, pending_osl=%d, total_tokens=%d)",
+            "[WORKLOAD] calculated load for {}: {:.2f}% "
+            "(type={}, pending_tokens={}, pending_osl={}, total_tokens={})",
             worker.worker_id, load, worker_type,
             workload.pending_tokens, workload.pending_osl, total_tokens,
         )
