@@ -1,3 +1,5 @@
+from typing import NamedTuple
+
 from loguru import logger
 
 from openjiuwentools.infer_router.config.config import settings
@@ -8,6 +10,17 @@ from openjiuwentools.infer_router.schemas.agent_hints import (
     CompletionRequest,
     RouteHint,
 )
+
+
+class _ResolvedHints(NamedTuple):
+    """AgentHints 归一化后的路由参数"""
+
+    priority: int
+    estimated_output_tokens: int
+    next_turn_prefill: bool
+    prefix_id: str | None
+    total_requests: int
+    iat: int
 
 
 class Preprocessor:
@@ -33,17 +46,14 @@ class Preprocessor:
 
         return self.tokenizer_manager.preload_models(models)
 
-    def _resolve_hint_values(
-        self, agent_hints: AgentHints
-    ) -> tuple[int, int, bool, str | None, int, int]:
+    def _resolve_hint_values(self, agent_hints: AgentHints) -> _ResolvedHints:
         """将 AgentHints 归一化为路由参数，并套用默认值与取值范围。
 
         Args:
             agent_hints: 请求携带的路由提示，可为 None。
 
         Returns:
-            按顺序返回 (priority, estimated_output_tokens, next_turn_prefill,
-            prefix_id, total_requests, iat)。
+            归一化后的路由参数。
         """
         priority = self.default_priority
         estimated_output_tokens = self.default_estimated_output_tokens
@@ -62,13 +72,13 @@ class Preprocessor:
             total_requests = agent_hints.total_requests or self.default_total_requests
             iat = agent_hints.iat or self.default_iat
 
-        return (
-            max(0, min(10, priority)),
-            max(1, estimated_output_tokens),
-            next_turn_prefill,
-            prefix_id,
-            max(1, min(50, total_requests)),
-            max(1, iat),
+        return _ResolvedHints(
+            priority=max(0, min(10, priority)),
+            estimated_output_tokens=max(1, estimated_output_tokens),
+            next_turn_prefill=next_turn_prefill,
+            prefix_id=prefix_id,
+            total_requests=max(1, min(50, total_requests)),
+            iat=max(1, iat),
         )
 
     def process(
