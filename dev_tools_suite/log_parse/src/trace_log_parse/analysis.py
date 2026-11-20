@@ -265,7 +265,7 @@ def build_timeline(records: list[TraceRecord], root_session: str) -> tuple[list[
             if queue is not None and not queue:
                 last_outputs.pop(sr_key, None)
             if last_output is not None:
-                last_output_ts, last_tools, last_kind, last_session_for_output, last_request_for_output = last_output
+                last_output_ts, last_tools, last_kind, last_session_for_output, _ = last_output
             if last_output is not None and rec.ts >= last_output_ts:
                 cutoff = final_at.get(sr_key)
                 is_post_gap = _is_post_final(rec.session_id, rec.request_id, rec.ts)

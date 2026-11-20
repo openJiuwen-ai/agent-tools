@@ -243,7 +243,7 @@ def render_html(
         title_name = tool_name if has_tools else "无工具调用"
         details = g.detail_tools
         detail_blocks = []
-        for j, item in enumerate(details, 1):
+        for item in details:
             detail_blocks.append(
                 _copyable_pre(_json_pretty(item))
             )
@@ -624,7 +624,6 @@ def render_html(
     def _split_steps(items: step_items) -> list[step_group]:
         steps: list[step_group] = []
         current: step_items = []
-        unnamed_idx = 1
         for kind, obj in items:
             current.append((kind, obj))
             label = _step_boundary_label(obj) if kind == "gap" else None
