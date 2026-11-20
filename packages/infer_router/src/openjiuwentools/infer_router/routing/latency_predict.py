@@ -93,7 +93,11 @@ class LatencyPredictAlgorithm(LoadBalancingAlgorithm):
             "input_token_length": input_token_length,
             "num_request_waiting": worker.queue_depth,
             "num_request_running": worker.running_requests,
-            "num_tokens_generated": route_hint.estimated_output_tokens or 128,
+            "num_tokens_generated": (
+                route_hint.estimated_output_tokens
+                if route_hint.estimated_output_tokens is not None
+                else 128
+            ),
             "prefix_cache_score": min(max(prefix_cache_score, 0.0), 1.0),
             "pod_type": pod_type,
         }
@@ -159,7 +163,11 @@ class LatencyPredictAlgorithm(LoadBalancingAlgorithm):
         t0 = time.perf_counter()
 
         overlap_scores = self._compute_overlap_scores(workers, route_hint)
-        osl = route_hint.estimated_output_tokens or 128
+        osl = (
+            route_hint.estimated_output_tokens
+            if route_hint.estimated_output_tokens is not None
+            else 128
+        )
 
         pred_requests = [
             self._build_prediction_request(w, route_hint, overlap_scores)
@@ -217,7 +225,11 @@ class LatencyPredictAlgorithm(LoadBalancingAlgorithm):
         all_candidates = list(all_workers_map.values())
 
         overlap_scores = self._compute_overlap_scores(all_candidates, route_hint)
-        osl = route_hint.estimated_output_tokens or 128
+        osl = (
+            route_hint.estimated_output_tokens
+            if route_hint.estimated_output_tokens is not None
+            else 128
+        )
 
         pred_requests = [
             self._build_prediction_request(w, route_hint, overlap_scores)
