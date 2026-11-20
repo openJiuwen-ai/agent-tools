@@ -70,6 +70,13 @@ async def retry_async(
                     attempts += 1
                     if attempts >= max_attempts:
                         raise
+                    wait_time = delay * (2 ** (attempts - 1))
+                    if jitter:
+                        wait_time += wait_time * jitter_factor * random.random()  # noqa: S311
+                    logger.info(
+                        f"Circuit breaker open, retrying in {wait_time:.2f} seconds..."
+                    )
+                    await asyncio.sleep(wait_time)
                     continue
 
             result = await func(*args, **kwargs)
@@ -146,6 +153,13 @@ def retry_sync(
                     attempts += 1
                     if attempts >= max_attempts:
                         raise
+                    wait_time = delay * (2 ** (attempts - 1))
+                    if jitter:
+                        wait_time += wait_time * jitter_factor * random.random()  # noqa: S311
+                    logger.info(
+                        f"Circuit breaker open, retrying in {wait_time:.2f} seconds..."
+                    )
+                    time.sleep(wait_time)
                     continue
 
             result = func(*args, **kwargs)
