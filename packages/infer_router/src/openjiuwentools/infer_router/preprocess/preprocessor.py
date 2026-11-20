@@ -1,3 +1,5 @@
+from typing import NamedTuple
+
 from loguru import logger
 
 from openjiuwentools.infer_router.config.config import settings
@@ -8,6 +10,17 @@ from openjiuwentools.infer_router.schemas.agent_hints import (
     CompletionRequest,
     RouteHint,
 )
+
+
+class _ResolvedHints(NamedTuple):
+    """AgentHints 归一化后的路由参数"""
+
+    priority: int
+    estimated_output_tokens: int
+    next_turn_prefill: bool
+    prefix_id: str | None
+    total_requests: int
+    iat: int
 
 
 class Preprocessor:
@@ -33,12 +46,15 @@ class Preprocessor:
 
         return self.tokenizer_manager.preload_models(models)
 
-    def process(
-        self, request: ChatCompletionRequest, agent_hints: AgentHints, request_id: str
-    ) -> RouteHint:
-        """处理请求并转换为路由提示"""
-        logger.debug(f"Preprocessing request {request_id}")
+    def _resolve_hint_values(self, agent_hints: AgentHints) -> _ResolvedHints:
+        """将 AgentHints 归一化为路由参数，并套用默认值与取值范围。
 
+        Args:
+            agent_hints: 请求携带的路由提示，可为 None。
+
+        Returns:
+            归一化后的路由参数。
+        """
         priority = self.default_priority
         estimated_output_tokens = self.default_estimated_output_tokens
         next_turn_prefill = self.default_next_turn_prefill
@@ -56,10 +72,29 @@ class Preprocessor:
             total_requests = agent_hints.total_requests or self.default_total_requests
             iat = agent_hints.iat or self.default_iat
 
-        priority = max(0, min(10, priority))
-        estimated_output_tokens = max(1, estimated_output_tokens)
-        total_requests = max(1, min(50, total_requests))
-        iat = max(1, iat)
+        return _ResolvedHints(
+            priority=max(0, min(10, priority)),
+            estimated_output_tokens=max(1, estimated_output_tokens),
+            next_turn_prefill=next_turn_prefill,
+            prefix_id=prefix_id,
+            total_requests=max(1, min(50, total_requests)),
+            iat=max(1, iat),
+        )
+
+    def process(
+        self, request: ChatCompletionRequest, agent_hints: AgentHints, request_id: str
+    ) -> RouteHint:
+        """处理请求并转换为路由提示"""
+        logger.debug(f"Preprocessing request {request_id}")
+
+        (
+            priority,
+            estimated_output_tokens,
+            next_turn_prefill,
+            prefix_id,
+            total_requests,
+            iat,
+        ) = self._resolve_hint_values(agent_hints)
 
         token_ids = self.tokenizer_manager.tokenize_messages(
             messages=request.messages,
@@ -88,27 +123,14 @@ class Preprocessor:
         """处理 /v1/completions 请求并转换为路由提示"""
         logger.debug(f"Preprocessing completion request {request_id}")
 
-        priority = self.default_priority
-        estimated_output_tokens = self.default_estimated_output_tokens
-        next_turn_prefill = self.default_next_turn_prefill
-        prefix_id = None
-        total_requests = self.default_total_requests
-        iat = self.default_iat
-
-        if agent_hints:
-            priority = agent_hints.priority or self.default_priority
-            estimated_output_tokens = (
-                agent_hints.estimated_output_tokens or self.default_estimated_output_tokens
-            )
-            next_turn_prefill = agent_hints.next_turn_prefill or self.default_next_turn_prefill
-            prefix_id = agent_hints.prefix_id
-            total_requests = agent_hints.total_requests or self.default_total_requests
-            iat = agent_hints.iat or self.default_iat
-
-        priority = max(0, min(10, priority))
-        estimated_output_tokens = max(1, estimated_output_tokens)
-        total_requests = max(1, min(50, total_requests))
-        iat = max(1, iat)
+        (
+            priority,
+            estimated_output_tokens,
+            next_turn_prefill,
+            prefix_id,
+            total_requests,
+            iat,
+        ) = self._resolve_hint_values(agent_hints)
 
         token_ids = self.tokenizer_manager.tokenize_prompt(
             prompt=request.prompt,
