@@ -246,7 +246,7 @@ class SettingsProxy:
 def create_settings(config_path: str | None = None) -> Settings:
     """创建配置实例
 
-    优先级：环境变量 > YAML 配置文件 > 默认值
+    优先级：YAML 配置文件 > 环境变量 > 默认值
 
     Args:
         config_path: 配置文件路径
