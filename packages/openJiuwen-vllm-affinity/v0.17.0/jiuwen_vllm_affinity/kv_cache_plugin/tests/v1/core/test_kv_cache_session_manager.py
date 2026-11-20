@@ -1,4 +1,3 @@
-import pytest
 from vllm.v1.core.kv_cache_utils import KVCacheBlock
 from jiuwen_vllm_affinity.kv_cache_plugin.v1.core.kv_cache_session_manager import KvCacheSessionManager
 
