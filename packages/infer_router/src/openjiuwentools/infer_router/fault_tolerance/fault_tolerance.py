@@ -298,9 +298,12 @@ class CircuitBreaker:
                 logger.warning("Circuit breaker is OPEN, rejecting request")
                 raise Exception("Circuit breaker is OPEN")
 
-        if self.state == "HALF_OPEN" and self.half_open_calls >= self.half_open_max_calls:
-            logger.warning("Circuit breaker is HALF_OPEN with max calls, rejecting request")
-            raise Exception("Circuit breaker is HALF_OPEN with max calls")
+        if self.state == "HALF_OPEN":
+            if self.half_open_calls >= self.half_open_max_calls:
+                logger.warning("Circuit breaker is HALF_OPEN with max calls, rejecting request")
+                raise Exception("Circuit breaker is HALF_OPEN with max calls")
+            # 通过检查即占用一次探测名额，确保直接调用 check_state 的重试路径同样受限
+            self.half_open_calls += 1
 
         return True
 
@@ -360,9 +363,6 @@ class CircuitBreaker:
         self.check_state()
 
         try:
-            if self.state == "HALF_OPEN":
-                self.half_open_calls += 1
-
             result = await func(*args, **kwargs)
             self.handle_success()
             return result
